@@ -8,7 +8,7 @@
  * injected isDirRel and assert the derived relative dirs.
  */
 import { describe, test, expect } from 'bun:test';
-import { relativeBindDirsFromCompose, relativeBindsFromCompose, isUnderRelDir, isLoadBearingStackFile, excludableBindDirs } from '../../src/lib/server/backups/stackfile-filter';
+import { relativeBindDirsFromCompose, relativeBindsFromCompose, isUnderRelDir, isLoadBearingStackFile, excludableBindDirs, relativeBindsRestored } from '../../src/lib/server/backups/stackfile-filter';
 
 const STACK = '/app/data/stacks/env/name';
 const allDirs = () => true;   // treat every candidate as a directory
@@ -311,5 +311,59 @@ describe('excludableBindDirs', () => {
 
 	test('no bind dirs means nothing to decide', () => {
 		expect(excludableBindDirs([], STACK, [`${STACK}/scripts`])).toEqual([]);
+	});
+});
+
+describe('relativeBindsRestored - the binds a restore wrote back', () => {
+	const compose = `services:
+  a:
+    image: x
+    volumes:
+      - ./config:/config
+      - ./x:/data
+      - ./.env:/app/.env
+      - type: bind
+        source: ./long
+        target: /long/
+      - named:/named
+      - /srv/abs/stack/cache:/cache
+      - ../shared:/shared
+      - \${HOST_DIR}:/var
+      - ./\${SUB}:/sub
+  b:
+    image: y
+    volumes:
+      - ./y:/data
+volumes:
+  named:`;
+	const at = (target: string, rel: string) => ({ target, source: `/srv/abs/stack/${rel}` });
+
+	test('a bind is restored when target and source both match, long and short syntax, files and dirs', () => {
+		expect(relativeBindsRestored(compose, '/srv/abs/stack', [at('/config', 'config'), at('/app/.env', '.env'), at('/long', 'long'), at('/cache', 'cache')]).sort())
+			.toEqual(['.env', 'cache', 'config', 'long']);
+	});
+
+	test('two sources at one target: only the restored one', () => {
+		expect(relativeBindsRestored(compose, '/srv/abs/stack', [at('/data', 'x')])).toEqual(['x']);
+		expect(relativeBindsRestored(compose, '/srv/abs/stack', [at('/data', 'y')])).toEqual(['y']);
+	});
+
+	test('a restored source maps to the one bind whose path is its longest tail', () => {
+		const shared = `services:\n  a:\n    image: x\n    volumes:\n      - ./app/config:/config\n  b:\n    image: y\n    volumes:\n      - ./config:/config\n`;
+		expect(relativeBindsRestored(shared, '/h/s', [{ target: '/config', source: '/h/s/app/config' }])).toEqual(['app/config']);
+		expect(relativeBindsRestored(shared, '/h/s', [{ target: '/config', source: '/h/s/config' }])).toEqual(['config']);
+		expect(relativeBindsRestored(shared, '/h/s', [{ target: '/config', source: '/h/s/app/config' }, { target: '/config', source: '/h/s/config' }]).sort()).toEqual(['app/config', 'config']);
+	});
+
+	test('a source whose path only ends like the bind name is not it', () => {
+		expect(relativeBindsRestored(compose, '/srv/abs/stack', [{ target: '/config', source: '/srv/other/myconfig' }])).toEqual([]);
+	});
+
+	test('nothing restored, a named volume, an escaping or ${VAR} source: nothing', () => {
+		expect(relativeBindsRestored(compose, '/srv/abs/stack', [])).toEqual([]);
+		expect(relativeBindsRestored(compose, '/srv/abs/stack', [{ target: '/named', source: 'named' }, at('/shared', '../shared'), { target: '/var', source: '/srv/abs/stack/x' }])).toEqual([]);
+		expect(relativeBindsRestored('not: [yaml', '/s', [at('/config', 'config')])).toEqual([]);
+		// A source left to the shell to fill in is never matched, however the host path reads.
+		expect(relativeBindsRestored(compose, '/srv/abs/stack', [{ target: '/sub', source: '/srv/abs/stack/${SUB}' }])).toEqual([]);
 	});
 });

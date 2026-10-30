@@ -68,7 +68,7 @@ export async function runImagePrune(
 		const pruneMode = settings.pruneMode || 'dangling';
 		const dangling = pruneMode === 'dangling';
 
-		await log(`Starting image prune (mode: ${pruneMode})`);
+		await log(`Starting image prune (mode: ${pruneMode}, env id ${envId})`);
 
 		// Execute prune
 		const result = await pruneImages(dangling, envId);
@@ -124,7 +124,7 @@ export async function runImagePrune(
 		}
 
 	} catch (error: any) {
-		await log(`Error: ${error.message}`);
+		await log(`Error: ${error.message}${error.statusCode ? ` (HTTP ${error.statusCode})` : ''}`);
 
 		await updateScheduleExecution(execution.id, {
 			status: 'failed',

@@ -15,7 +15,7 @@ import {
 	getSecretEnvVarsAsRecord,
 	getNonSecretEnvVarsAsRecord,
 	type GitRepository,
-	type GitCredential,
+	type GitCredentialData,
 	type GitStackWithRepo,
 	type ScheduleTrigger
 } from './db';
@@ -24,11 +24,12 @@ import { createRunRecorder } from './deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from './deploy-run-record-core';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
 import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
-import { expandValue, parseEnvFileForForm } from '$lib/utils/env-file-values';
+import { expandValue } from '$lib/utils/env-file-values';
+import { envFileFormVars } from './secretproviders/sops-core';
 import {
 	parseManifest,
 	serializeManifest,
@@ -236,7 +237,7 @@ async function ensurePasswdEntry(env: GitEnv): Promise<void> {
 	}
 }
 
-async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
+async function buildGitEnv(credential: GitCredentialData | null): Promise<GitEnv> {
 	const env: GitEnv = {
 		...process.env as GitEnv,
 		GIT_TERMINAL_PROMPT: '0',
@@ -310,7 +311,7 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	return env;
 }
 
-function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
+function cleanupSshKey(credential: GitCredentialData | null, env?: GitEnv): void {
 	if (credential?.authType === 'ssh') {
 		// Removes the exact per-operation key this env created; falls back to the old
 		// deterministic path only if no env is available (legacy callers). See #1413.
@@ -318,22 +319,9 @@ function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
 	}
 }
 
-function buildRepoUrl(url: string, credential: GitCredential | null): string {
+function buildRepoUrl(url: string, credential: GitCredentialData | null): string {
 	assertSafeRepoUrl(url);
-	// Never embed credentials in the URL — they leak via /proc/<pid>/cmdline (see #1081).
-	// HTTPS credentials are injected via GIT_CONFIG_COUNT env vars in buildGitEnv().
-	// Strip any existing credentials from the URL for safety.
-	if (credential?.authType === 'password' && !url.startsWith('git@')) {
-		try {
-			const parsed = new URL(url);
-			parsed.username = '';
-			parsed.password = '';
-			return parsed.toString();
-		} catch {
-			return url;
-		}
-	}
-	return url;
+	return stripUrlCredentials(url, credential?.authType);
 }
 
 /**
@@ -427,7 +415,7 @@ function execGit(
  */
 async function getChangedFilesInDir(
 	repoPath: string,
-	previousCommit: string,
+	previousCommit: string | null,
 	newCommit: string,
 	dirPath: string,
 	env: GitEnv
@@ -641,7 +629,7 @@ function cleanGitError(stderr: string, ctx?: { authType?: string | null; url?: s
 async function testRepositoryConnection(options: {
 	url: string;
 	branch: string;
-	credential: GitCredential | null;
+	credential: GitCredentialData | null;
 }): Promise<TestResult> {
 	const { url, branch, credential } = options;
 
@@ -1343,7 +1331,10 @@ async function notifyGitSync(stackName: string, envId: number | null | undefined
 				type: 'error'
 			}, envId ?? undefined);
 		}
-	} catch { /* never changes the deploy outcome */ }
+	} catch (error) {
+		// Logged only: a notification never changes the deploy outcome.
+		console.error(`[Stack:${stackName}] git sync notification failed:`, error instanceof Error ? error.message : String(error));
+	}
 }
 
 /**
@@ -2286,9 +2277,7 @@ export async function readGitStackEnvFile(
 		// wrote it rather than being resolved the way a deploy would. This is also the
 		// diff base the editor decides overrides against, so it has to match what the
 		// form shows or an untouched variable reads as an override.
-		const vars = Object.fromEntries(
-			parseEnvFileForForm(content).map((row) => [row.key, row.value])
-		);
+		const vars = envFileFormVars(content);
 		return { vars };
 	} catch (error: any) {
 		return { vars: {}, error: error.message };
@@ -2341,8 +2330,8 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		mkdirSync(tempDir, { recursive: true });
 
 		// Build git environment with credentials
-		// Cast credential to GitCredential type (only uses id, authType, sshPrivateKey)
-		env = await buildGitEnv(credential as GitCredential | null);
+		// Cast credential to GitCredentialData (only uses id, authType, sshPrivateKey)
+		env = await buildGitEnv(credential as GitCredentialData | null);
 
 		// Security: the preview endpoint clones a
 		// USER-SUPPLIED URL and reads env files from it — the same SSRF / RCE /
@@ -2360,7 +2349,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		repoFilePath(tempDir, composePath, 'Compose path');
 		const safeEnvFilePath = envFilePath ? repoFilePath(tempDir, envFilePath, 'Env file path') : null;
 		assertSafeGitRef(branch);
-		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredential | null);
+		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredentialData | null);
 
 		// Clone with depth 1 (shallow clone for speed)
 		const cloneProc = nodeSpawn(
@@ -2397,9 +2386,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		if (existsSync(baseEnvPath)) {
 			console.log(`${logPrefix} Reading .env from: ${baseEnvPath}`);
 			const content = readFileSync(baseEnvPath, 'utf-8');
-			const baseVars = Object.fromEntries(
-				parseEnvFileForForm(content).map((row) => [row.key, row.value])
-			);
+			const baseVars = envFileFormVars(content);
 			for (const [key, value] of Object.entries(baseVars)) {
 				vars[key] = value;
 				sources[key] = '.env';
@@ -2416,9 +2403,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 			if (existsSync(additionalEnvPath)) {
 				console.log(`${logPrefix} Reading additional env file: ${additionalEnvPath}`);
 				const content = readFileSync(additionalEnvPath, 'utf-8');
-				const additionalVars = Object.fromEntries(
-					parseEnvFileForForm(content).map((row) => [row.key, row.value])
-				);
+				const additionalVars = envFileFormVars(content);
 				for (const [key, value] of Object.entries(additionalVars)) {
 					vars[key] = value;
 					sources[key] = 'envFile';
@@ -2437,7 +2422,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		return { vars: {}, sources: {}, error: error.message };
 	} finally {
 		// Always clean up temp directory
-		cleanupSshKey(credential as GitCredential | null, env);
+		cleanupSshKey(credential as GitCredentialData | null, env);
 		try {
 			if (existsSync(tempDir)) {
 				rmSync(tempDir, { recursive: true, force: true });

@@ -53,6 +53,9 @@ function collectErrorInfo(error: unknown): { codes: string[]; names: string[]; t
 	return { codes, names, text: messages.join(' ') };
 }
 
+/** What a rate-limited registry check's error contains; withCheckRetry keys on it. */
+export const RATE_LIMITED_PREFIX = 'Rate limited by registry (429';
+
 /** Retry-After is registry-controlled: only echo a seconds count or a short HTTP-date. */
 function formatRetryAfter(value: string | null | undefined): string {
 	const v = value?.trim();
@@ -70,7 +73,7 @@ export function describeRegistryFailure(failure: RegistryFailure): string {
 			return 'Registry response had no Docker-Content-Digest header';
 		case 'http': {
 			const s = failure.status;
-			if (s === 429) return `Rate limited by registry (429${formatRetryAfter(failure.retryAfter)})`;
+			if (s === 429) return `${RATE_LIMITED_PREFIX}${formatRetryAfter(failure.retryAfter)})`;
 			// A locally built image and an image deleted upstream both 404 - don't claim to know which.
 			if (s === 404) return 'Registry returned 404 (image or tag not found - deleted upstream, private, or a locally built image)';
 			if (s === 401 || s === 403) return `Registry denied access (${s}) - private image or missing credentials`;

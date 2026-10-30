@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { buildComposeOperationArgs, runsSeparateBuild, deployPullPolicy, pullSteps, pullThenUp, PULL_FAILED_WARNING, runBuildStep, pullBuildThenUp, stepOptions, BUILD_STEP_UNSUPPORTED_WARNING } from '../src/lib/server/compose-args';
+import { buildComposeOperationArgs, runsSeparateBuild, deployPullPolicy, pullSteps, pullThenUp, PULL_FAILED_WARNING, runBuildStep, pullBuildThenUp, stepOptions, BUILD_STEP_UNSUPPORTED_WARNING, deployPlan } from '../src/lib/server/compose-args';
 import type { DeletionApplyResult } from '../src/lib/server/git-deletions';
 
 describe('buildComposeOperationArgs', () => {
@@ -388,5 +388,31 @@ describe('the deploy paths hand the policy on', () => {
 		expect(src).toContain('pullBase: build && pullBase,');
 		expect(src).toMatch(/pullBase: pullBase \|\| false/);
 		expect(src).toContain("if (operation === 'up' || operation === 'pull' || operation === 'build') {");
+	});
+});
+
+describe('deployPlan', () => {
+	it('a plain deploy is one up', () => {
+		expect(deployPlan(false, false, false, undefined)).toBe('up (build=false, pullBase=false, noBuildCache=false, pullPolicy=none)');
+	});
+
+	it('pull always goes to up as --pull always', () => {
+		expect(deployPlan(false, false, false, 'always')).toBe('up --pull always (build=false, pullBase=false, noBuildCache=false, pullPolicy=always)');
+	});
+
+	it('respecting pull_policy is a separate pull before up', () => {
+		expect(deployPlan(true, false, false, 'respect')).toBe('pull -> up --build (build=true, pullBase=false, noBuildCache=false, pullPolicy=respect)');
+	});
+
+	it('pull base images is a separate build --pull, then up --no-build', () => {
+		expect(deployPlan(true, true, false, undefined)).toBe('build --pull -> up --no-build (build=true, pullBase=true, noBuildCache=false, pullPolicy=none)');
+	});
+
+	it('pull base images without cache is build --pull --no-cache', () => {
+		expect(deployPlan(true, true, true, undefined)).toBe('build --pull --no-cache -> up --no-build (build=true, pullBase=true, noBuildCache=true, pullPolicy=none)');
+	});
+
+	it('no cache with a pull policy is pull, build --no-cache, up --no-build', () => {
+		expect(deployPlan(true, false, true, 'always')).toBe('pull -> build --no-cache -> up --no-build (build=true, pullBase=false, noBuildCache=true, pullPolicy=always)');
 	});
 });

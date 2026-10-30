@@ -135,8 +135,12 @@ describe('where values are resolved and where they are not', () => {
 		// Three reads feed the editor - the stack's repo file and the two repo previews -
 		// and all three go through the form reader, which resolves quoting but not a
 		// reference. None of them may use the deploy reader.
-		const formReads = git.match(/parseEnvFileForForm\(content\)/g) ?? [];
+		const formReads = git.match(/envFileFormVars\(content\)/g) ?? [];
 		expect(formReads.length).toBe(3);
+		// envFileFormVars is the form reader with a SOPS file's metadata left out.
+		const sopsCore = readFileSync(new URL('../src/lib/server/secretproviders/sops-core.ts', import.meta.url), 'utf8');
+		const body = sopsCore.slice(sopsCore.indexOf('export function envFileFormVars'));
+		expect(body.slice(0, body.indexOf('\n}'))).toContain('parseEnvFileForForm(content)');
 		expect(git).not.toContain('expand: false');
 		expect(parseEnvFileForForm('A="${B}/y"\n')).toEqual([{ key: 'A', value: '${B}/y' }]);
 	});
@@ -280,7 +284,7 @@ describe('what the editor is given', () => {
 	const git = readFileSync(new URL('../src/lib/server/git.ts', import.meta.url), 'utf8');
 
 	test('the editor read and the two previews leave a reference alone', () => {
-		expect((git.match(/parseEnvFileForForm\(content\)/g) ?? []).length).toBe(3);
+		expect((git.match(/envFileFormVars\(content\)/g) ?? []).length).toBe(3);
 		expect(git).not.toContain('expand: false');
 	});
 
@@ -558,7 +562,8 @@ describe('parseEnvFileForForm is the one reader', () => {
 		];
 		for (const caller of callers) {
 			const source = readFileSync(new URL(caller, import.meta.url), 'utf8');
-			expect(source).toMatch(/parseEnvFileForForm\(/);
+			// git.ts reads through envFileFormVars, the form reader minus SOPS metadata.
+			expect(source).toMatch(/parseEnvFileForForm\(|envFileFormVars\(/);
 			// A hand-rolled value split is how the callers drifted apart, whatever it names
 			// its locals. git.ts legitimately has one in `parseEnvFileContent`, the
 			// DEPLOY-time reader, so that function's body is the one exception.

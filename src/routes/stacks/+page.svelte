@@ -11,6 +11,8 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { SearchInput } from '$lib/components/ui/search-input';
+	import { initialWildcard, stackMatchesSearch } from '$lib/utils/wildcard-match';
+	import { loadLocalFlag, saveLocalFlag } from '$lib/utils/local-flag';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
@@ -473,6 +475,10 @@
 	const initialSearch = $page.url.searchParams.get('search') ?? '';
 	let searchInput = $state(initialSearch);
 	let searchQuery = $state(initialSearch);
+	// Wildcard mode for the search box: the user's choice is kept per browser, and a
+	// search arriving in the URL brings its own mode (a link from another page is plain).
+	const SEARCH_WILDCARD_KEY = 'dockhand-stacks-search-wildcard';
+	let searchWildcard = $state(initialWildcard($page.url.searchParams, !!initialSearch, loadLocalFlag(SEARCH_WILDCARD_KEY)));
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
@@ -769,11 +775,7 @@
 
 		// Filter by search query
 		if (searchQuery.trim()) {
-			const query = searchQuery.toLowerCase();
-			result = result.filter(stack =>
-				stack.name.toLowerCase().includes(query) ||
-				getDisplayStatus(stack).toLowerCase().includes(query)
-			);
+			result = result.filter(stack => stackMatchesSearch(stack.name, getDisplayStatus(stack), searchQuery, searchWildcard));
 		}
 
 		// The cooling-down filter is synthetic (not a stack status), so apply it
@@ -985,6 +987,8 @@
 		const url = new URL($page.url);
 		if (q) url.searchParams.set('search', q);
 		else url.searchParams.delete('search');
+		if (q && searchWildcard) url.searchParams.set('wildcard', '1');
+		else url.searchParams.delete('wildcard');
 		if (url.toString() !== $page.url.toString()) {
 			goto(url.toString(), { replaceState: true, noScroll: true, keepFocus: true });
 		}
@@ -1799,7 +1803,7 @@
 			{/if}
 		</PageHeader>
 		<div class="flex flex-wrap items-center gap-2">
-			<SearchInput bind:value={searchInput} placeholder={m.stacks_list_search_placeholder()} class="h-8 w-48 text-sm" />
+			<SearchInput bind:value={searchInput} bind:wildcard={searchWildcard} onwildcardchange={(on) => saveLocalFlag(SEARCH_WILDCARD_KEY, on)} wildcardHint={m.ui_search_wildcard_stacks()} placeholder={m.stacks_list_search_placeholder()} class="h-8 w-48 text-sm" />
 			<MultiSelectFilter
 				bind:value={statusFilter}
 				options={filterOptions}

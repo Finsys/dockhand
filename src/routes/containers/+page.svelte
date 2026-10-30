@@ -8,6 +8,8 @@
 	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import { containerMatchesSearch } from '$lib/utils/container-search-core';
+	import { loadLocalFlag, saveLocalFlag } from '$lib/utils/local-flag';
+	import { initialWildcard } from '$lib/utils/wildcard-match';
 	import { containerDisplayName } from '$lib/utils/container-display-name';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
@@ -85,6 +87,7 @@
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import VersionUpdateBadge from '$lib/components/VersionUpdateBadge.svelte';
 	import VersionUpdateModal from '$lib/components/VersionUpdateModal.svelte';
+	import CooldownNotesModal from '$lib/components/CooldownNotesModal.svelte';
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { matchesContainerHealthFilter, stateFilterValues } from '$lib/utils/grid-filters';
 	import { nextLogsSessions, panelsAfterRowClick, showsLogsIndicator } from '$lib/utils/active-logs-core';
@@ -319,6 +322,10 @@
 	const initialSearch = $page.url.searchParams.get('search')
 		?? $page.url.searchParams.get('image') ?? '';
 	let searchQuery = $state(initialSearch);
+	// Wildcard mode for the search box: the user's choice is kept per browser, and a
+	// search arriving in the URL brings its own mode (a link from another page is plain).
+	const SEARCH_WILDCARD_KEY = 'dockhand-containers-search-wildcard';
+	let searchWildcard = $state(initialWildcard($page.url.searchParams, !!initialSearch, loadLocalFlag(SEARCH_WILDCARD_KEY)));
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
@@ -415,6 +422,8 @@
 		const url = new URL($page.url);
 		if (q) url.searchParams.set('search', q);
 		else url.searchParams.delete('search');
+		if (q && searchWildcard) url.searchParams.set('wildcard', '1');
+		else url.searchParams.delete('wildcard');
 		url.searchParams.delete('image'); // clean up legacy param
 		if (url.toString() !== $page.url.toString()) {
 			goto(url.toString(), { replaceState: true, noScroll: true, keepFocus: true });
@@ -526,6 +535,15 @@
 	function openVersionModal(container: ContainerInfo, newer: import('$lib/server/semver/find-newer').NewerVersion) {
 		versionModalContainer = container;
 		versionModalNewer = newer;
+	}
+
+	// Release notes for a held (cooling-down) update, so the user can judge whether to
+	// force it - a security fix should not have to wait out the cooldown.
+	let cooldownModalContainer = $state<ContainerInfo | null>(null);
+	let cooldownModalHours = $state<number | null>(null);
+	function openCooldownModal(container: ContainerInfo) {
+		cooldownModalContainer = container;
+		cooldownModalHours = coolingDownMap.get(container.id) ?? null;
 	}
 
 	// Single container update mode (doesn't overwrite batch list)
@@ -1074,7 +1092,7 @@
 		// Filter by search query (name, image, any label key/value, or a
 		// `label:key`/`label:key=value` filter - see containerMatchesSearch).
 		if (searchQuery.trim()) {
-			result = result.filter(c => containerMatchesSearch(c, searchQuery));
+			result = result.filter(c => containerMatchesSearch(c, searchQuery, searchWildcard));
 		}
 
 		// Filter by user-defined tags.
@@ -1660,7 +1678,7 @@
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Box} title={m.nav_containers()} count={containers.length} />
 		<div class="flex flex-wrap items-center gap-2">
-			<SearchInput bind:value={searchQuery} placeholder={m.containers_list_search_placeholder()} class="h-8 w-64 text-sm" />
+			<SearchInput bind:value={searchQuery} bind:wildcard={searchWildcard} onwildcardchange={(on) => saveLocalFlag(SEARCH_WILDCARD_KEY, on)} placeholder={m.containers_list_search_placeholder()} class="h-8 w-64 text-sm" />
 			<!-- Status filter (multi-select). The synthetic 'update-available'
 			     entry appears once at least one container has a pending update,
 			     and ANDs with selected real states (#1063). -->
@@ -2105,11 +2123,18 @@
 									</Tooltip.Content>
 								</Tooltip.Root>
 							{:else if coolingDownMap.has(container.id)}
-								<!-- An update exists but the image is too young to apply. Muted, not
-								     amber: there is nothing for the user to act on. -->
+								<!-- An update is held by the minimum image age. Clicking opens its
+								     release notes so the user can decide whether to force it. -->
 								<Tooltip.Root>
 									<Tooltip.Trigger>
-										<Clock class="w-3 h-3 text-muted-foreground shrink-0" />
+										<button
+											type="button"
+											onclick={(e) => { e.stopPropagation(); openCooldownModal(container); }}
+											class="shrink-0 text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+											aria-label={m.containers_list_cooldown_notes_title()}
+										>
+											<Clock class="w-3 h-3" />
+										</button>
 									</Tooltip.Trigger>
 									<Tooltip.Content side="right" class="w-72 p-3">
 										<div class="space-y-1.5">
@@ -2117,6 +2142,7 @@
 												<Clock class="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
 												<span>{m.containers_list_update_held_title({ count: coolingDownMap.get(container.id)! })}</span>
 											</p>
+											<p class="text-xs text-muted-foreground">{m.containers_list_cooldown_notes_title()}</p>
 										</div>
 									</Tooltip.Content>
 								</Tooltip.Root>
@@ -2379,10 +2405,13 @@
 					{:else if column.id === 'cooldown'}
 						{#if coolingDownMap.has(container.id)}
 							{@const hours = coolingDownMap.get(container.id)!}
-							<span class="text-xs text-muted-foreground tabular-nums whitespace-nowrap cursor-default flex items-center justify-end gap-1"
-								title={m.containers_list_update_held_title({ count: hours })}>
+							<button
+								type="button"
+								onclick={() => openCooldownModal(container)}
+								class="text-xs text-muted-foreground tabular-nums whitespace-nowrap flex items-center justify-end gap-1 ml-auto hover:text-foreground transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+								title={m.containers_list_cooldown_notes_title()}>
 								<Clock class="w-3 h-3 shrink-0" />{m.containers_list_cooldown_hours({ count: hours })}
-							</span>
+							</button>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs text-right block">-</span>
 						{/if}
@@ -2878,6 +2907,15 @@
 	bind:container={versionModalContainer}
 	newerVersion={versionModalNewer}
 	{envId}
+/>
+
+<CooldownNotesModal
+	bind:container={cooldownModalContainer}
+	cooldownHours={cooldownModalHours}
+	{envId}
+	onUpdateNow={$canAccess('containers', 'create')
+		? (id, name) => updateSingleContainer(id, name)
+		: undefined}
 />
 
 <BatchOperationModal

@@ -22,6 +22,7 @@ import { redirect } from '@sveltejs/kit';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
 import { isPublicPath } from '$lib/server/public-paths-core';
+import { evaluateExposure } from '$lib/server/exposure-warning';
 import { METRICS_PUBLIC } from '$lib/server/metrics';
 import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
 // Side-effect import: installs globalThis.__authenticateWsUpgrade and
@@ -179,6 +180,14 @@ if (!initialized) {
 		cleanupOrphanedScannerContainers().catch(err => {
 			console.error('Failed to cleanup orphaned scanner containers:', err);
 		});
+		// Warn once at startup if this instance is listening beyond localhost with auth
+		// off and the Docker socket writable - the config that makes it one request from
+		// host takeover. The UI shows the same warning; this covers headless operators.
+		evaluateExposure(process.env.HOST || '0.0.0.0').then(warn => {
+			if (warn) {
+				console.warn('[SECURITY] Dockhand is listening beyond localhost with authentication disabled and the Docker socket mounted read-write. If this instance is reachable from the internet, enable authentication (Settings > Authentication) or keep Dockhand behind a firewall or VPN.');
+			}
+		}).catch(() => { /* best-effort */ });
 		// Start background subprocesses and the scheduler only AFTER credential
 		// migration/rotation has settled, so a scheduled backup can't decrypt a
 		// destination password mid-rotation (new key against old-key ciphertext).

@@ -150,7 +150,7 @@ describe('SizeBudgetTracker', () => {
 		}
 		expect(scans).toBe(1); // one lazy scan on the first call, none after
 		expect(scans).toBeLessThan(200); // the actual regression this fixes
-	});
+	}, 30_000); // 500 fixture files: ~0.2 s alone, past bun's 5 s default under a loaded full suite
 
 	test('re-scans again once accumulated own bytes cross the refresh threshold', async () => {
 		await seedOtherRunFiles(null, 5, 10);

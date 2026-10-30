@@ -39,6 +39,8 @@ describe('encryption key rotation covers backup destinations (audit #6)', () => 
 		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'envVars'/);
 		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'sshPrivateKey'/);
 		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'sshKnownHosts'/);
+		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'cacert'/);
+		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'tlsClientCert'/);
 	});
 
 	it('writes the re-encrypted backup destination values back on rotation', () => {
@@ -112,5 +114,24 @@ describe('encryption key rotation rolls back atomically on failure', () => {
 			/catch \([\s\S]*?cachedKey = oldKey;[\s\S]*?throw /,
 			'on failure the catch must restore cachedKey = oldKey AND rethrow so nothing becomes unrecoverable'
 		);
+	});
+});
+
+// db.ts stores the SMTP secret as config.password (encryptNotificationConfig), so
+// rotation must collect and write back that field, not a name nothing writes.
+describe('encryption key rotation covers the SMTP notification password', () => {
+	it('collects config.password of smtp channels', () => {
+		assert.match(encryptionSrc, /notif\.type === 'smtp' && config\.password && isEncrypted\(config\.password\)/);
+		assert.match(encryptionSrc, /field:\s*'config\.password',\s*value:\s*config\.password/);
+	});
+
+	it('writes the re-encrypted value back into config.password', () => {
+		assert.match(encryptionSrc, /item\.field === 'config\.password'[\s\S]{0,300}config\.password = reEncrypted/);
+	});
+
+	it('the field name matches what db.ts encrypts', () => {
+		const dbSrc = readFileSync(join(here, '..', 'src', 'lib', 'server', 'db.ts'), 'utf8');
+		assert.match(dbSrc, /password: encrypt\(smtpConfig\.password\)/);
+		assert.doesNotMatch(encryptionSrc, /smtpPassword/);
 	});
 });

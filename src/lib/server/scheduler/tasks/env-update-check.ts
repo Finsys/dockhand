@@ -40,7 +40,7 @@ import {
 	getTagArtifactKind,
 	getRegistryTagCreatedAt,
 } from '../../docker';
-import { withPullRetry } from '../../pull-retry';
+import { withPullRetry, withCheckRetry, createRegistryThrottle } from '../../pull-retry';
 import type { ImageEnvLabels } from '../../container-env-merge';
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
@@ -173,6 +173,7 @@ export async function runEnvUpdateCheckJob(
 
 		const updatesAvailable: UpdateInfo[] = [];
 		let checkedCount = 0;
+		const throttle = createRegistryThrottle();
 		let errorCount = 0;
 
 		// Check each container for updates
@@ -201,12 +202,16 @@ export async function runEnvUpdateCheckJob(
 				checkedCount++;
 				await log(`  Checking: ${container.name} (${imageName})`);
 
-				const result = await checkImageUpdateAvailable(
+				if (throttle.isThrottled(imageName)) {
+					await log(`    Registry kept rate limiting earlier in this run - checking once, without retries`);
+				}
+				const result = await withCheckRetry(() => checkImageUpdateAvailable(
 					imageName, currentImageId, environmentId,
 					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels),
 					isCooldownSkippedByLabel(inspectData.Config?.Labels),
 					!isDigestWatchDisabledByLabel(inspectData.Config?.Labels)
-				);
+				), { log: (m) => log(`    ${m}`), label: `${container.name} (${imageName}), env ${env.name}`, delays: throttle.delays(imageName) });
+				throttle.noteCheck(imageName, result.error);
 
 				if (result.isLocalImage) {
 					await log(`    Local image - skipping update check`);
@@ -445,7 +450,8 @@ export async function runEnvUpdateCheckJob(
 
 						// Step 1: Pull new image
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`) });
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`), label: `${update.containerName} (${update.imageName}), env ${env.name}`, delays: throttle.delays(update.imageName) });
+						throttle.notePull(update.imageName, null);
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;
@@ -566,7 +572,8 @@ export async function runEnvUpdateCheckJob(
 					} else {
 						// Simple pull (no scanning or digest-based image)
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`) });
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`), label: `${update.containerName} (${update.imageName}), env ${env.name}`, delays: throttle.delays(update.imageName) });
+						throttle.notePull(update.imageName, null);
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;
@@ -589,6 +596,7 @@ export async function runEnvUpdateCheckJob(
 					// Remove from pending table - successfully updated
 					await removePendingContainerUpdate(environmentId, update.containerId);
 				} catch (err: any) {
+					throttle.notePull(update.imageName, err);
 					await log(`  FAILED: ${err.message}`);
 					failCount++;
 					failedContainers.push(update.containerName);

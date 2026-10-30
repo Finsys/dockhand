@@ -9,7 +9,7 @@
  * Nothing here logs: the decrypted values pass through these functions.
  */
 
-import { expandValue } from '../../utils/env-file-values';
+import { expandValue, parseEnvFileForForm } from '../../utils/env-file-values';
 
 // A `KEY=value` line as compose reads it, `export` prefix allowed.
 const ENV_LINE_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
@@ -74,6 +74,17 @@ export function withoutSopsArtifacts(vars: Record<string, string>): Record<strin
 		out[key] = value;
 	}
 	return out;
+}
+
+/**
+ * An env file as the stack editor shows it: name to value, the way the form reads it.
+ * In a SOPS file the `sops_*` lines are SOPS's own metadata, not the stack's variables,
+ * so they are left out; the encrypted variables stay, under their names.
+ */
+export function envFileFormVars(content: string): Record<string, string> {
+	const vars = Object.fromEntries(parseEnvFileForForm(content).map((row) => [row.key, row.value]));
+	if (!isSopsDotenv(content)) return vars;
+	return Object.fromEntries(Object.entries(vars).filter(([key]) => !key.startsWith(SOPS_METADATA_PREFIX)));
 }
 
 /**

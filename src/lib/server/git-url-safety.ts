@@ -27,6 +27,29 @@ export function assertSafeRepoUrl(url: string): void {
 	}
 }
 
+/**
+ * Strip credentials embedded in a repo URL for a password/token credential.
+ * A password/token in the URL leaks via /proc/<pid>/cmdline, so HTTPS creds are
+ * injected via GIT_CONFIG_COUNT env vars elsewhere and dropped from the URL here.
+ * On SSH the username (ssh://user@host) is NOT a secret - it is who git logs in
+ * as, and the key/password is passed separately - so dropping it makes ssh fall
+ * back to the default user (root) and auth fails. Keep the username on SSH; drop
+ * only the password. authType other than 'password', or a scp-like git@host URL,
+ * is returned unchanged.
+ */
+export function stripUrlCredentials(url: string, authType: string | null | undefined): string {
+	if (authType !== 'password' || url.startsWith('git@')) return url;
+	try {
+		const parsed = new URL(url);
+		const isSsh = parsed.protocol === 'ssh:';
+		if (!isSsh) parsed.username = '';
+		parsed.password = '';
+		return parsed.toString();
+	} catch {
+		return url;
+	}
+}
+
 /** A git ref (branch/tag) must not be parseable as an option. Empty is allowed
  *  (callers fall back to a default like HEAD). */
 export function assertSafeGitRef(ref: string | null | undefined): void {

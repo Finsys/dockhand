@@ -30,6 +30,7 @@
 	import { formatHostPortUrl } from '$lib/utils/url';
 	import { containerStore } from '$lib/stores/containers';
 	import { m } from '$lib/paraglide/messages.js';
+	import CooldownNotesModal from '$lib/components/CooldownNotesModal.svelte';
 
 	interface Props {
 		open: boolean;
@@ -174,6 +175,18 @@
 
 	// Raw JSON modal state
 	let showRawJson = $state(false);
+
+	// Release notes for the held update. Opening it closes the inspect view so the
+	// dialogs are not stacked, matching the raw-JSON pattern below.
+	let cooldownNotesContainer = $state<{ id: string; name: string; image: string } | null>(null);
+	function openCooldownNotes() {
+		cooldownNotesContainer = {
+			id: containerId,
+			name: displayName || containerId.slice(0, 12),
+			image: containerData?.Config?.Image ?? ''
+		};
+		open = false;
+	}
 	let jsonCopied = $state<'ok' | 'error' | null>(null);
 
 	// Label copy state
@@ -1120,13 +1133,15 @@
 										</span>
 									{/if}
 								{:else if cooldownHours}
-									<span
-										title={m.containers_inspect_update_held_hint()}
-										class="flex items-center gap-1 text-xs text-muted-foreground shrink-0"
+									<button
+										type="button"
+										onclick={openCooldownNotes}
+										title={m.containers_list_cooldown_notes_title()}
+										class="flex items-center gap-1 text-xs text-muted-foreground shrink-0 hover:text-foreground transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
 									>
 										<Clock class="w-3.5 h-3.5" />
 										{m.containers_inspect_update_held_short({ hours: cooldownHours })}
-									</span>
+									</button>
 								{/if}
 							</div>
 						</div>
@@ -2003,6 +2018,13 @@
 </Dialog.Root>
 
 <!-- Inspect (raw) modal -->
+<CooldownNotesModal
+	bind:container={cooldownNotesContainer}
+	{cooldownHours}
+	envId={$currentEnvironment?.id ?? null}
+	onUpdateNow={onUpdate ? (id, name) => onUpdate(id, name) : undefined}
+/>
+
 <Dialog.Root bind:open={showRawJson}>
 	<Dialog.Content class="max-w-4xl max-h-[90vh] sm:max-h-[80vh] flex flex-col">
 		<Dialog.Header class="shrink-0">

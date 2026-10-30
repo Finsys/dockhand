@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from '../src/lib/server/git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials } from '../src/lib/server/git-url-safety';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -184,5 +184,59 @@ describe('repoFilePath - a committed symlink cannot reach Dockhand secrets', () 
 		rmSync(base, { recursive: true, force: true });
 		if (previousDataDir === undefined) delete process.env.DATA_DIR;
 		else process.env.DATA_DIR = previousDataDir;
+	});
+});
+
+describe('stripUrlCredentials — keep the SSH username, drop only the password', () => {
+	// The regression: an ssh:// URL with a password credential had its username
+	// stripped, so git fell back to the default login user and auth failed.
+	test('ssh:// keeps the username (not a secret), drops the password', () => {
+		const out = stripUrlCredentials('ssh://gituser:pw@host:5522/path/repo.git', 'password');
+		expect(out).toBe('ssh://gituser@host:5522/path/repo.git');
+	});
+
+	test('ssh:// with only a username is returned with the username intact', () => {
+		const out = stripUrlCredentials('ssh://gituser@host:5522/path/repo.git', 'password');
+		expect(out).toBe('ssh://gituser@host:5522/path/repo.git');
+	});
+
+	test('https:// strips both username and password (they leak via cmdline)', () => {
+		const out = stripUrlCredentials('https://user:tok@github.com/u/repo.git', 'password');
+		expect(out).toBe('https://github.com/u/repo.git');
+	});
+
+	// Pin the leak guard to "strip for everything that is NOT ssh", not just https:
+	// http:// and git:// are legit schemes too and must not keep an in-URL token.
+	test('http:// strips both username and password', () => {
+		const out = stripUrlCredentials('http://user:tok@gitea.local/u/repo.git', 'password');
+		expect(out).toBe('http://gitea.local/u/repo.git');
+	});
+
+	test('git:// strips the credential', () => {
+		const out = stripUrlCredentials('git://user:tok@host/u/repo.git', 'password');
+		expect(out).toBe('git://host/u/repo.git');
+	});
+
+	// scp-like git@host:path carries no in-URL password to strip. The git@ early
+	// return is a fast-path: new URL() throws on this form anyway, so the catch
+	// would return it unchanged even without the guard. Same result either way.
+	test('scp-like git@host URL is left untouched', () => {
+		const out = stripUrlCredentials('git@github.com:u/repo.git', 'password');
+		expect(out).toBe('git@github.com:u/repo.git');
+	});
+
+	test('ssh authType leaves the whole URL untouched', () => {
+		const url = 'ssh://gituser:pw@host:5522/path/repo.git';
+		expect(stripUrlCredentials(url, 'ssh')).toBe(url);
+	});
+
+	test('no credential (null/undefined authType) leaves the URL untouched', () => {
+		const url = 'https://user:tok@github.com/u/repo.git';
+		expect(stripUrlCredentials(url, null)).toBe(url);
+		expect(stripUrlCredentials(url, undefined)).toBe(url);
+	});
+
+	test('an unparseable URL is returned unchanged rather than thrown', () => {
+		expect(stripUrlCredentials('not a url', 'password')).toBe('not a url');
 	});
 });

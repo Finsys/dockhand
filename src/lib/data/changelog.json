@@ -1,15 +1,23 @@
 [
   {
     "version": "1.0.56",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-10-30",
     "changes": [
+      { "type": "fix", "text": "bitwarden bulk pull skips a key that is not a valid environment variable name (#1831)" },
       { "type": "feature", "text": "Spanish interface translation (PR#1811, @hugomon)" },
       { "type": "feature", "text": "Russian interface translation (PR#1809, @Kirill901)" },
       { "type": "feature", "text": "stack redeploy can respect each service's pull_policy and pull newer base images (#1800)" },
       { "type": "fix", "text": "backups list shows a schedule's snapshots from every destination it has used (#1783)" },
       { "type": "fix", "text": "scheduled updates retry a rate-limited pull (toomanyrequests) and honour the registry's retry-after (#1268)" },
-      { "type": "fix", "text": "pruning unused images works on older Docker engines (#1490)" }
+      { "type": "fix", "text": "pruning unused images works on older Docker engines (#1490)" },
+      { "type": "fix", "text": "the stacks page update check counts only containers that belong to a stack (#1803)" },
+      { "type": "fix", "text": "git stack deploys notify channels subscribed to stack events, once per deploy (#1295)" },
+      { "type": "fix", "text": "the git stack editor no longer lists a SOPS env file's metadata as variables (#1815)" },
+      { "type": "feature", "text": "wildcard search (* and ?) in the containers and stacks search boxes (#1814)" },
+      { "type": "fix", "text": "self-update keeps a pinned IP and the MAC derived from it (#1816)" },
+      { "type": "fix", "text": "editing a container's env var no longer corrupts a command with embedded quotes (#1821)" },
+      { "type": "feature", "text": "release notes for a held update are available during the cooldown (#1824)" },
+      { "type": "fix", "text": "git stacks over ssh keep the username from the repo url so they log in as the right user (#1828)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.56"
   },

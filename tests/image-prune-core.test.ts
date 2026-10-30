@@ -1,6 +1,6 @@
 // @ts-expect-error -- bun:test is a runtime built-in with no types installed
 import { describe, test, expect } from 'bun:test';
-import { buildImagePruneFilters, buildKeepLabelFilter, labelNegationBroken, imageRefsToRemove, pruneAllUnused, PRUNE_KEEP_LABEL, type PruneImageSummary } from '../src/lib/server/image-prune-core';
+import { buildImagePruneFilters, buildKeepLabelFilter, labelNegationBroken, imageRefsToRemove, pruneAllUnused, PRUNE_KEEP_LABEL, type PruneImageSummary, holderFailureWarning } from '../src/lib/server/image-prune-core';
 
 function decode(filters: string): Record<string, string[]> {
 	return JSON.parse(decodeURIComponent(filters));
@@ -156,11 +156,70 @@ describe('pruneAllUnused', () => {
 		ports.log = (m: string) => { logs.push(m); };
 		expect(await pruneAllUnused(ports)).toEqual({ ImagesDeleted: [{ Deleted: 'sha256:x' }], SpaceReclaimed: 42 });
 		expect(calls.filter((c) => c === 'prune')).toEqual(['prune']);
-		expect(logs).toEqual(["label! image listing refused (Invalid filter 'label!'); using the ordinary prune"]);
+		expect(logs).toEqual(["label! image listing failed (Invalid filter 'label!'); using the ordinary prune"]);
+	});
+
+	test('the log says which path ran, with the counts behind the choice', async () => {
+		const ok = engine(images, ['sha256:busybox'], false);
+		const okLogs: string[] = [];
+		ok.ports.log = (m: string) => { okLogs.push(m); };
+		await pruneAllUnused(ok.ports);
+		expect(okLogs).toEqual(['label! filter works (4 images, 3 without the keep label); using the engine prune']);
+
+		const broken = engine(images, ['sha256:busybox'], true);
+		const logs: string[] = [];
+		broken.ports.log = (m: string) => { logs.push(m); };
+		await pruneAllUnused(broken.ports);
+		expect(logs).toEqual([
+			'label! filter matches no image (4 listed, 1 with the keep label, 1 in use by containers); removing 2 unused images one by one',
+			'one-by-one prune done: 2 of 2 images removed, 0 kept by the engine, space freed not known'
+		]);
+	});
+
+	test('a listing failure carries the HTTP status', async () => {
+		const { ports } = engine(images, [], false);
+		const listImages = ports.listImages;
+		ports.listImages = async (filters?: string) => {
+			if (filters && decode(filters)['label!']) throw Object.assign(new Error("Invalid filter 'label!'"), { statusCode: 400 });
+			return listImages(filters);
+		};
+		const logs: string[] = [];
+		ports.log = (m: string) => { logs.push(m); };
+		await pruneAllUnused(ports);
+		expect(logs).toEqual(["label! image listing failed (HTTP 400: Invalid filter 'label!'); using the ordinary prune"]);
+	});
+
+	test('refusals are logged five at a time, the rest counted', async () => {
+		const many = Array.from({ length: 8 }, (_, i) => ({ Id: `sha256:i${i}`, RepoTags: [`img${i}:1`] }));
+		const { ports } = engine(many, [], true);
+		ports.remove = async () => { throw Object.assign(new Error('conflict: image has dependent child images'), { statusCode: 409 }); };
+		const logs: string[] = [];
+		ports.log = (m: string) => { logs.push(m); };
+		await pruneAllUnused(ports);
+		expect(logs.filter((l) => l.startsWith('Kept image'))).toHaveLength(5);
+		expect(logs).toContain('Kept image "img0:1" (HTTP 409: conflict: image has dependent child images)');
+		expect(logs).toContain('3 more images kept by the engine');
+		expect(logs.at(-1)).toBe('one-by-one prune done: 0 of 8 images removed, 8 kept by the engine, space freed not known');
 	});
 
 	test('nothing to remove is reported as no images, like an empty prune', async () => {
 		const { ports } = engine([images[1]], [], true);
 		expect(await pruneAllUnused(ports)).toEqual({ ImagesDeleted: null });
+	});
+});
+
+describe('holderFailureWarning', () => {
+	test('an image that is not on the host (404) needs no warning', () => {
+		expect(holderFailureWarning(Object.assign(new Error('No such image: grype'), { statusCode: 404 }), 'anchore/grype:v1', 3)).toBeNull();
+	});
+
+	test('any other engine failure leaves the image unprotected and says so', () => {
+		expect(holderFailureWarning(Object.assign(new Error('server error'), { statusCode: 500 }), 'anchore/grype:v1', 3))
+			.toBe('[Prune] env 3: could not protect anchore/grype:v1 from the prune (HTTP 500): server error');
+	});
+
+	test('a failure with no HTTP answer says so too', () => {
+		expect(holderFailureWarning(new Error('connect ECONNREFUSED'), 'aquasec/trivy:0.1', undefined))
+			.toBe('[Prune] env local: could not protect aquasec/trivy:0.1 from the prune (HTTP no response): connect ECONNREFUSED');
 	});
 });

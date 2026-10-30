@@ -103,8 +103,10 @@ export interface RestorePorts {
 	recreateContainerFromMetadata(name: string, envId: number | null | undefined, snapshotMetaContainer: unknown): Promise<void>;
 	/** Redeploy a stack from the snapshot's stored compose files; throws if absent.
 	 *  restoreSecrets (opt-in, default on): write the stack's secrets carried in the
-	 *  snapshot into the target env's DB before redeploy so the stack comes up complete. */
-	redeployStack(name: string, envId: number | null | undefined, destinationId: number, snapshotId: string, restoreSecrets?: boolean): Promise<void>;
+	 *  snapshot into the target env's DB before redeploy so the stack comes up complete.
+	 *  restoredBinds: target and host source of each bind volume an in-place restore just
+	 *  wrote on the host; the redeploy leaves those binds alone. */
+	redeployStack(name: string, envId: number | null | undefined, destinationId: number, snapshotId: string, restoreSecrets?: boolean, restoredBinds?: { target: string; source: string }[]): Promise<void>;
 	/** Read the snapshot's stored restore metadata (typed SnapshotLayout), or null. */
 	readSnapshotMetadata(destinationId: number, snapshotId: string): Promise<SnapshotLayout | null>;
 	/** Write the snapshot's captured stack files (/volumes/__dockhand_stackdir__) into
@@ -566,8 +568,9 @@ export class RestoreService {
 				const { restart } = await this.ports.stopStackBeforeRestore(job.targetName, job.environmentId);
 				return { restart };
 			},
-			// A stack is brought back by redeploying from its stored compose files.
-			postAction: (op) => this.applyPostRestore('redeploy', job, op),
+			// A stack is brought back by redeploying from its stored compose files. The volume swap
+			// has just written `volumes` onto the host, so the redeploy leaves those binds alone.
+			postAction: (op) => this.applyPostRestore('redeploy', job, op, volumes),
 		});
 	}
 
@@ -734,6 +737,8 @@ export class RestoreService {
 		action: 'start' | 'recreate' | 'redeploy' | 'none',
 		job: RestoreJob,
 		op: OperationHandle,
+		/** Volume keys an in-place swap wrote onto the host; empty for every other path. */
+		swappedVolumes: string[] = [],
 	): Promise<PostRestoreOutcome> {
 		const envId = job.environmentId;
 		const name = job.targetName ?? '';
@@ -775,7 +780,11 @@ export class RestoreService {
 						return { action, ok: false, error: 'no stack files stored in this snapshot; cannot redeploy' };
 					}
 					op.progress('redeploying', `Redeploying stack ${name}...`);
-					await this.ports.redeployStack(name, envId, job.destinationId, job.snapshotId, job.restoreSecrets ?? true);
+					const swapped = new Set(swappedVolumes);
+					const restoredBinds = meta.volumes
+						.filter((v) => v.type === 'bind' && swapped.has(v.key ?? v.name) && typeof v.source === 'string')
+						.map((v) => ({ target: v.name, source: v.source as string }));
+					await this.ports.redeployStack(name, envId, job.destinationId, job.snapshotId, job.restoreSecrets ?? true, restoredBinds);
 					return { action, ok: true };
 				}
 			}

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.55",
+    "version": "1.0.56",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -61,6 +61,9 @@
     },
     {
       "name": "events"
+    },
+    {
+      "name": "exposure-status"
     },
     {
       "name": "git"
@@ -13829,6 +13832,41 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/exposure-status": {
+      "get": {
+        "operationId": "get_api_exposure-status",
+        "tags": [
+          "exposure-status"
+        ],
+        "summary": "Whether this instance is listening beyond localhost with auth off and the Docker socket writable, and whether that warning was dismissed",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "{ warn: boolean, dismissed: boolean }"
+          }
+        },
+        "security": [],
+        "description": "Public so the warning can render while authentication is disabled. Returns {warn, dismissed}; warn is true only when auth is off, the bind host is not loopback, and the Docker socket is mounted read-write."
+      },
+      "post": {
+        "operationId": "post_api_exposure-status",
+        "tags": [
+          "exposure-status"
+        ],
+        "summary": "Dismiss the unsecured-exposure warning for this instance",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "{ dismissed: true }"
+          },
+          "403": {
+            "description": "Authentication is enabled; the warning never fires, so there is nothing to dismiss"
+          }
+        },
+        "security": [],
+        "description": "Reachable without a session only while authentication is disabled (the warning's only state); once auth is on it returns 403, so a secured instance exposes no public write. Stores a per-instance flag so the warning does not show again."
       }
     },
     "/api/git/branches": {

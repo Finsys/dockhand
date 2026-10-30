@@ -298,11 +298,13 @@ async function planStackDirVolume(
 		: excludableBindDirs(bindDirs, hostPath, capturedVolumeSources);
 	const kept = bindDirs.filter((rel) => !droppable.includes(rel));
 	const excludePaths = droppable.map((rel) => `/volumes/${STACKDIR_VOLUME_KEY}/${rel}`);
+	// The picker plans without captured volumes; only a real backup passes them.
+	const phase = capturedVolumeSources === undefined ? 'preview' : 'backup';
 	if (excludePaths.length > 0) {
-		console.log(`[Backup] stackdir "${targetName}": excluding ${excludePaths.length} compose bind dir(s) from the stackdir volume (captured separately as their own volumes): [${droppable.join(', ')}]`);
+		console.log(`[Backup] stackdir "${targetName}" (${phase}): excluding ${excludePaths.length} compose bind dir(s) from the stackdir volume (captured separately as their own volumes): [${droppable.join(', ')}]`);
 	}
 	if (kept.length > 0) {
-		console.log(`[Backup] stackdir "${targetName}": keeping ${kept.length} compose bind dir(s) IN the stackdir capture - no captured volume covers them: [${kept.join(', ')}]`);
+		console.log(`[Backup] stackdir "${targetName}" (${phase}): keeping ${kept.length} compose bind dir(s) IN the stackdir capture - no captured volume covers them: [${kept.join(', ')}]`);
 	}
 
 	// User deselections from the "Stack files on the host" picker: exclude each named top-level
@@ -311,15 +313,19 @@ async function planStackDirVolume(
 	if (excludedStackFiles && excludedStackFiles.length > 0) {
 		const { isLoadBearingStackFile } = await import('./stackfile-filter');
 		const dropped: string[] = [];
+		const refused: string[] = [];
 		for (const name of excludedStackFiles) {
 			// Only a plain top-level entry name (no path separators / traversal) is honored.
-			if (!name || name.includes('/') || name === '.' || name === '..') continue;
-			if (isLoadBearingStackFile(name)) continue; // never exclude compose/.env
+			if (!name || name.includes('/') || name === '.' || name === '..') { refused.push(name); continue; }
+			if (isLoadBearingStackFile(name)) { refused.push(name); continue; } // never exclude compose/.env
 			const p = `/volumes/${STACKDIR_VOLUME_KEY}/${name}`;
 			if (!excludePaths.includes(p)) { excludePaths.push(p); dropped.push(name); }
 		}
 		if (dropped.length > 0) {
-			console.log(`[Backup] stackdir "${targetName}": user deselected ${dropped.length} stack file(s) from the capture: [${dropped.join(', ')}]`);
+			console.log(`[Backup] stackdir "${targetName}" (${phase}): user deselected ${dropped.length} stack file(s) from the capture: [${dropped.join(', ')}]`);
+		}
+		if (refused.length > 0) {
+			console.log(`[Backup] stackdir "${targetName}" (${phase}): ignored ${refused.length} deselection(s) the server never excludes (compose/.env, or not a plain name): [${refused.join(', ')}]`);
 		}
 	}
 
@@ -944,7 +950,7 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 		// override files, and sibling configs referenced by relative paths resolve, and the
 		// file keeps its real name (e.g. immich.yaml). The backup always captures the full dir
 		// plus the recorded compose filename, so there is no normalized-compose.yaml fallback.
-		redeployStack: async (name, envId, destId, snapId, restoreSecrets) => {
+		redeployStack: async (name, envId, destId, snapId, restoreSecrets, restoredBinds) => {
 			const { redeployStackFromDir, getStackDir } = await import('../stacks');
 			const { existsSync } = await import('fs');
 			const { join } = await import('path');
@@ -1005,7 +1011,14 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 					// into. A backup restore's redeploy could get its own recorder the same
 					// way -- there is nothing structural stopping it -- it just hasn't been
 					// done yet.
-					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined);
+					// The binds the in-place swap just wrote on the host, as stack-dir paths.
+					const { readFileSync } = await import('fs');
+					const { relativeBindsRestored } = await import('./stackfile-filter');
+					const keepOnHost = restoredBinds?.length
+						? relativeBindsRestored(readFileSync(composePath, 'utf8'), stackDir, restoredBinds)
+						: [];
+					if (keepOnHost.length) log(`leaving the restored bind(s) as they are on the host: [${keepOnHost.join(', ')}]`);
+					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined, keepOnHost);
 					if (!r.success) throw new Error(r.error || 'docker compose up failed');
 				}
 			});

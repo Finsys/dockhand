@@ -23,7 +23,8 @@ export const PUBLIC_EXACT = [
 	'/api/auth/passkeys/login/verify',
 	'/api/license',
 	'/api/changelog',
-	'/api/settings/theme'
+	'/api/settings/theme',
+	'/api/exposure-status'
 ];
 
 /**
