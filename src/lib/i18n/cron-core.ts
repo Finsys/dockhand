@@ -7,6 +7,7 @@ import 'cronstrue/locales/es';
 import 'cronstrue/locales/fr';
 import 'cronstrue/locales/pl';
 import 'cronstrue/locales/ru';
+import 'cronstrue/locales/uk';
 import 'cronstrue/locales/zh_CN';
 
 const CRONSTRUE_LOCALES: Record<string, string> = {
@@ -16,7 +17,8 @@ const CRONSTRUE_LOCALES: Record<string, string> = {
 	'fr-CA': 'fr',
 	pl: 'pl',
 	'zh-CN': 'zh_CN',
-	ru: 'ru'
+	ru: 'ru',
+	uk: 'uk'
 };
 
 export function cronstrueLocaleFor(locale: string): string {

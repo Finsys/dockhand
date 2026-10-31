@@ -37,7 +37,8 @@
 		'fr-CA': 'Français (Canada)',
 		pl: 'Polski',
 		'zh-CN': '简体中文',
-		ru: 'Русский'
+		ru: 'Русский',
+		uk: 'Українська'
 	};
 
 	/** What is stored, which is not what is rendered: absent means follow the browser. */
