@@ -16,6 +16,7 @@
 	import { additionalNetworkNames } from '$lib/utils/network-identity';
 	import BackupPanel from './BackupPanel.svelte';
 	import { volumeInfoFromBind } from '$lib/utils/mounts';
+	import { containerMountBindings } from '$lib/utils/container-mounts';
 	import { commandPayload, commandTextError, formatCommandArgs } from '$lib/utils/command-field';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
@@ -459,7 +460,7 @@
 				: [{ hostPort: '', containerPort: '', protocol: 'tcp' }];
 
 			// Parse volume mappings
-			const binds = data.HostConfig.Binds || [];
+			const binds = containerMountBindings(data);
 			volumeMappings = binds.length > 0
 				? binds.map((bind: string) => {
 						const [hostPath, containerPath, mode] = bind.split(':');
@@ -1003,8 +1004,9 @@
 						Object.assign(ports, bindings);
 					});
 
-				const volumeBinds = volumeMappings
-					.filter((v) => v.hostPath && v.containerPath)
+				const currentVolumes = volumeMappings.filter((v) => v.hostPath && v.containerPath);
+				const originalVolumes = originalConfig?.volumeMappings.filter((v) => v.hostPath && v.containerPath);
+				const volumeBinds = currentVolumes
 					.map((v) => `${v.hostPath}:${v.containerPath}:${v.mode}`);
 
 				const env = envVars
@@ -1084,7 +1086,7 @@
 					name: name.trim(),
 					image: image.trim(),
 					ports: Object.keys(ports).length > 0 ? ports : null,
-					volumeBinds: volumeBinds.length > 0 ? volumeBinds : null,
+					volumeBinds: originalConfig && JSON.stringify(currentVolumes) !== JSON.stringify(originalVolumes) ? volumeBinds : undefined,
 					// Fields the form manages: send `null` when the user cleared them
 					// so the server can distinguish "cleared" from "absent" (#1119).
 					// Server's updateContainer merges payload over existing config and
