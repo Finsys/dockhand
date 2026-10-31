@@ -298,6 +298,57 @@ describe('findNewerImageTag drops a stale candidate and keeps looking', () => {
 	});
 });
 
+describe('findNewerImageTag offers the most recently built candidate', () => {
+	const probeWith = (built: Record<string, { at: string; image?: string }>) => async (tag: string) => ({
+		ok: true,
+		digest: `sha256:${tag}`,
+		createdAt: built[tag]?.at ?? null,
+		imageId: built[tag]?.image ?? `sha256:img-${tag}`
+	});
+
+	it('prefers a later build over a higher-sorting name', async () => {
+		const r = await findNewerImageTag('3.1.0', ['3.1.0', '3.1.1', '8.1.2135'], probeWith({
+			'8.1.2135': { at: '2021-11-06T15:03:15Z' },
+			'3.1.1': { at: '2026-10-01T00:00:00Z' }
+		}));
+		expect(r?.tag).toBe('3.1.1');
+		expect(r?.createdAt).toBe('2026-10-01T00:00:00Z');
+	});
+
+	it('offers the highest version among tags of the same image', async () => {
+		const same = { at: '2026-10-01T00:00:00Z', image: 'sha256:one' };
+		const r = await findNewerImageTag('2.0', ['2.0', '2.1', '2.1.0', '2.1.0.1'], probeWith({
+			'2.1': same, '2.1.0': same, '2.1.0.1': same
+		}));
+		expect(r?.tag).toBe('2.1.0.1');
+	});
+
+	it('gives the same answer whatever order the registry lists the betas in', async () => {
+		// Betas the parser cannot rank by name: the build date decides, every run.
+		const built = {
+			'1.6.0-b1': { at: '2026-10-01T00:00:00Z' },
+			'1.6.0-b2': { at: '2026-10-09T00:00:00Z' },
+			'1.6.0-b3': { at: '2026-10-03T00:00:00Z' },
+			'1.6.0-b4': { at: '2026-10-04T00:00:00Z' }
+		};
+		const tags = ['1.5.0', ...Object.keys(built)];
+		const first = await findNewerImageTag('1.5.0', tags, probeWith(built), { matchFlavor: false });
+		const again = await findNewerImageTag('1.5.0', [...tags].reverse(), probeWith(built), { matchFlavor: false });
+		expect(first?.tag).toBe('1.6.0-b2');
+		expect(again?.tag).toBe('1.6.0-b2');
+	});
+
+	it('falls back to the highest version, in one probe, when no date is known', async () => {
+		let probes = 0;
+		const r = await findNewerImageTag('1.0.0', ['1.0.0', '1.1.0', '1.2.0'], async () => {
+			probes++;
+			return { ok: true, createdAt: null };
+		});
+		expect(r?.tag).toBe('1.2.0');
+		expect(probes).toBe(1);
+	});
+});
+
 describe('a container filters its own candidates', () => {
 	// Exercised THROUGH findNewerVersionTag, not just against applyTagFilter: a
 	// filter that is computed and then discarded looks identical to one that works.
