@@ -1,0 +1,2276 @@
+{
+    "zabbix_export": {
+        "version": "7.4",
+        "template_groups": [
+            {
+                "uuid": "a571c0d144b14fd4a87a9d9b2aa9fcd6",
+                "name": "Templates/Applications"
+            }
+        ],
+        "templates": [
+            {
+                "uuid": "9e8987acc64c4b84b7ffc13cdd836733",
+                "template": "Dockhand by HTTP",
+                "name": "Dockhand by HTTP",
+                "description": "Dockhand monitoring template for Zabbix 7.4. Combines Dockhand API/event monitoring with local Docker Engine and Dockhand application-container monitoring through Zabbix Agent 2. Requires Zabbix Agent 2 with the Docker plugin on the Dockhand host and the agent user must have access to the Docker socket. The local Dockhand container name is controlled by {$DOCKHAND.LOCAL.CONTAINER.NAME}.",
+                "groups": [
+                    {
+                        "name": "Templates/Applications"
+                    }
+                ],
+                "items": [
+                    {
+                        "uuid": "e092aedcd2f84cbeb3fae6a7fedda0fa",
+                        "name": "Local Docker engine: Containers list",
+                        "key": "docker.containers",
+                        "delay": "{$DOCKHAND.POLL.INTERVAL}",
+                        "history": "0",
+                        "value_type": "TEXT",
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "containers"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "eed9120fe1ae4a6a83ae10a0d913b172",
+                        "name": "Local Docker engine: Containers running",
+                        "type": "DEPENDENT",
+                        "key": "docker.containers.running",
+                        "description": "Number of running containers on the local Docker host.",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.ContainersRunning"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.info"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "docker"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "containers_running"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "7589f67a670940c1821b9a8f2b6cda48",
+                        "name": "Local Docker engine: Containers stopped",
+                        "type": "DEPENDENT",
+                        "key": "docker.containers.stopped",
+                        "description": "Number of stopped containers on the local Docker host.",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.ContainersStopped"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.info"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "docker"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "containers_stopped"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "e246d495563e4a19af4ed408255faf03",
+                        "name": "Local Docker engine: Containers total",
+                        "type": "DEPENDENT",
+                        "key": "docker.containers.total",
+                        "description": "Total number of containers on the local Docker host.",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.Containers"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.info"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "docker"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "containers_total"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "de666bbd5254411985c5ef7c0a4153e8",
+                        "name": "Dockhand application container: Raw info",
+                        "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]",
+                        "delay": "{$DOCKHAND.POLL.INTERVAL}",
+                        "history": "0",
+                        "value_type": "TEXT",
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "container_info"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "d4cde01bbb4b4a2bba7bb3fe6b4fd930",
+                        "name": "Dockhand application container: Raw stats",
+                        "key": "docker.container_stats[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\"]",
+                        "delay": "{$DOCKHAND.POLL.INTERVAL}",
+                        "history": "0",
+                        "value_type": "TEXT",
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "container_stats"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "2bbd73cbdade402088dc159bdf1acb03",
+                        "name": "Local Docker engine: Storage driver",
+                        "type": "DEPENDENT",
+                        "key": "docker.driver",
+                        "value_type": "CHAR",
+                        "description": "Docker storage driver.",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.Driver"
+                                ]
+                            },
+                            {
+                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
+                                "parameters": [
+                                    "1d"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.info"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "docker"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "storage_driver"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "54bc149f6ada4ce39ca5d98a3af3292f",
+                        "name": "Local Docker engine: Images total",
+                        "type": "DEPENDENT",
+                        "key": "docker.images.total",
+                        "description": "Total number of Docker images including intermediate layers.",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.Images"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.info"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "docker"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "images_total"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "dbea203a50c149baaab360bf8b1e6cd8",
+                        "name": "Local Docker engine: Raw info",
+                        "key": "docker.info",
+                        "delay": "{$DOCKHAND.POLL.INTERVAL}",
+                        "history": "0",
+                        "value_type": "TEXT",
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "info"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "75f41125b245415593cd2ab44889824c",
+                        "name": "Local Docker engine: Ping",
+                        "key": "docker.ping",
+                        "delay": "{$DOCKHAND.POLL.INTERVAL}",
+                        "valuemap": {
+                            "name": "Dockhand Docker service state"
+                        },
+                        "preprocessing": [
+                            {
+                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
+                                "parameters": [
+                                    "10m"
+                                ]
+                            }
+                        ],
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "docker"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "ping"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ],
+                        "triggers": [
+                            {
+                                "uuid": "7d1d0456f0a94ca886976ab3fc9bcf00",
+                                "expression": "last(/Dockhand by HTTP/docker.ping)=0",
+                                "name": "Dockhand host: Local Docker engine is down",
+                                "priority": "HIGH",
+                                "description": "The Docker daemon on the Dockhand host is not reachable through the Zabbix Agent 2 Docker plugin.",
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "docker"
+                                    },
+                                    {
+                                        "tag": "event_group",
+                                        "value": "system"
+                                    },
+                                    {
+                                        "tag": "event_type",
+                                        "value": "docker_engine_down"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "local_docker"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "56429bdea64a445fa78cafe90467c5ef",
+                        "name": "Local Docker engine: Server version",
+                        "type": "DEPENDENT",
+                        "key": "docker.server_version",
+                        "value_type": "CHAR",
+                        "description": "Docker Engine server version.",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.ServerVersion"
+                                ]
+                            },
+                            {
+                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
+                                "parameters": [
+                                    "1d"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.info"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "docker"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "server_version"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "local_docker"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "81883a3a28304a38bc28cc1440c32972",
+                        "name": "Dockhand raw event",
+                        "type": "TRAP",
+                        "key": "dockhand.event",
+                        "history": "7d",
+                        "trends": "0",
+                        "description": "Receives raw Dockhand notification events through the Zabbix history.push API. This item is the primary event stream used for immediate container, environment, health, vulnerability, and lifecycle notifications.",
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_type",
+                                "value": "event"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "bff664154eac4b1493458f016f7914da",
+                        "name": "Dockhand application container: CPU usage",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.cpu_pct",
+                        "history": "30d",
+                        "value_type": "FLOAT",
+                        "units": "%",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.cpu_stats.cpu_usage.percent_usage"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_stats[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\"]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "cpu_pct"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "9b1cccc8d6404a20a94dea3f165cabc1",
+                        "name": "Dockhand application container: Error",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.error",
+                        "history": "7d",
+                        "value_type": "CHAR",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.State.Error"
+                                ]
+                            },
+                            {
+                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
+                                "parameters": [
+                                    "1d"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "error"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ],
+                        "triggers": [
+                            {
+                                "uuid": "7b18a8cfc9dd4a4798f486a01863b17e",
+                                "expression": "last(/Dockhand by HTTP/dockhand.local.container.error,#1)<>last(/Dockhand by HTTP/dockhand.local.container.error,#2) and length(last(/Dockhand by HTTP/dockhand.local.container.error))>0",
+                                "name": "Dockhand application container reported an error",
+                                "priority": "WARNING",
+                                "description": "Docker reported a non-empty error string for the local Dockhand application container.",
+                                "manual_close": "YES",
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "event_group",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "event_type",
+                                        "value": "dockhand_container_error"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "application"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "e44eafd1809a43da9c8aaf0c7a05cd29",
+                        "name": "Dockhand application container: Exit code",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.exit_code",
+                        "history": "7d",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.State.ExitCode"
+                                ]
+                            },
+                            {
+                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
+                                "parameters": [
+                                    "1d"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "exit_code"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "d81681da9bdd4b4f90327935950c92a8",
+                        "name": "Dockhand application container: Health",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.health",
+                        "history": "7d",
+                        "value_type": "FLOAT",
+                        "valuemap": {
+                            "name": "Dockhand container health state"
+                        },
+                        "preprocessing": [
+                            {
+                                "type": "JAVASCRIPT",
+                                "parameters": [
+                                    "var input = JSON.parse(value);\n\nif (typeof input.State.Health !== 'object' || typeof input.State.Health === 'undefined') {\n    return 4;\n}\n\nreturn (['starting', 'unhealthy', 'healthy', 'none'].indexOf(input.State.Health.Status) + 1);"
+                                ]
+                            },
+                            {
+                                "type": "IN_RANGE",
+                                "parameters": [
+                                    "1",
+                                    "4"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "4"
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "health"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "e7ba7285a6604c828971b697f26807ff",
+                        "name": "Dockhand application container: Image",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.image",
+                        "history": "7d",
+                        "value_type": "CHAR",
+                        "preprocessing": [
+                            {
+                                "type": "JAVASCRIPT",
+                                "parameters": [
+                                    "var containers = JSON.parse(value);\nvar target = '{$DOCKHAND.LOCAL.CONTAINER.NAME}';\n\nif (!Array.isArray(containers)) {\n    return '';\n}\n\nfor (var i = 0; i < containers.length; i++) {\n    var names = containers[i].Names || [];\n    for (var j = 0; j < names.length; j++) {\n        if (String(names[j]).replace(/^\\/+/, '') === target) {\n            return containers[i].Image || '';\n        }\n    }\n}\n\nreturn '';"
+                                ]
+                            },
+                            {
+                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
+                                "parameters": [
+                                    "1d"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.containers"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "image"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "1507f6d1bab14ae68fcb3237d5849f8c",
+                        "name": "Dockhand application container: Memory usage",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.memory_usage",
+                        "history": "30d",
+                        "units": "B",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.memory_stats.usage"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_stats[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\"]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "memory_usage"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "465a81d15cef4f03bd43fc441192faa4",
+                        "name": "Dockhand application container: Network received",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.net_rx",
+                        "history": "30d",
+                        "value_type": "FLOAT",
+                        "units": "B",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.networks[*].rx_bytes.sum()"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "0"
+                            },
+                            {
+                                "type": "CHANGE_PER_SECOND"
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_stats[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\"]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "net_rx"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "86f265381aa24483a9c51e36313df735",
+                        "name": "Dockhand application container: Network sent",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.net_tx",
+                        "history": "30d",
+                        "value_type": "FLOAT",
+                        "units": "B",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.networks[*].tx_bytes.sum()"
+                                ],
+                                "error_handler": "CUSTOM_VALUE",
+                                "error_handler_params": "0"
+                            },
+                            {
+                                "type": "CHANGE_PER_SECOND"
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_stats[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\"]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "net_tx"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "e3c93c91291f422d88613fca09586f5b",
+                        "name": "Dockhand application container: OOMKilled",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.oomkilled",
+                        "history": "7d",
+                        "valuemap": {
+                            "name": "Dockhand Docker flag"
+                        },
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.State.OOMKilled"
+                                ]
+                            },
+                            {
+                                "type": "BOOL_TO_DECIMAL"
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "oomkilled"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ],
+                        "triggers": [
+                            {
+                                "uuid": "491e6d0b22a845f6a10742dd45551b51",
+                                "expression": "last(/Dockhand by HTTP/dockhand.local.container.oomkilled)=1",
+                                "name": "Dockhand application container was OOM-killed",
+                                "priority": "HIGH",
+                                "description": "The local Dockhand application container was killed due to an out-of-memory condition.",
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "event_group",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "event_type",
+                                        "value": "dockhand_container_oom"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "application"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "a75b40455afc431d95d38e053f624256",
+                        "name": "Dockhand application container: PID",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.pid",
+                        "history": "7d",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.State.Pid"
+                                ]
+                            },
+                            {
+                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
+                                "parameters": [
+                                    "1d"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "pid"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "d115c85b6cbc44459e27d94e3638fd89",
+                        "name": "Dockhand application container: Current PIDs",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.pids",
+                        "history": "30d",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.pids_stats.current"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_stats[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\"]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "pids"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "5100355bf1db4f8b89511952688cdd2a",
+                        "name": "Dockhand application container: Present",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.present",
+                        "history": "7d",
+                        "description": "Whether the local Dockhand application container named by {$DOCKHAND.LOCAL.CONTAINER.NAME} exists in the local Docker Engine.",
+                        "valuemap": {
+                            "name": "Dockhand Docker flag"
+                        },
+                        "preprocessing": [
+                            {
+                                "type": "JAVASCRIPT",
+                                "parameters": [
+                                    "var containers = JSON.parse(value);\nvar target = '{$DOCKHAND.LOCAL.CONTAINER.NAME}';\n\nif (!Array.isArray(containers)) {\n    return 0;\n}\n\nfor (var i = 0; i < containers.length; i++) {\n    var names = containers[i].Names || [];\n    for (var j = 0; j < names.length; j++) {\n        if (String(names[j]).replace(/^\\/+/, '') === target) {\n            return 1;\n        }\n    }\n}\n\nreturn 0;"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.containers"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "present"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ],
+                        "triggers": [
+                            {
+                                "uuid": "0dba0073c76848778d10eb9e887e8850",
+                                "expression": "last(/Dockhand by HTTP/dockhand.local.container.present)=0",
+                                "name": "Dockhand application container is missing",
+                                "priority": "HIGH",
+                                "description": "The local Docker Engine is reachable, but the Dockhand application container \"{$DOCKHAND.LOCAL.CONTAINER.NAME}\" is not present.",
+                                "dependencies": [
+                                    {
+                                        "name": "Dockhand host: Local Docker engine is down",
+                                        "expression": "last(/Dockhand by HTTP/docker.ping)=0"
+                                    }
+                                ],
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "event_group",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "event_type",
+                                        "value": "dockhand_container_missing"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "application"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "c2f0489ac9b5434d98a1929669203dd1",
+                        "name": "Dockhand application container: Restart count",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.restart_count",
+                        "history": "30d",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.RestartCount"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "restart_count"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ],
+                        "triggers": [
+                            {
+                                "uuid": "b74d3c693fc440bc807c68d8dc97a34b",
+                                "expression": "last(/Dockhand by HTTP/dockhand.local.container.restart_count)-min(/Dockhand by HTTP/dockhand.local.container.restart_count,{$DOCKHAND.RESTART.WINDOW})>={$DOCKHAND.RESTART.COUNT}",
+                                "name": "Dockhand application container: Restart loop detected",
+                                "priority": "HIGH",
+                                "description": "The local Dockhand application container restarted at least {$DOCKHAND.RESTART.COUNT} times within {$DOCKHAND.RESTART.WINDOW}.",
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "event_group",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "event_type",
+                                        "value": "dockhand_container_restart_loop"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "application"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "b45589d7dd80485e828b374468f57d4b",
+                        "name": "Dockhand application container: Running",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.running",
+                        "history": "7d",
+                        "valuemap": {
+                            "name": "Dockhand Docker flag"
+                        },
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.State.Running"
+                                ]
+                            },
+                            {
+                                "type": "BOOL_TO_DECIMAL"
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "running"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ],
+                        "triggers": [
+                            {
+                                "uuid": "97f6384d774d422b9443ee8c9d63369c",
+                                "expression": "last(/Dockhand by HTTP/dockhand.local.container.running)=0",
+                                "name": "Dockhand application container is not running",
+                                "priority": "HIGH",
+                                "description": "The local Dockhand application container exists but is not running.",
+                                "dependencies": [
+                                    {
+                                        "name": "Dockhand application container is missing",
+                                        "expression": "last(/Dockhand by HTTP/dockhand.local.container.present)=0"
+                                    },
+                                    {
+                                        "name": "Dockhand host: Local Docker engine is down",
+                                        "expression": "last(/Dockhand by HTTP/docker.ping)=0"
+                                    }
+                                ],
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "event_group",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "event_type",
+                                        "value": "dockhand_container_not_running"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "application"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "03a260dcf2fb4c938bc770901b75b4d2",
+                        "name": "Dockhand application container: Status",
+                        "type": "DEPENDENT",
+                        "key": "dockhand.local.container.status",
+                        "history": "7d",
+                        "value_type": "CHAR",
+                        "preprocessing": [
+                            {
+                                "type": "JSONPATH",
+                                "parameters": [
+                                    "$.State.Status"
+                                ]
+                            },
+                            {
+                                "type": "DISCARD_UNCHANGED_HEARTBEAT",
+                                "parameters": [
+                                    "1h"
+                                ]
+                            }
+                        ],
+                        "master_item": {
+                            "key": "docker.container_info[\"{$DOCKHAND.LOCAL.CONTAINER.NAME}\",full]"
+                        },
+                        "tags": [
+                            {
+                                "tag": "component",
+                                "value": "dockhand"
+                            },
+                            {
+                                "tag": "data_source",
+                                "value": "agent2"
+                            },
+                            {
+                                "tag": "metric",
+                                "value": "status"
+                            },
+                            {
+                                "tag": "resource",
+                                "value": "application"
+                            }
+                        ]
+                    }
+                ],
+                "discovery_rules": [
+                    {
+                        "uuid": "e83d840a011e4609a9c60ed2b4059838",
+                        "name": "Discover containers in {#ENV.NAME}",
+                        "type": "SCRIPT",
+                        "key": "dockhand.containers.discovery[{#ENV.ID}]",
+                        "delay": "{$DOCKHAND.LLD.INTERVAL}",
+                        "params": "var params = JSON.parse(value);\n\nvar url = params.url.replace(/\\/+$/, '');\nvar token = (params.token || '').trim();\nvar environmentId = String(params.environment_id || '').trim();\nvar environmentName = String(params.environment_name || '').trim();\n\nif (environmentId === '') {\n    throw 'Dockhand environment ID is empty';\n}\n\nvar request = new HttpRequest();\n\nif (token !== '') {\n    request.addHeader('Authorization: Bearer ' + token);\n}\n\nvar endpoint =\n    url +\n    '/api/containers?env=' +\n    encodeURIComponent(environmentId) +\n    '&all=true';\n\nvar response = request.get(endpoint);\nvar status = request.getStatus();\n\nif (status < 200 || status >= 300) {\n    throw 'Dockhand API returned HTTP ' + status +\n        ' for environment \"' + environmentName +\n        '\" (' + environmentId + '): ' + response;\n}\n\nvar data;\n\ntry {\n    data = JSON.parse(response);\n}\ncatch (e) {\n    throw 'Invalid JSON returned by Dockhand /api/containers for environment \"' +\n        environmentName + '\": ' + e;\n}\n\nif (!Array.isArray(data)) {\n    throw 'Dockhand /api/containers did not return an array for environment \"' +\n        environmentName + '\"';\n}\n\nvar result = [];\n\nfor (var i = 0; i < data.length; i++) {\n    var container = data[i];\n    var labels = container.labels || {};\n\n    var notifyLabel = labels['dockhand.notify'];\n\n    if (\n        notifyLabel !== undefined &&\n        String(notifyLabel).toLowerCase() === 'false'\n    ) {\n        continue;\n    }\n\n    var stack = labels['com.docker.compose.project'] || '';\n    var service = labels['com.docker.compose.service'] || '';\n\n    result.push({\n        environment_id: environmentId,\n        environment_name: environmentName,\n        container_id: container.id || '',\n        container_name: container.name || '',\n        image: container.image || '',\n        state: container.state || 'unknown',\n        status: container.status || '',\n        health: container.health || '',\n        restart_count:\n            container.restartCount !== undefined\n                ? Number(container.restartCount)\n                : 0,\n        stack: stack,\n        service: service\n    });\n}\n\nreturn JSON.stringify(result);",
+                        "description": "Discovers containers managed by the Dockhand environment \"{#ENV.NAME}\" through the /api/containers endpoint. Containers explicitly configured with the dockhand.notify=false label are excluded. Supports both unauthenticated Dockhand installations and installations protected by a bearer API token.",
+                        "item_prototypes": [
+                            {
+                                "uuid": "f9b90ac9a04b4bc4bb2ca46b638e4b55",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Event type",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "30d",
+                                "value_type": "CHAR",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.event_type"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.container.event[{#ENV.ID},{#CONTAINER.NAME}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "metric",
+                                        "value": "event_type"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ],
+                                "trigger_prototypes": [
+                                    {
+                                        "uuid": "02d93cb571d340298340f6363836c78a",
+                                        "expression": "last(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_exited\"",
+                                        "recovery_mode": "RECOVERY_EXPRESSION",
+                                        "recovery_expression": "last(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_started\"\nor\nlast(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_restarted\"",
+                                        "name": "Dockhand container {#CONTAINER.NAME}: Exited",
+                                        "opdata": "event_type={ITEM.LASTVALUE1}",
+                                        "priority": "AVERAGE",
+                                        "description": "Container \"{#CONTAINER.NAME}\" in Dockhand environment \"{#ENV.NAME}\" exited unexpectedly. The problem remains open until the container is started or restarted.",
+                                        "tags": [
+                                            {
+                                                "tag": "component",
+                                                "value": "dockhand"
+                                            },
+                                            {
+                                                "tag": "container",
+                                                "value": "{#CONTAINER.NAME}"
+                                            },
+                                            {
+                                                "tag": "environment",
+                                                "value": "{#ENV.NAME}"
+                                            },
+                                            {
+                                                "tag": "event_group",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "event_type",
+                                                "value": "container_exited"
+                                            },
+                                            {
+                                                "tag": "resource",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "service",
+                                                "value": "{#SERVICE}"
+                                            },
+                                            {
+                                                "tag": "stack",
+                                                "value": "{#STACK}"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "uuid": "2633654cc64d44d78c487c72de0d52c4",
+                                        "expression": "last(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_oom\"",
+                                        "recovery_mode": "RECOVERY_EXPRESSION",
+                                        "recovery_expression": "last(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_started\"\nor\nlast(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_restarted\"",
+                                        "name": "Dockhand container {#CONTAINER.NAME}: Out of memory",
+                                        "opdata": "event_type={ITEM.LASTVALUE1}",
+                                        "priority": "HIGH",
+                                        "description": "Container \"{#CONTAINER.NAME}\" in Dockhand environment \"{#ENV.NAME}\" was terminated due to an out-of-memory condition. The problem remains open until the container is started or restarted.",
+                                        "tags": [
+                                            {
+                                                "tag": "component",
+                                                "value": "dockhand"
+                                            },
+                                            {
+                                                "tag": "container",
+                                                "value": "{#CONTAINER.NAME}"
+                                            },
+                                            {
+                                                "tag": "environment",
+                                                "value": "{#ENV.NAME}"
+                                            },
+                                            {
+                                                "tag": "event_group",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "event_type",
+                                                "value": "container_oom"
+                                            },
+                                            {
+                                                "tag": "resource",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "service",
+                                                "value": "{#SERVICE}"
+                                            },
+                                            {
+                                                "tag": "stack",
+                                                "value": "{#STACK}"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "uuid": "5ec1cdbc6a9f4deea46b72cb4c60c012",
+                                        "expression": "last(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_stopped\"",
+                                        "recovery_mode": "RECOVERY_EXPRESSION",
+                                        "recovery_expression": "last(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_started\"\nor\nlast(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_restarted\"",
+                                        "name": "Dockhand container {#CONTAINER.NAME}: Stopped",
+                                        "opdata": "event_type={ITEM.LASTVALUE1}",
+                                        "priority": "AVERAGE",
+                                        "description": "Container \"{#CONTAINER.NAME}\" in Dockhand environment \"{#ENV.NAME}\" was stopped. The problem remains open until the container is started or restarted.",
+                                        "tags": [
+                                            {
+                                                "tag": "component",
+                                                "value": "dockhand"
+                                            },
+                                            {
+                                                "tag": "container",
+                                                "value": "{#CONTAINER.NAME}"
+                                            },
+                                            {
+                                                "tag": "environment",
+                                                "value": "{#ENV.NAME}"
+                                            },
+                                            {
+                                                "tag": "event_group",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "event_type",
+                                                "value": "container_stopped"
+                                            },
+                                            {
+                                                "tag": "resource",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "service",
+                                                "value": "{#SERVICE}"
+                                            },
+                                            {
+                                                "tag": "stack",
+                                                "value": "{#STACK}"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "uuid": "0a96d001f9644c33bd9f74f9187b4cce",
+                                        "expression": "last(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_unhealthy\"",
+                                        "recovery_mode": "RECOVERY_EXPRESSION",
+                                        "recovery_expression": "last(/Dockhand by HTTP/dockhand.container.event.type[{#ENV.ID},{#CONTAINER.NAME}])=\"container_healthy\"",
+                                        "name": "Dockhand container {#CONTAINER.NAME}: Unhealthy",
+                                        "event_name": "Dockhand container {#CONTAINER.NAME} is unhealthy",
+                                        "opdata": "event_type={ITEM.LASTVALUE1}",
+                                        "priority": "HIGH",
+                                        "description": "Container \"{#CONTAINER.NAME}\" in Dockhand environment \"{#ENV.NAME}\" reported an unhealthy health status. The problem remains open until Dockhand reports container_healthy for the same container.",
+                                        "tags": [
+                                            {
+                                                "tag": "component",
+                                                "value": "dockhand"
+                                            },
+                                            {
+                                                "tag": "container",
+                                                "value": "{#CONTAINER.NAME}"
+                                            },
+                                            {
+                                                "tag": "environment",
+                                                "value": "{#ENV.NAME}"
+                                            },
+                                            {
+                                                "tag": "event_group",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "event_type",
+                                                "value": "container_unhealthy"
+                                            },
+                                            {
+                                                "tag": "resource",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "service",
+                                                "value": "{#SERVICE}"
+                                            },
+                                            {
+                                                "tag": "stack",
+                                                "value": "{#STACK}"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "c0c656d3903448b3a567895d8b935c43",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Event",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.event[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "7d",
+                                "value_type": "TEXT",
+                                "description": "Filtered raw Dockhand notification event for container \"{#CONTAINER.NAME}\" in environment \"{#ENV.NAME}\". Events are selected from the global dockhand.event stream by environment ID and container name.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JAVASCRIPT",
+                                        "parameters": [
+                                            "var event;\n\ntry {\n    event = JSON.parse(value);\n}\ncatch (e) {\n    return null;\n}\n\nif (\n    String(event.environment_id || '') !== String('{#ENV.ID}') ||\n    String(event.container || '') !== String('{#CONTAINER.NAME}')\n) {\n    return null;\n}\n\nreturn value;"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.event"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "data_type",
+                                        "value": "event"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "3f09f3b9d3af4ed689598f8d22089aaf",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Exit code",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.exit_code[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "30d",
+                                "value_type": "CHAR",
+                                "description": "Last Docker container exit code reported by Dockhand for container \"{#CONTAINER.NAME}\" in environment \"{#ENV.NAME}\". The value is null when no exit code is currently available.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.exit_code"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.container.raw[{#ENV.ID},{#CONTAINER.NAME}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "metric",
+                                        "value": "exit_code"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "8de7034431b24d62bd9bf86b09fb6787",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Health",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.health[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "7d",
+                                "value_type": "CHAR",
+                                "description": "Current Docker health status reported by Dockhand for container \"{#CONTAINER.NAME}\" in environment \"{#ENV.NAME}\". Typical values are healthy, unhealthy, starting, or none.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.health"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.container.raw[{#ENV.ID},{#CONTAINER.NAME}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "metric",
+                                        "value": "health"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "d8f3667b9b8a4fb6a2f7397f5e8139a1",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Container ID",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.id[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "30d",
+                                "value_type": "CHAR",
+                                "description": "Current Docker container ID reported by Dockhand for container \"{#CONTAINER.NAME}\" in environment \"{#ENV.NAME}\". The ID is diagnostic metadata only and is not used as the logical identity of the monitored container.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.container_id"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.container.raw[{#ENV.ID},{#CONTAINER.NAME}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "metric",
+                                        "value": "container_id"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "c1eb7826ab20478dbc0ef03f8952a3bf",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Image",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.image[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "30d",
+                                "value_type": "CHAR",
+                                "description": "Docker image name and tag currently used by container \"{#CONTAINER.NAME}\" in Dockhand environment \"{#ENV.NAME}\". Changes to this value may indicate a container image update or redeployment.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.image"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.container.raw[{#ENV.ID},{#CONTAINER.NAME}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "metric",
+                                        "value": "image"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "63b636f6cb6c4eae951c63d3f0cc9932",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Raw data",
+                                "type": "SCRIPT",
+                                "key": "dockhand.container.raw[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "delay": "{$DOCKHAND.POLL.INTERVAL}",
+                                "history": "0",
+                                "value_type": "TEXT",
+                                "params": "var params = JSON.parse(value);\n\nvar url = String(params.url || '').replace(/\\/+$/, '');\nvar token = String(params.token || '').trim();\nvar environmentId = String(params.environment_id || '').trim();\nvar environmentName = String(params.environment_name || '').trim();\nvar containerName = String(params.container_name || '').trim();\n\nif (url === '') {\n    throw 'Dockhand URL is empty';\n}\n\nif (environmentId === '') {\n    throw 'Dockhand environment ID is empty';\n}\n\nif (containerName === '') {\n    throw 'Dockhand container name is empty';\n}\n\nvar request = new HttpRequest();\n\nif (token !== '') {\n    request.addHeader('Authorization: Bearer ' + token);\n}\n\nvar endpoint =\n    url +\n    '/api/containers/' +\n    encodeURIComponent(containerName) +\n    '/inspect?env=' +\n    encodeURIComponent(environmentId);\n\nvar response = request.get(endpoint);\nvar status = request.getStatus();\n\nif (status < 200 || status >= 300) {\n    throw 'Dockhand API returned HTTP ' + status +\n        ' while inspecting container \"' + containerName +\n        '\" from environment \"' + environmentName + '\": ' + response;\n}\n\nvar container;\n\ntry {\n    container = JSON.parse(response);\n}\ncatch (e) {\n    throw 'Invalid JSON returned by Dockhand container inspect API: ' + e;\n}\n\nvar labels =\n    container.Config && container.Config.Labels\n        ? container.Config.Labels\n        : {};\n\nvar state = container.State || {};\nvar health =\n    state.Health && state.Health.Status\n        ? state.Health.Status\n        : 'none';\n\nvar image =\n    container.Config && container.Config.Image\n        ? container.Config.Image\n        : '';\n\nvar actualName = String(container.Name || containerName).replace(/^\\/+/, '');\n\nvar humanStatus = state.Status || 'unknown';\n\nif (state.Status === 'exited') {\n    humanStatus = 'Exited (' + String(state.ExitCode) + ')';\n}\nelse if (state.Status === 'running') {\n    humanStatus = health !== 'none'\n        ? 'Running (' + health + ')'\n        : 'Running';\n}\nelse if (state.Status === 'restarting') {\n    humanStatus = 'Restarting';\n}\n\nreturn JSON.stringify({\n    environment_id: environmentId,\n    environment_name: environmentName,\n\n    stack: labels['com.docker.compose.project'] || '',\n    service: labels['com.docker.compose.service'] || '',\n\n    container_name: actualName,\n    container_id: container.Id || '',\n\n    image: image,\n    state: state.Status || 'unknown',\n    status: humanStatus,\n    health: health,\n\n    restart_count:\n        container.RestartCount !== undefined\n            ? Number(container.RestartCount)\n            : 0,\n\n    exit_code:\n        state.ExitCode !== undefined\n            ? Number(state.ExitCode)\n            : null,\n\n    created:\n        container.Created\n            ? Math.floor(Date.parse(container.Created) / 1000)\n            : null\n});",
+                                "description": "Collects the current state and metadata of container \"{#CONTAINER.NAME}\" from Dockhand environment \"{#ENV.NAME}\". This is a master item for dependent container metrics. The raw JSON value is not stored in history.",
+                                "timeout": "10s",
+                                "parameters": [
+                                    {
+                                        "name": "container_name",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "name": "environment_id",
+                                        "value": "{#ENV.ID}"
+                                    },
+                                    {
+                                        "name": "environment_name",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "name": "token",
+                                        "value": "{$DOCKHAND.API.TOKEN}"
+                                    },
+                                    {
+                                        "name": "url",
+                                        "value": "{$DOCKHAND.URL}"
+                                    }
+                                ],
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "raw"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "e93513d2e7fe47a899c68ef898701af8",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Restart count",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.restart_count[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "30d",
+                                "description": "Docker restart counter reported by Dockhand for container \"{#CONTAINER.NAME}\" in environment \"{#ENV.NAME}\". This metric is used to detect repeated container restarts and restart loops.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.restart_count"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.container.raw[{#ENV.ID},{#CONTAINER.NAME}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "metric",
+                                        "value": "restart_count"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ],
+                                "trigger_prototypes": [
+                                    {
+                                        "uuid": "a6b20a8ff79147d9806e304812b84f93",
+                                        "expression": "last(/Dockhand by HTTP/dockhand.container.restart_count[{#ENV.ID},{#CONTAINER.NAME}])\n-\nmin(/Dockhand by HTTP/dockhand.container.restart_count[{#ENV.ID},{#CONTAINER.NAME}],{$DOCKHAND.RESTART.WINDOW})\n>={$DOCKHAND.RESTART.COUNT}",
+                                        "name": "Dockhand container {#CONTAINER.NAME}: Restart loop detected",
+                                        "opdata": "restart_count={ITEM.LASTVALUE1}",
+                                        "priority": "HIGH",
+                                        "description": "Container \"{#CONTAINER.NAME}\" in Dockhand environment \"{#ENV.NAME}\" restarted at least {$DOCKHAND.RESTART.COUNT} times within {$DOCKHAND.RESTART.WINDOW}. This may indicate a restart loop or repeated application failures.",
+                                        "tags": [
+                                            {
+                                                "tag": "component",
+                                                "value": "dockhand"
+                                            },
+                                            {
+                                                "tag": "container",
+                                                "value": "{#CONTAINER.NAME}"
+                                            },
+                                            {
+                                                "tag": "environment",
+                                                "value": "{#ENV.NAME}"
+                                            },
+                                            {
+                                                "tag": "event_group",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "event_type",
+                                                "value": "restart_loop"
+                                            },
+                                            {
+                                                "tag": "resource",
+                                                "value": "container"
+                                            },
+                                            {
+                                                "tag": "service",
+                                                "value": "{#SERVICE}"
+                                            },
+                                            {
+                                                "tag": "stack",
+                                                "value": "{#STACK}"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "a6e3d2a385aa4d16a95651f24c4775b8",
+                                "name": "Dockhand container {#CONTAINER.NAME}: State",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.state[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "7d",
+                                "value_type": "CHAR",
+                                "description": "Current Docker container state reported by Dockhand for container \"{#CONTAINER.NAME}\" in environment \"{#ENV.NAME}\". Typical values include running, exited, paused, restarting, and created.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.state"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.container.raw[{#ENV.ID},{#CONTAINER.NAME}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "state"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "85cf6341d18b48558d760aff32a8bcc6",
+                                "name": "Dockhand container {#CONTAINER.NAME}: Status",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.container.status[{#ENV.ID},{#CONTAINER.NAME}]",
+                                "history": "7d",
+                                "value_type": "CHAR",
+                                "description": "Human-readable Docker container status reported by Dockhand for container \"{#CONTAINER.NAME}\" in environment \"{#ENV.NAME}\". Examples include \"Up 10 minutes\", \"Exited (1) 5 minutes ago\", and health status information.",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.status"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.container.raw[{#ENV.ID},{#CONTAINER.NAME}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "container",
+                                        "value": "{#CONTAINER.NAME}"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "metric",
+                                        "value": "status"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "container"
+                                    },
+                                    {
+                                        "tag": "service",
+                                        "value": "{#SERVICE}"
+                                    },
+                                    {
+                                        "tag": "stack",
+                                        "value": "{#STACK}"
+                                    }
+                                ]
+                            }
+                        ],
+                        "parent_discovery_rule": {
+                            "key": "dockhand.environments.discovery"
+                        },
+                        "timeout": "10s",
+                        "parameters": [
+                            {
+                                "name": "environment_id",
+                                "value": "{#ENV.ID}"
+                            },
+                            {
+                                "name": "environment_name",
+                                "value": "{#ENV.NAME}"
+                            },
+                            {
+                                "name": "token",
+                                "value": "{$DOCKHAND.API.TOKEN}"
+                            },
+                            {
+                                "name": "url",
+                                "value": "{$DOCKHAND.URL}"
+                            }
+                        ],
+                        "lld_macro_paths": [
+                            {
+                                "lld_macro": "{#CONTAINER.HEALTH}",
+                                "path": "$.health"
+                            },
+                            {
+                                "lld_macro": "{#CONTAINER.ID}",
+                                "path": "$.container_id"
+                            },
+                            {
+                                "lld_macro": "{#CONTAINER.IMAGE}",
+                                "path": "$.image"
+                            },
+                            {
+                                "lld_macro": "{#CONTAINER.NAME}",
+                                "path": "$.container_name"
+                            },
+                            {
+                                "lld_macro": "{#CONTAINER.RESTART.COUNT}",
+                                "path": "$.restart_count"
+                            },
+                            {
+                                "lld_macro": "{#CONTAINER.STATE}",
+                                "path": "$.state"
+                            },
+                            {
+                                "lld_macro": "{#CONTAINER.STATUS}",
+                                "path": "$.status"
+                            },
+                            {
+                                "lld_macro": "{#SERVICE}",
+                                "path": "$.service"
+                            },
+                            {
+                                "lld_macro": "{#STACK}",
+                                "path": "$.stack"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "affbfc6fcdc448cea9e508394719ac15",
+                        "name": "Discover Dockhand environments",
+                        "type": "SCRIPT",
+                        "key": "dockhand.environments.discovery",
+                        "delay": "{$DOCKHAND.LLD.INTERVAL}",
+                        "params": "var params = JSON.parse(value);\n\nvar url = params.url.replace(/\\/+$/, '');\nvar token = (params.token || '').trim();\n\nvar request = new HttpRequest();\n\nif (token !== '') {\n    request.addHeader('Authorization: Bearer ' + token);\n}\n\nvar response = request.get(url + '/api/environments');\nvar status = request.getStatus();\n\nif (status < 200 || status >= 300) {\n    throw 'Dockhand API returned HTTP ' + status +\n        ' for /api/environments: ' + response;\n}\n\nvar data;\n\ntry {\n    data = JSON.parse(response);\n}\ncatch (e) {\n    throw 'Invalid JSON returned by Dockhand /api/environments: ' + e;\n}\n\nif (!Array.isArray(data)) {\n    throw 'Dockhand /api/environments did not return an array';\n}\n\nreturn JSON.stringify(data);",
+                        "lifetime": "30d",
+                        "description": "Discovers Docker environments configured in Dockhand through the /api/environments endpoint. Supports both unauthenticated Dockhand installations and installations protected by a bearer API token.",
+                        "item_prototypes": [
+                            {
+                                "uuid": "94a252ee981e4202bfa56e80887c79b8",
+                                "name": "Dockhand environment {#ENV.NAME}: Event type",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.environment.event.type[{#ENV.ID}]",
+                                "history": "30d",
+                                "value_type": "CHAR",
+                                "preprocessing": [
+                                    {
+                                        "type": "JSONPATH",
+                                        "parameters": [
+                                            "$.event_type"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.environment.event[{#ENV.ID}]"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "metric",
+                                        "value": "event_type"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "environment"
+                                    }
+                                ],
+                                "trigger_prototypes": [
+                                    {
+                                        "uuid": "856aa70932bb410a92fa5554de8e4592",
+                                        "expression": "last(/Dockhand by HTTP/dockhand.environment.event.type[{#ENV.ID}])=\"environment_offline\"",
+                                        "recovery_mode": "RECOVERY_EXPRESSION",
+                                        "recovery_expression": "last(/Dockhand by HTTP/dockhand.environment.event.type[{#ENV.ID}])=\"environment_online\"",
+                                        "name": "Dockhand environment {#ENV.NAME}: Offline",
+                                        "opdata": "event_type={ITEM.LASTVALUE1}",
+                                        "priority": "HIGH",
+                                        "description": "Dockhand environment \"{#ENV.NAME}\" is unreachable. The problem is automatically resolved when Dockhand reports the environment online again.",
+                                        "tags": [
+                                            {
+                                                "tag": "component",
+                                                "value": "dockhand"
+                                            },
+                                            {
+                                                "tag": "environment",
+                                                "value": "{#ENV.NAME}"
+                                            },
+                                            {
+                                                "tag": "event_group",
+                                                "value": "system"
+                                            },
+                                            {
+                                                "tag": "event_type",
+                                                "value": "environment_offline"
+                                            },
+                                            {
+                                                "tag": "resource",
+                                                "value": "environment"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "uuid": "9fa860bdfb9340a4b93e56efbf09a85d",
+                                "name": "Dockhand environment {#ENV.NAME}: Event",
+                                "type": "DEPENDENT",
+                                "key": "dockhand.environment.event[{#ENV.ID}]",
+                                "history": "7d",
+                                "value_type": "TEXT",
+                                "preprocessing": [
+                                    {
+                                        "type": "JAVASCRIPT",
+                                        "parameters": [
+                                            "var event;\n\ntry {\n    event = JSON.parse(value);\n}\ncatch (e) {\n    return null;\n}\n\nvar envId = String(event.environment_id || '');\nvar envName = String(event.environment || '');\n\nif (envId !== '') {\n    if (envId !== String('{#ENV.ID}')) {\n        return null;\n    }\n}\nelse {\n    if (envName !== String('{#ENV.NAME}')) {\n        return null;\n    }\n}\n\nreturn value;"
+                                        ]
+                                    }
+                                ],
+                                "master_item": {
+                                    "key": "dockhand.event"
+                                },
+                                "tags": [
+                                    {
+                                        "tag": "component",
+                                        "value": "dockhand"
+                                    },
+                                    {
+                                        "tag": "data_type",
+                                        "value": "event"
+                                    },
+                                    {
+                                        "tag": "environment",
+                                        "value": "{#ENV.NAME}"
+                                    },
+                                    {
+                                        "tag": "resource",
+                                        "value": "environment"
+                                    }
+                                ]
+                            }
+                        ],
+                        "timeout": "10s",
+                        "parameters": [
+                            {
+                                "name": "token",
+                                "value": "{$DOCKHAND.API.TOKEN}"
+                            },
+                            {
+                                "name": "url",
+                                "value": "{$DOCKHAND.URL}"
+                            }
+                        ],
+                        "lld_macro_paths": [
+                            {
+                                "lld_macro": "{#ENV.CONNECTION.TYPE}",
+                                "path": "$.connectionType"
+                            },
+                            {
+                                "lld_macro": "{#ENV.ID}",
+                                "path": "$.id"
+                            },
+                            {
+                                "lld_macro": "{#ENV.NAME}",
+                                "path": "$.name"
+                            },
+                            {
+                                "lld_macro": "{#ENV.TIMEZONE}",
+                                "path": "$.timezone"
+                            }
+                        ]
+                    }
+                ],
+                "macros": [
+                    {
+                        "macro": "{$DOCKHAND.API.TOKEN}",
+                        "description": "Dockhand API bearer token. Leave empty when Dockhand authentication is disabled. Override this macro as Secret text on the monitored host when authentication is enabled."
+                    },
+                    {
+                        "macro": "{$DOCKHAND.LLD.INTERVAL}",
+                        "value": "5m",
+                        "description": "Interval for Dockhand environment and container low-level discovery."
+                    },
+                    {
+                        "macro": "{$DOCKHAND.LOCAL.CONTAINER.NAME}",
+                        "value": "dockhand",
+                        "description": "Name of the local Dockhand application container monitored through the Zabbix Agent 2 Docker plugin."
+                    },
+                    {
+                        "macro": "{$DOCKHAND.POLL.INTERVAL}",
+                        "value": "1m",
+                        "description": "Interval for collecting current Dockhand container state and metadata."
+                    },
+                    {
+                        "macro": "{$DOCKHAND.RESTART.COUNT}",
+                        "value": "3",
+                        "description": "Number of container restarts within the configured time window required to trigger a restart loop alert."
+                    },
+                    {
+                        "macro": "{$DOCKHAND.RESTART.WINDOW}",
+                        "value": "10m",
+                        "description": "Time window used to count container restarts when detecting a restart loop."
+                    },
+                    {
+                        "macro": "{$DOCKHAND.URL}",
+                        "value": "http://<dockhand-host>:3000",
+                        "description": "Base URL of the Dockhand instance. Do not include a trailing slash."
+                    }
+                ],
+                "valuemaps": [
+                    {
+                        "uuid": "603ea2cb29d84ad9aa1593d953895315",
+                        "name": "Dockhand container health state",
+                        "mappings": [
+                            {
+                                "value": "1",
+                                "newvalue": "starting"
+                            },
+                            {
+                                "value": "2",
+                                "newvalue": "unhealthy"
+                            },
+                            {
+                                "value": "3",
+                                "newvalue": "healthy"
+                            },
+                            {
+                                "value": "4",
+                                "newvalue": "none"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "2eeccedafc23491781b0de31f4e0b763",
+                        "name": "Dockhand Docker flag",
+                        "mappings": [
+                            {
+                                "value": "0",
+                                "newvalue": "False"
+                            },
+                            {
+                                "value": "1",
+                                "newvalue": "True"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "efa82bb28c974596a2382f67de5700b3",
+                        "name": "Dockhand Docker service state",
+                        "mappings": [
+                            {
+                                "value": "0",
+                                "newvalue": "Down"
+                            },
+                            {
+                                "value": "1",
+                                "newvalue": "Up"
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+        "triggers": [
+            {
+                "uuid": "cb4e32dd967a437eb64f98f76a735fc6",
+                "expression": "last(/Dockhand by HTTP/dockhand.local.container.running)=1\nand\ncount(/Dockhand by HTTP/dockhand.local.container.health,#2,\"eq\",2)=2",
+                "name": "Dockhand application container is unhealthy",
+                "priority": "HIGH",
+                "description": "The local Dockhand application container health check reports unhealthy.",
+                "tags": [
+                    {
+                        "tag": "component",
+                        "value": "dockhand"
+                    },
+                    {
+                        "tag": "event_group",
+                        "value": "container"
+                    },
+                    {
+                        "tag": "event_type",
+                        "value": "dockhand_container_unhealthy"
+                    },
+                    {
+                        "tag": "resource",
+                        "value": "application"
+                    }
+                ]
+            }
+        ]
+    }
+}
