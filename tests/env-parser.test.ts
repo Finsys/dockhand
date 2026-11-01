@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseEnvVars } from '../src/lib/server/env-parser';
+import { parseEnvVars, extractEnvPlaceholderReferences } from '../src/lib/server/env-parser';
 
 describe('parseEnvVars', () => {
 	test('parses simple key=value pairs', () => {
@@ -79,5 +79,34 @@ EMPTY=`;
 	test('preserves values with special chars in quotes', () => {
 		const content = "PASS='password$123#!'";
 		expect(parseEnvVars(content)).toEqual({ PASS: "'password$123#!'" });
+	});
+});
+
+describe('extractEnvPlaceholderReferences', () => {
+	test('extracts ${VAR} references', () => {
+		expect(extractEnvPlaceholderReferences('${BASE_URL}/api')).toEqual(['BASE_URL']);
+	});
+
+	test('extracts $VAR bare references', () => {
+		expect(extractEnvPlaceholderReferences('$HOST:8080')).toEqual(['HOST']);
+	});
+
+	test('extracts ${VAR:-default} and modifier variants', () => {
+		expect(extractEnvPlaceholderReferences('${DOMAIN:-example.com}/${PATH}')).toEqual(['DOMAIN', 'PATH']);
+		expect(extractEnvPlaceholderReferences('${ALT+backup}')).toEqual(['ALT']);
+	});
+
+	test('ignores escaped $$', () => {
+		expect(extractEnvPlaceholderReferences('$$LITERAL')).toEqual([]);
+		expect(extractEnvPlaceholderReferences('$${LITERAL}')).toEqual([]);
+	});
+
+	test('ignores $ followed by digit or non-identifier', () => {
+		expect(extractEnvPlaceholderReferences('"1$abcdef1234"')).toEqual([]);
+		expect(extractEnvPlaceholderReferences('$100')).toEqual([]);
+	});
+
+	test('extracts multiple unique references', () => {
+		expect(extractEnvPlaceholderReferences('https://${SUBDOMAIN}.${DOMAIN}:${PORT}/v1')).toEqual(['SUBDOMAIN', 'DOMAIN', 'PORT']);
 	});
 });
