@@ -53,10 +53,10 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Create a git-deployed stack (from an existing repo or new repo url/branch)
- * body: {stackName:string!, environmentId:integer, repositoryId:integer, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
+ * body: {stackName:string!, environmentId:integer, repositoryId:integer, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string,takeOverExternalStack:boolean}
  * resp-400: Invalid stack name, or secretProviderId is not a number/null
  * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
- * resp-409: A git stack with this name already exists in the environment
+ * resp-409: A stack with this name already exists in the environment
  * resp-500: Failed to create the git stack
  */
 export const POST: RequestHandler = async (event) => {
@@ -108,7 +108,7 @@ export const POST: RequestHandler = async (event) => {
 
 		// Check for name conflicts with existing stacks (regular/external/git)
 		const existing = await getStackSource(trimmedStackName, data.environmentId || null);
-		if (existing) {
+		if (existing && !(data.takeOverExternalStack === true && existing.sourceType === 'external')) {
 			return json({ error: 'A stack with this name already exists on this environment' }, { status: 409 });
 		}
 
