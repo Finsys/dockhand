@@ -8,6 +8,7 @@ import {
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditNotification } from '$lib/server/audit';
+import { maskAppriseUrl } from '$lib/server/notifications/events-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -25,13 +26,13 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 	try {
 		const settings = await getNotificationSettings();
-		// Don't expose passwords
+		// Withhold secrets: the SMTP password, and the Apprise URLs (which embed bot
+		// tokens / webhook secrets in their path).
 		const safeSettings = settings.map(s => ({
 			...s,
-			config: s.type === 'smtp' ? {
-				...s.config,
-				password: s.config.password ? '********' : undefined
-			} : s.config
+			config: s.type === 'smtp'
+				? { ...s.config, password: s.config.password ? '********' : undefined }
+				: { ...s.config, urls: Array.isArray(s.config.urls) ? s.config.urls.map(maskAppriseUrl) : s.config.urls }
 		}));
 		return json(safeSettings);
 	} catch (error) {
@@ -95,14 +96,10 @@ export const POST: RequestHandler = async (event) => {
 		// Audit log
 		await auditNotification(event, 'create', setting.id, setting.name);
 
-		// Don't expose passwords in response
-		const safeSetting = setting.type === 'smtp' ? {
-			...setting,
-			config: {
-				...setting.config,
-				password: setting.config.password ? '********' : undefined
-			}
-		} : setting;
+		// Withhold secrets from the response, the same way the GET does.
+		const safeSetting = setting.type === 'smtp'
+			? { ...setting, config: { ...setting.config, password: setting.config.password ? '********' : undefined } }
+			: { ...setting, config: { ...setting.config, urls: Array.isArray(setting.config.urls) ? setting.config.urls.map(maskAppriseUrl) : setting.config.urls } };
 		return json(safeSetting);
 	} catch (error: any) {
 		console.error('Error creating notification setting:', error);

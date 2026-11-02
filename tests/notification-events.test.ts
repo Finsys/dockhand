@@ -1,6 +1,6 @@
 // @ts-expect-error -- bun:test is a runtime built-in with no types installed
 import { describe, expect, test } from 'bun:test';
-import { mapActionToEventType, withoutSubscribersOf, deliveryLogLine, coveredLogLine } from '../src/lib/server/notifications/events-core';
+import { mapActionToEventType, withoutSubscribersOf, deliveryLogLine, coveredLogLine, maskAppriseUrl } from '../src/lib/server/notifications/events-core';
 
 describe('mapActionToEventType', () => {
 	// The full docker-action -> notification-event decision table. This is what turns a
@@ -98,5 +98,30 @@ describe('notification sends are wired to the log lines', () => {
 		expect(src).toContain('logCovered(eventType, coveredBy, envNotifications.filter(n => !kept.includes(n)).map(n => n.channelName));');
 		expect(src).toContain('logCovered(eventType, coveredBy, subscribed.filter(s => !kept.includes(s)).map(s => s.name));');
 		expect(src).toMatch(/\.filter\(s => s\.eventTypes\?\.includes\(eventType\)\);\s*const kept = withoutSubscribersOf\(subscribed, coveredBy\);/);
+	});
+});
+
+describe('maskAppriseUrl', () => {
+	test('hides the credential while keeping the scheme, across Apprise URL layouts', () => {
+		// The token lives in the path, differently per scheme - masking everything after
+		// the scheme leaks nothing regardless of layout.
+		expect(maskAppriseUrl('discord://webhook_id/webhook_token')).toBe('discord://********');
+		expect(maskAppriseUrl('tgram://123456:ABCbottoken/chatid')).toBe('tgram://********');
+		expect(maskAppriseUrl('slack://tokenA/tokenB/tokenC')).toBe('slack://********');
+		expect(maskAppriseUrl('pover://user@apptoken')).toBe('pover://********');
+	});
+
+	test('leaves no token fragment behind', () => {
+		const masked = maskAppriseUrl('tgram://123456:SECRETbottoken/chatid');
+		expect(masked).not.toContain('SECRETbottoken');
+		expect(masked).not.toContain('chatid');
+	});
+
+	test('a string with no scheme is fully masked, not passed through', () => {
+		expect(maskAppriseUrl('just-a-token')).toBe('********');
+	});
+
+	test('empty stays empty', () => {
+		expect(maskAppriseUrl('')).toBe('');
 	});
 });

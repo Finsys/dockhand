@@ -4,7 +4,7 @@ import { findStackDir, getStackDir } from '$lib/server/stacks';
 import { getStackSource } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { isForbiddenStackPath } from '$lib/server/fs-guard';
+import { isForbiddenStackPath, isProtectedPath } from '$lib/server/fs-guard';
 import { join, dirname } from 'node:path';
 import type { RequestHandler } from './$types';
 
@@ -72,7 +72,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 		let content = '';
 		// The stored path is client-chosen; never read or write a protected location through it.
-		if (envFilePath && isForbiddenStackPath(envFilePath)) {
+		// isProtectedPath adds /etc,/root on top of isForbiddenStackPath's /proc + Dockhand
+		// secrets, matching the compose-path guard so a stored envPath cannot read a home dir.
+		if (envFilePath && (isForbiddenStackPath(envFilePath) || isProtectedPath(envFilePath))) {
 			return json({ error: 'Env file path is not allowed' }, { status: 403 });
 		}
 		if (envFilePath && existsSync(envFilePath)) {
@@ -160,7 +162,9 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 		}
 
 		// The stored path is client-chosen; never read or write a protected location through it.
-		if (envFilePath && isForbiddenStackPath(envFilePath)) {
+		// isProtectedPath adds /etc,/root so a stored envPath cannot write a cron unit or a
+		// home-dir payload (the arbitrary-write vector), matching the compose-path guard.
+		if (envFilePath && (isForbiddenStackPath(envFilePath) || isProtectedPath(envFilePath))) {
 			return json({ error: 'Env file path is not allowed' }, { status: 403 });
 		}
 		// Only write if we have a valid path

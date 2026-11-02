@@ -143,6 +143,10 @@ const FORBIDDEN_RESTORE_ROOTS = [
 	// (PATH hijack) and /usr/lib/systemd (unit drop). /usr holds no user data, so
 	// blocking it wholesale costs no legitimate restore.
 	'/usr',
+	// The scheduler spools: dropping a crontab here runs code as root on the next tick,
+	// the same host-takeover shape as /etc/cron.d (already covered by /etc). They hold no
+	// restorable user data. /var/cron is the BSD/some-distro spelling of the same thing.
+	'/var/spool', '/var/cron',
 ];
 
 // Blocked as a path SEGMENT anywhere (not a root prefix): an .ssh directory is an
@@ -179,6 +183,27 @@ export function unsafeRestoreTargetReason(targetPath: string): string | null {
 export function assertSafeRestoreTarget(targetPath: string): void {
 	const reason = unsafeRestoreTargetReason(targetPath);
 	if (reason) throw new Error(`Refusing new-location restore: ${reason}`);
+}
+
+/** Docker's own named-volume data root, the one legitimate location an in-place restore
+ * writes under that unsafeRestoreTargetReason otherwise forbids (it sits inside the
+ * /var/lib/docker takeover root). A named volume lives at
+ * /var/lib/docker/volumes/<name>/_data; the daemon owns that layout, the attacker does not. */
+const NAMED_VOLUME_ROOT = '/var/lib/docker/volumes';
+
+/**
+ * In-place restore binds a host SOURCE from the captured metadata rw as root, then restic
+ * writes the snapshot into it. A crafted bind source (e.g. a container bind-mounting /etc)
+ * would otherwise let the restore write there. Apply the new-location denylist, with one
+ * carve-out: a path under Docker's own named-volume root is where in-place restore legitimately
+ * writes (a single-file bind under /var/lib/docker/volumes/<name>/_data), so allow it even
+ * though /var/lib/docker is a forbidden root for a user-chosen NEW location.
+ */
+export function assertSafeInPlaceBindSource(source: string): void {
+	const norm = resolvePath((source ?? '').trim());
+	if (norm === NAMED_VOLUME_ROOT || norm.startsWith(NAMED_VOLUME_ROOT + pathSep)) return;
+	const reason = unsafeRestoreTargetReason(source);
+	if (reason) throw new Error(`Refusing in-place restore: ${reason}`);
 }
 
 /**

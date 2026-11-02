@@ -9,7 +9,7 @@
  */
 
 import { resolve, sep, join, dirname } from 'node:path';
-import { isForbiddenStackPath } from './fs-guard';
+import { isForbiddenStackPath, safeResolve } from './fs-guard';
 
 export function assertSafeRepoUrl(url: string): void {
 	const u = (url || '').trim();
@@ -74,8 +74,29 @@ export function repoFilePath(repoPath: string, userRel: string, label: string): 
 	if (abs !== repoPath && !abs.startsWith(repoPath + sep)) {
 		throw new Error(`${label} must be a path inside the repository (got "${userRel}")`);
 	}
+	// The containment above is LEXICAL on the link path, but readFileSync follows a
+	// committed symlink to its target. Resolve the real path and require it to stay in the
+	// clone, so `leak.env -> /root/.env` (or another clone's .env) cannot be read out.
+	assertResolvedWithinRepo(repoPath, abs, label, userRel);
 	assertNotForbidden(abs, label, userRel);
 	return abs;
+}
+
+/** Refuse a path that reaches the clone through a symlink whose target escapes it.
+ * readFileSync follows a committed link to its target, so resolve the FULL chain the way
+ * the OS opens it (safeResolve follows every symlink, including a link-to-link-to-outside,
+ * before applying any `..`) and require the real target to stay under the clone. A dangling
+ * target still resolves to a lexical path, so `leak.env -> /root/.env` is refused even when
+ * the target does not exist here (it can appear later, or exist on the deploy host). */
+function assertResolvedWithinRepo(repoPath: string, abs: string, label: string, shown: string): void {
+	// safeResolve returns null for a path through /proc or a .ssh/.git segment - treat that
+	// as an escape too (those are refused anyway). Resolve the root the same way so a clone
+	// under a symlinked ancestor is compared like-for-like.
+	const resolved = safeResolve(abs);
+	const root = safeResolve(repoPath) ?? resolve(repoPath);
+	if (resolved === null || (resolved !== root && !resolved.startsWith(root + sep))) {
+		throw new Error(`${label} "${shown}" leads outside the repository`);
+	}
 }
 
 /** Throws when a path, its symlinks followed, reaches a location stacks may never use. */

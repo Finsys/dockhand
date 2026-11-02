@@ -60,3 +60,16 @@ export function coveredLogLine(eventType: string, coveredBy: string | undefined,
 	if (skipped.length === 0) return null;
 	return `[Notifications] ${eventType}: skipped ${skipped.join(', ')} (subscribed to ${coveredBy}, which they get instead)`;
 }
+
+/**
+ * Mask an Apprise URL for display. Apprise embeds the credential in the PATH, and the
+ * layout differs per scheme (`discord://id/token`, `tgram://bottoken/chatid`,
+ * `slack://a/b/c`), so rather than parse each, keep only the scheme and hide the rest.
+ * The scheme alone tells a reader which channel it is without leaking the token.
+ */
+export function maskAppriseUrl(url: string): string {
+	if (typeof url !== 'string' || url === '') return url;
+	const sep = url.indexOf('://');
+	if (sep === -1) return '********';
+	return `${url.slice(0, sep + 3)}********`;
+}

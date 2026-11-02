@@ -4,7 +4,7 @@ import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecre
 import { findStackDir } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, readFileSync } from 'node:fs';
-import { isForbiddenStackPath } from '$lib/server/fs-guard';
+import { isForbiddenStackPath, isProtectedPath } from '$lib/server/fs-guard';
 import { join, dirname } from 'node:path';
 import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 import type { RequestHandler } from './$types';
@@ -87,7 +87,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		} else {
 			// Internal/adopted stacks: non-secrets from file, secrets from DB
 			// The stored path is client-chosen; never read or write a protected location through it.
-			if (envFilePath && isForbiddenStackPath(envFilePath)) {
+			// isProtectedPath adds /etc,/root so a stored envPath cannot read a home dir.
+			if (envFilePath && (isForbiddenStackPath(envFilePath) || isProtectedPath(envFilePath))) {
 				return json({ error: 'Env file path is not allowed' }, { status: 403 });
 			}
 			if (envFilePath && existsSync(envFilePath)) {

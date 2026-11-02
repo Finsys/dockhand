@@ -224,7 +224,8 @@ export async function createUserSession(
 	userId: number,
 	provider: string,
 	cookies: Cookies,
-	request?: Request
+	request?: Request,
+	opts?: { oidcSub?: string | null; oidcSid?: string | null }
 ): Promise<Session> {
 	// Clean up expired sessions periodically
 	await deleteExpiredSessions();
@@ -238,7 +239,7 @@ export async function createUserSession(
 	const expiresAt = new Date(Date.now() + sessionTimeout * 1000).toISOString();
 
 	// Create session in database
-	const session = await dbCreateSession(sessionId, userId, provider, expiresAt);
+	const session = await dbCreateSession(sessionId, userId, provider, expiresAt, opts?.oidcSub ?? null, opts?.oidcSid ?? null);
 
 	// Cookie max-age is capped at the browser's ~400-day limit; the DB session outlives it.
 	setSessionCookie(cookies, sessionId, cookieMaxAge(sessionTimeout), request);
@@ -1335,6 +1336,47 @@ export async function getEnabledOidcConfigs(): Promise<OidcConfig[]> {
 	return configs.filter(config => config.enabled);
 }
 
+/** What a back-channel logout caller needs to verify a token against one provider. */
+export interface OidcVerificationContext {
+	keys: ReturnType<typeof createRemoteJWKSet>;
+	issuer: string;
+	clientId: string;
+	/** The session provider string these keys belong to, e.g. "oidc:Keycloak". */
+	provider: string;
+}
+
+/**
+ * Resolve the verification contexts for every enabled provider whose discovered issuer
+ * matches a token's claimed iss. Returns all matches so the caller can try each in turn:
+ * two providers can share one realm (same issuer) with different client ids, and only a
+ * verify against the right client id passes. Empty when no enabled provider matches. The
+ * claimed iss is used ONLY to pick which providers' keys to verify against; the caller
+ * then verifies the signature, which is what binds the token to one of them. Keeps the
+ * private discovery/JWKS caches encapsulated so a caller never touches them directly.
+ */
+export async function getOidcVerificationContexts(claimedIssuer: string): Promise<OidcVerificationContext[]> {
+	const contexts: OidcVerificationContext[] = [];
+	for (const config of await getEnabledOidcConfigs()) {
+		let discovery: OidcDiscoveryDocument;
+		try {
+			discovery = await getOidcDiscovery(config.issuerUrl);
+		} catch {
+			continue;
+		}
+		if (discovery.issuer !== claimedIssuer) continue;
+		// A provider whose discovery omits jwks_uri has no keys to verify against; skip it
+		// rather than let getKeyStore throw on new URL(undefined) and 500 the request.
+		if (!discovery.jwks_uri) continue;
+		contexts.push({
+			keys: getKeyStore(discovery.jwks_uri),
+			issuer: discovery.issuer,
+			clientId: config.clientId,
+			provider: `oidc:${config.name}`
+		});
+	}
+	return contexts;
+}
+
 /**
  * Fetch and cache OIDC discovery document
  */
@@ -1464,7 +1506,7 @@ export async function buildOidcAuthorizationUrl(
 export async function handleOidcCallback(
 	code: string,
 	stateData: OidcLoginState
-): Promise<LoginResult & { redirectUrl?: string; providerName?: string; providerId?: number }> {
+): Promise<LoginResult & { redirectUrl?: string; providerName?: string; providerId?: number; oidcSub?: string | null; oidcSid?: string | null }> {
 	const config = await getOidcConfig(stateData.configId);
 	if (!config || !config.enabled) {
 		return { success: false, error: 'OIDC configuration not found or disabled' };
@@ -1635,7 +1677,9 @@ export async function handleOidcCallback(
 			user: await buildAuthenticatedUser(user, 'oidc'),
 			redirectUrl: stateData.redirectUrl,
 			providerName: config.name,
-			providerId: config.id
+			providerId: config.id,
+			oidcSub: (claims.sub as string) ?? null,
+			oidcSid: (typeof claims.sid === 'string' ? claims.sid : null)
 		};
 	} catch (error: any) {
 		const errorMsg = error instanceof Error ? error.message : String(error);

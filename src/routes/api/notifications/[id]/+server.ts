@@ -10,6 +10,7 @@ import {
 import { authorize } from '$lib/server/authorize';
 import { auditNotification } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
+import { maskAppriseUrl } from '$lib/server/notifications/events-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -39,13 +40,12 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Notification setting not found' }, { status: 404 });
 		}
 
-		// Don't expose passwords
+		// Withhold secrets: the SMTP password, and the Apprise URLs (bot tokens in path).
 		const safeSetting = {
 			...setting,
-			config: setting.type === 'smtp' ? {
-				...setting.config,
-				password: setting.config.password ? '********' : undefined
-			} : setting.config
+			config: setting.type === 'smtp'
+				? { ...setting.config, password: setting.config.password ? '********' : undefined }
+				: { ...setting.config, urls: Array.isArray(setting.config.urls) ? setting.config.urls.map(maskAppriseUrl) : setting.config.urls }
 		};
 
 		return json(safeSetting);
@@ -103,7 +103,26 @@ export const PUT: RequestHandler = async (event) => {
 				}
 			} else if (existing.type === 'apprise') {
 				const appriseConfig = config as AppriseConfig;
-				if (!appriseConfig.urls?.length) {
+				// The GET masks each URL to "scheme://********". On save, restore the stored
+				// value for a masked entry (the user did not change it) while keeping edited
+				// and newly added URLs - per entry, so a partial edit or a deletion is not
+				// lost. Match a masked entry to a stored URL by its masked form, consuming
+				// each stored URL once so duplicate schemes still map one-to-one. A masked
+				// entry that matches no unused stored URL (a copied placeholder line) is
+				// dropped - never persist the bare "scheme://********", which Apprise cannot
+				// deliver to.
+				const stored = (existing.config as AppriseConfig).urls ?? [];
+				const used = new Set<number>();
+				appriseConfig.urls = (appriseConfig.urls ?? [])
+					.map((u) => {
+						if (!(u.includes('://********') || u === '********')) return u;
+						const i = stored.findIndex((s, idx) => !used.has(idx) && maskAppriseUrl(s) === u);
+						if (i === -1) return null;
+						used.add(i);
+						return stored[i];
+					})
+					.filter((u): u is string => u !== null);
+				if (!appriseConfig.urls.length) {
 					return json({ error: 'Webhook config requires at least one URL' }, { status: 400 });
 				}
 			}
@@ -128,13 +147,12 @@ export const PUT: RequestHandler = async (event) => {
 		// Audit log
 		await auditNotification(event, 'update', updated.id, updated.name, diff);
 
-		// Don't expose passwords in response
+		// Withhold secrets from the response, the same way the GET does.
 		const safeSetting = {
 			...updated,
-			config: updated.type === 'smtp' ? {
-				...updated.config,
-				password: updated.config.password ? '********' : undefined
-			} : updated.config
+			config: updated.type === 'smtp'
+				? { ...updated.config, password: updated.config.password ? '********' : undefined }
+				: { ...updated.config, urls: Array.isArray(updated.config.urls) ? updated.config.urls.map(maskAppriseUrl) : updated.config.urls }
 		};
 
 		return json(safeSetting);

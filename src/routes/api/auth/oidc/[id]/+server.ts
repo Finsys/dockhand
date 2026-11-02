@@ -16,22 +16,17 @@ import { computeAuditDiff } from '$lib/utils/diff';
  * path: id:integer! Numeric id of the OIDC configuration (from GET /api/auth/oidc)
  * resp-200: {id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}
  * resp-400: Invalid configuration id (not a number)
- * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
- * resp-403: Permission denied (missing settings:view)
+ * resp-401: Not authorized (auth is enabled and the caller is not an admin)
  * resp-404: OIDC configuration not found
  * resp-500: Failed to read the OIDC configuration
  */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
-	// When auth is enabled, require authentication and settings:view permission
-	if (auth.authEnabled) {
-		if (!auth.isAuthenticated) {
-			return json({ error: 'Authentication required' }, { status: 401 });
-		}
-		if (!await auth.can('settings', 'view')) {
-			return json({ error: 'Permission denied' }, { status: 403 });
-		}
+	// Identity-provider config is admin-only (it carries adminClaim, which decides who
+	// becomes admin on login) - same gate as the LDAP provider endpoints.
+	if (auth.authEnabled && (!auth.isAuthenticated || !auth.isAdmin)) {
+		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
 	const id = parseInt(params.id || '');
@@ -64,8 +59,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * body-example: {"enabled":true,"scopes":"openid profile email groups","clientSecret":"***"}
  * resp-200: {id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}
  * resp-400: Invalid configuration id (not a number)
- * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
- * resp-403: Permission denied (missing settings:edit)
+ * resp-401: Not authorized (auth is enabled and the caller is not an admin)
  * resp-404: OIDC configuration not found
  * resp-500: Failed to update the OIDC configuration
  */
@@ -73,14 +67,10 @@ export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 
-	// When auth is enabled, require authentication and settings:edit permission
-	if (auth.authEnabled) {
-		if (!auth.isAuthenticated) {
-			return json({ error: 'Authentication required' }, { status: 401 });
-		}
-		if (!await auth.can('settings', 'edit')) {
-			return json({ error: 'Permission denied' }, { status: 403 });
-		}
+	// adminClaim decides who becomes admin on OIDC login, so provider edits are admin-only
+	// (a settings:edit user must not be able to grant themselves admin) - same gate as LDAP.
+	if (auth.authEnabled && (!auth.isAuthenticated || !auth.isAdmin)) {
+		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
 	const id = parseInt(params.id || '');
@@ -145,8 +135,7 @@ export const PUT: RequestHandler = async (event) => {
  * path: id:integer! Numeric id of the OIDC configuration (from GET /api/auth/oidc)
  * resp-200: {success:boolean!}
  * resp-400: Invalid configuration id (not a number)
- * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
- * resp-403: Permission denied (missing settings:edit)
+ * resp-401: Not authorized (auth is enabled and the caller is not an admin)
  * resp-404: OIDC configuration not found
  * resp-500: Failed to delete the OIDC configuration
  */
@@ -154,14 +143,9 @@ export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 
-	// When auth is enabled, require authentication and settings:edit permission
-	if (auth.authEnabled) {
-		if (!auth.isAuthenticated) {
-			return json({ error: 'Authentication required' }, { status: 401 });
-		}
-		if (!await auth.can('settings', 'edit')) {
-			return json({ error: 'Permission denied' }, { status: 403 });
-		}
+	// Identity-provider config is admin-only - same gate as the LDAP provider endpoints.
+	if (auth.authEnabled && (!auth.isAuthenticated || !auth.isAdmin)) {
+		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
 	const id = parseInt(params.id || '');

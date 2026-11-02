@@ -3595,6 +3595,14 @@ export async function getRegistryAuth(
 	// Parse registry URL to extract host and organization path
 	const parsed = parseRegistryUrl(registry.url);
 
+	// SSRF guard: a registry URL is user-supplied, so block a host that points at
+	// loopback or cloud metadata before any browsing request is built. A self-hosted
+	// registry on a LAN is still allowed (same policy as the update-check path).
+	const hostSafety = isSafeRegistryHost(parsed.host);
+	if (!hostSafety.ok) {
+		throw new Error(`Registry host is not allowed: ${hostSafety.reason}`);
+	}
+
 	// V2 API endpoints are always at the registry host root
 	const baseUrl = `${parsed.protocol}://${parsed.host}`;
 
@@ -3635,6 +3643,13 @@ export interface HarborCatalogResult {
 export async function isHarborRegistry(registryUrl: string): Promise<boolean> {
 	const parsed = parseRegistryUrl(registryUrl);
 	const host = parsed.host;
+
+	// This is the first registry-browsing fetch, so apply the SSRF guard here too: a host
+	// pointing at loopback or cloud metadata is never probed (treated as not-Harbor; the
+	// token flow refuses it as well). A LAN host stays allowed.
+	if (!isSafeRegistryHost(host).ok) {
+		return false;
+	}
 
 	const cached = harborDetectionCache.get(host);
 	if (cached && Date.now() - cached.ts < HARBOR_CACHE_TTL) {
@@ -3777,6 +3792,7 @@ export async function harborListRepositories(
 	pageSize: number = 100
 ): Promise<HarborCatalogResult> {
 	const parsed = parseRegistryUrl(registry.url);
+	if (!isSafeRegistryHost(parsed.host).ok) throw new Error('Registry host is not allowed');
 	const baseUrl = `${parsed.protocol}://${parsed.host}/api/v2.0`;
 	const headers = harborHeaders(registry);
 
@@ -3823,6 +3839,7 @@ export async function harborSearchRepositories(
 	limit: number = 25
 ): Promise<string[]> {
 	const parsed = parseRegistryUrl(registry.url);
+	if (!isSafeRegistryHost(parsed.host).ok) throw new Error('Registry host is not allowed');
 	const baseUrl = `${parsed.protocol}://${parsed.host}/api/v2.0`;
 	const headers = harborHeaders(registry);
 

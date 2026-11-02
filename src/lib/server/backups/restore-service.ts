@@ -29,7 +29,7 @@ import {
 import { posix } from 'node:path';
 import { describeFsError } from '../fs-error';
 import { buildInPlaceRestore, buildNewLocationRestore, buildCloneRestore, buildFileRestores, FILE_MOUNT_ROOT, type FileRestoreTarget } from './restore-script';
-import { assertSafeVolumeInclude, assertSafeRestoreTarget } from './security';
+import { assertSafeVolumeInclude, assertSafeRestoreTarget, assertSafeInPlaceBindSource } from './security';
 import { liveTargetKey } from './locks';
 import { cleanErrorMsg } from './helpers';
 import type { SnapshotLayout } from './snapshot-layout';
@@ -644,6 +644,12 @@ export class RestoreService {
 		for (const v of volumes) {
 			const { bind, include, source, type } = await this.ports.resolveVolumeBind(meta, env, v);
 			assertSafeVolumeInclude(include);
+			// A bind source is a host path from the captured metadata, bound rw as root for the
+			// swap - the same last line of defense the clone/new-location paths apply, so an
+			// in-place restore cannot write a crafted bind source into a protected system dir.
+			// Uses the in-place variant so a named-volume path (/var/lib/docker/volumes/...)
+			// still restores, while /etc, /usr, the cron spools, etc. are refused.
+			if (type === 'bind' && source) assertSafeInPlaceBindSource(source);
 			lockBinds.push(bind);
 			if (fileKeys.has(v) && type === 'bind' && source) {
 				const file = fileBind(v, source);

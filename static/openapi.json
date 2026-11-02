@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.55",
+    "version": "1.0.57",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -1693,10 +1693,7 @@
             }
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:view)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "500": {
             "description": "Failed to read the OIDC configurations"
@@ -1757,10 +1754,7 @@
             "description": "A required field is missing (name, issuerUrl, clientId, clientSecret, redirectUri)"
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:edit)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "500": {
             "description": "Failed to create the OIDC configuration"
@@ -1904,10 +1898,7 @@
             "description": "Invalid configuration id (not a number)"
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:view)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "404": {
             "description": "OIDC configuration not found"
@@ -1981,10 +1972,7 @@
             "description": "Invalid configuration id (not a number)"
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:edit)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "404": {
             "description": "OIDC configuration not found"
@@ -2098,10 +2086,7 @@
             "description": "Invalid configuration id (not a number)"
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:edit)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "404": {
             "description": "OIDC configuration not found"
@@ -2256,6 +2241,52 @@
           }
         },
         "security": []
+      }
+    },
+    "/api/auth/oidc/backchannel-logout": {
+      "post": {
+        "operationId": "post_api_auth_oidc_backchannel-logout",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Receive an OIDC Back-Channel Logout token from the identity provider and end the matching server-side session(s). Called by the IdP, not by browser clients. Public (its auth is the signed logout_token itself).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Logout accepted (idempotent; ends the session(s) the token names, no body)"
+          },
+          "400": {
+            "description": "The logout_token was missing, malformed, from an unknown issuer, or failed verification"
+          },
+          "429": {
+            "description": "Too many failed verification attempts from this client"
+          },
+          "500": {
+            "description": "The session deletion failed; the IdP should retry"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "logout_token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "logout_token"
+                ]
+              },
+              "example": {
+                "logout_token": "string"
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/oidc/callback": {
@@ -14581,13 +14612,17 @@
                       },
                       "credentialId": {
                         "type": "integer"
+                      },
+                      "hasWebhookSecret": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
                       "id",
                       "name",
                       "url",
-                      "branch"
+                      "branch",
+                      "hasWebhookSecret"
                     ]
                   }
                 },
@@ -14597,7 +14632,8 @@
                     "name": "homelab",
                     "url": "https://github.com/example/homelab.git",
                     "branch": "main",
-                    "credentialId": 2
+                    "credentialId": 2,
+                    "hasWebhookSecret": true
                   }
                 ]
               }
@@ -14648,13 +14684,17 @@
                     },
                     "credentialId": {
                       "type": "integer"
+                    },
+                    "hasWebhookSecret": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "id",
                     "name",
                     "url",
-                    "branch"
+                    "branch",
+                    "hasWebhookSecret"
                   ]
                 },
                 "example": {
@@ -14662,7 +14702,8 @@
                   "name": "string",
                   "url": "string",
                   "branch": "string",
-                  "credentialId": 0
+                  "credentialId": 0,
+                  "hasWebhookSecret": true
                 }
               }
             }
@@ -14763,6 +14804,9 @@
                     "credentialId": {
                       "type": "integer"
                     },
+                    "hasWebhookSecret": {
+                      "type": "boolean"
+                    },
                     "stacksUsing": {
                       "type": "array",
                       "items": {
@@ -14776,6 +14820,7 @@
                     "name",
                     "url",
                     "branch",
+                    "hasWebhookSecret",
                     "stacksUsing"
                   ]
                 },
@@ -14785,6 +14830,7 @@
                   "url": "string",
                   "branch": "string",
                   "credentialId": 0,
+                  "hasWebhookSecret": true,
                   "stacksUsing": [
                     {}
                   ]
@@ -14853,13 +14899,17 @@
                     },
                     "credentialId": {
                       "type": "integer"
+                    },
+                    "hasWebhookSecret": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "id",
                     "name",
                     "url",
-                    "branch"
+                    "branch",
+                    "hasWebhookSecret"
                   ]
                 },
                 "example": {
@@ -14867,7 +14917,8 @@
                   "name": "string",
                   "url": "string",
                   "branch": "string",
-                  "credentialId": 0
+                  "credentialId": 0,
+                  "hasWebhookSecret": true
                 }
               }
             }
@@ -16104,6 +16155,9 @@
                     },
                     "error": {
                       "type": "string"
+                    },
+                    "output": {
+                      "type": "string"
                     }
                   }
                 },
@@ -16164,6 +16218,9 @@
                       "type": "boolean"
                     },
                     "error": {
+                      "type": "string"
+                    },
+                    "output": {
                       "type": "string"
                     }
                   }
@@ -22572,7 +22629,7 @@
             }
           },
           "400": {
-            "description": "Invalid id, or a duplicate registry name"
+            "description": "Invalid id, a duplicate registry name, or a URL pointing at loopback/cloud-metadata (SSRF)"
           },
           "403": {
             "description": "Caller lacks the registries:edit permission"
@@ -27529,7 +27586,7 @@
             "description": "Invalid conversion request or repository configuration"
           },
           "403": {
-            "description": "Caller lacks stacks:edit or required secrets:view permission"
+            "description": "Caller lacks stacks:edit or required secrets:view permission, or access denied to this environment (enterprise)"
           },
           "404": {
             "description": "Stack not found"
@@ -29073,6 +29130,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "envValues": {
+                    "type": "object",
+                    "properties": {}
                   }
                 }
               },

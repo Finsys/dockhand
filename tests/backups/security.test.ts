@@ -16,6 +16,7 @@ import {
 	isSafeWebhookUrl,
 	unsafeRestoreTargetReason,
 	assertSafeRestoreTarget,
+	assertSafeInPlaceBindSource,
 } from '../../src/lib/server/backups/security';
 
 describe('isSafeVolumeInclude (command-injection guard on restore includes)', () => {
@@ -75,6 +76,23 @@ describe('unsafeRestoreTargetReason: /usr and .ssh takeover targets', () => {
 		}
 	});
 
+	it('blocks the scheduler spools (a restored crontab runs as root)', () => {
+		for (const p of [
+			'/var/spool/cron/crontabs/root',
+			'/var/spool/cron',
+			'/var/spool/at/jobs',
+			'/var/cron/tabs/root',
+		]) {
+			expect(unsafeRestoreTargetReason(p)).not.toBeNull();
+		}
+	});
+
+	it('still allows ordinary /var data paths (not the spools)', () => {
+		expect(unsafeRestoreTargetReason('/var/lib/myapp/data')).toBeNull();
+		expect(unsafeRestoreTargetReason('/var/www/html')).toBeNull();
+		expect(unsafeRestoreTargetReason('/var/spool-data/x')).toBeNull();
+	});
+
 	it('blocks any .ssh directory segment (SSH-key takeover under any home)', () => {
 		for (const p of [
 			'/home/user/.ssh/authorized_keys',
@@ -94,6 +112,35 @@ describe('unsafeRestoreTargetReason: /usr and .ssh takeover targets', () => {
 	it('boundary-safe: a sibling that merely shares a forbidden prefix is allowed', () => {
 		expect(unsafeRestoreTargetReason('/usr-data/x')).toBeNull();
 		expect(unsafeRestoreTargetReason('/home2/restore')).toBeNull();
+	});
+});
+
+describe('assertSafeInPlaceBindSource: in-place restore bind-source guard', () => {
+	it('refuses a crafted bind source into a system/takeover dir', () => {
+		for (const p of [
+			'/etc', '/etc/cron.d', '/root/.bashrc', '/usr/local/bin',
+			'/var/spool/cron/crontabs/root', '/boot', '/home/user/.ssh/authorized_keys',
+		]) {
+			expect(() => assertSafeInPlaceBindSource(p)).toThrow(/in-place restore/);
+		}
+	});
+
+	it('allows a named-volume path even though /var/lib/docker is a forbidden NEW-location root', () => {
+		// in-place restore legitimately writes a single-file bind under the daemon's own
+		// named-volume root; the attacker does not control that layout.
+		expect(() => assertSafeInPlaceBindSource('/var/lib/docker/volumes/dockhand_data/_data/stacks/x/.env')).not.toThrow();
+		expect(() => assertSafeInPlaceBindSource('/var/lib/docker/volumes/foo/_data')).not.toThrow();
+	});
+
+	it('allows ordinary host-data bind sources', () => {
+		expect(() => assertSafeInPlaceBindSource('/srv/appA/data')).not.toThrow();
+		expect(() => assertSafeInPlaceBindSource('/opt/stack/data')).not.toThrow();
+		expect(() => assertSafeInPlaceBindSource('/home/user/app/data')).not.toThrow();
+	});
+
+	it('does NOT allow the rest of /var/lib/docker (only the volumes root)', () => {
+		expect(() => assertSafeInPlaceBindSource('/var/lib/docker/overlay2/x')).toThrow(/in-place restore/);
+		expect(() => assertSafeInPlaceBindSource('/var/lib/docker')).toThrow(/in-place restore/);
 	});
 });
 

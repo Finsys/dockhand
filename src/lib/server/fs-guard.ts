@@ -74,8 +74,11 @@ function isProtectedSegment(name: string): boolean {
  * other than what readlink names), through a component named .ssh or .git (also
  * when that component is a symlink), a `..` after a missing component, a component
  * that cannot be inspected, or a symlink loop.
+ *
+ * Exported so other import-light path guards (e.g. git-url-safety's repo containment)
+ * resolve a committed symlink CHAIN the same way, instead of a partial one-hop walk.
  */
-function safeResolve(p: string): string | null {
+export function safeResolve(p: string): string | null {
 	const pending = (isAbsolute(p) ? p : process.cwd() + sep + p).split(sep);
 	let resolved: string = sep;
 	let links = 0;

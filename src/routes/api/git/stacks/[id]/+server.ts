@@ -36,7 +36,9 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Permission denied' }, { status: 403 });
 		}
 
-		return json(gitStack);
+		// Withhold the webhook secret from the response; expose only whether one is set.
+		const { webhookSecret, ...safeStack } = gitStack;
+		return json({ ...safeStack, hasWebhookSecret: !!webhookSecret });
 	} catch (error) {
 		console.error('Failed to get git stack:', error);
 		return json({ error: 'Failed to get git stack' }, { status: 500 });
@@ -149,6 +151,17 @@ export const PUT: RequestHandler = async (event) => {
 			forceRedeploy: data.forceRedeploy
 		});
 
+		// updateGitStack returns null if the row vanished between the read above and the
+		// write (a concurrent delete); treat it as not found rather than dereferencing null.
+		if (!updated) {
+			return json({ error: 'Git stack not found' }, { status: 404 });
+		}
+
+		// The webhook secret authenticates the public deploy-trigger endpoints, so it must
+		// not travel back in any response (JSON or SSE); expose only hasWebhookSecret.
+		const { webhookSecret: _updatedSecret, ...safeUpdatedRest } = updated;
+		const safeUpdated = { ...safeUpdatedRest, hasWebhookSecret: !!_updatedSecret };
+
 		// If stack name changed, update related records
 		if (data.stackName && data.stackName !== oldStackName) {
 			await updateStackSourceName(oldStackName, data.stackName, existing.environmentId);
@@ -224,20 +237,20 @@ export const PUT: RequestHandler = async (event) => {
 					});
 					await auditGitStack(event, 'deploy', updated.id, updated.stackName, updated.environmentId);
 					send('result', {
-						...updated,
+						...safeUpdated,
 						deployResult
 					});
 				} catch (error) {
 					console.error('Failed to deploy git stack:', error);
 					send('result', {
-						...updated,
+						...safeUpdated,
 						deployResult: { success: false, error: 'Failed to deploy git stack' }
 					});
 				}
 			}, request);
 		}
 
-		return json(updated);
+		return json(safeUpdated);
 	} catch (error: any) {
 		console.error('Failed to update git stack:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {
