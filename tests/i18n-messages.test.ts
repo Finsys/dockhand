@@ -132,6 +132,27 @@ describe('UI translations', () => {
 		}
 	});
 
+	test('Brazilian Portuguese plural messages cover every regional plural category', () => {
+		// pt-BR uses "many" for exact multiples of a million. Without that branch,
+		// Paraglide returns the message key instead of the translated quantity.
+		const categories = new Intl.PluralRules('pt-BR').resolvedOptions().pluralCategories;
+		for (const [key, message] of Object.entries(load('pt-BR'))) {
+			if (typeof message === 'string') continue;
+			for (const variant of message) {
+				const pluralSelectors = (variant.declarations ?? []).flatMap((declaration) => {
+					const name = /^local (\w+) = \w+: plural$/.exec(declaration)?.[1];
+					return name ? [name] : [];
+				});
+				for (const selector of pluralSelectors) {
+					for (const category of categories) {
+						expect({ key, category, covered: `${selector}=${category}` in variant.match })
+							.toEqual({ key, category, covered: true });
+					}
+				}
+			}
+		}
+	});
+
 	test('the locale list the app imports matches the inlang settings', () => {
 		// src/lib/i18n/locales.ts restates what paraglide compiles from, because the
 		// settings file sits outside src/ and the generated runtime does not exist in a

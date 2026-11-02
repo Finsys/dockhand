@@ -29,6 +29,7 @@ describe('asLocale', () => {
 		expect(asLocale('zh-CN')).toBe('zh-CN');
 		expect(asLocale('es-ES')).toBe('es-ES');
 		expect(asLocale('uk')).toBe('uk');
+		expect(asLocale('pt-BR')).toBe('pt-BR');
 	});
 
 	test('refuses anything else, so a stale or hand-edited value cannot take effect', () => {
@@ -78,6 +79,12 @@ describe('fromNavigator', () => {
 		expect(fromNavigator(['es-MX'])).toBe('es-ES');
 		expect(fromNavigator(['fr'])).toBe('fr-FR');
 		expect(fromNavigator(['fr-BE'])).toBe('fr-FR');
+	});
+
+	test('Portuguese resolves to Brazilian Portuguese with the existing regional fallback', () => {
+		expect(fromNavigator(['pt-BR', 'en'])).toBe('pt-BR');
+		expect(fromNavigator(['pt', 'en'])).toBe('pt-BR');
+		expect(fromNavigator(['pt-PT', 'en'])).toBe('pt-BR');
 	});
 
 	test('a sibling region of an earlier language beats a later exact match', () => {
