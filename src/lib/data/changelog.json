@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.0.57",
+    "date": "",
+    "comingSoon": true,
+    "changes": [
+      { "type": "feature", "text": "OIDC back-channel logout ends a Dockhand session when the identity provider signals logout (#1835)" },
+      { "type": "feature", "text": "Ukrainian interface translation (#1839, PR#1839, @TripShuti)" },
+      { "type": "feature", "text": "Infisical bulk pull now includes secrets from folder imports (#1829, PR#1844, @gorillka)" },
+      { "type": "feature", "text": "convert a stack between local and git management without recreating it (#636, PR#795, @barrelltitor)" },
+      { "type": "fix", "text": "git stack files keep their executable bit when deployed to a Hawser remote host" },
+      { "type": "fix", "text": "a git stack webhook skips a push whose branch is not the one the stack tracks (#1790, PR#1796, @Totopo27)" },
+      { "type": "fix", "text": "the containers and stacks status filter survives a page refresh (#1842)" },
+      { "type": "fix", "text": "git stack files over 10 MB reach a Hawser agent instead of being dropped (#1845)" },
+      { "type": "fix", "text": "env vars used only as placeholders in other env values are no longer flagged unused (#1766, PR#1804, @Totopo27)" },
+      { "type": "fix", "text": "update bundled dependencies (nodemailer, undici)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.57"
+  },
+  {
     "version": "1.0.56",
     "date": "2026-10-30",
     "changes": [
