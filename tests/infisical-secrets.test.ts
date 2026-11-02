@@ -1,10 +1,14 @@
 /**
  * Infisical bulk pull talks to GET /api/v4/secrets and flattens imported
- * secrets itself. These cover the URL (projectId, includeImports) and the
- * precedence rules Infisical documents for imports — no network.
+ * secrets itself, falling back to the v3 raw URL when v4 is absent. These cover
+ * both URL builders and the import precedence rules - no network.
  */
 import { describe, test, expect } from 'bun:test';
-import { collectInfisicalSecrets, infisicalSecretsUrl } from '../src/lib/server/secretproviders/infisical';
+import {
+	collectInfisicalSecrets,
+	infisicalSecretsUrl,
+	infisicalSecretsV3Url
+} from '../src/lib/server/secretproviders/infisical';
 
 describe('infisicalSecretsUrl', () => {
 	test('lists secrets on /api/v4/secrets with projectId and includeImports', () => {
@@ -35,6 +39,32 @@ describe('infisicalSecretsUrl', () => {
 
 	test('rejects a cloud-metadata host before building the request', () => {
 		expect(() => infisicalSecretsUrl('http://169.254.169.254', 'proj', 'dev', '/')).toThrow(/host not allowed/);
+	});
+});
+
+describe('infisicalSecretsV3Url (the v4 fallback)', () => {
+	test('lists on /api/v3/secrets/raw with workspaceId (not projectId or imports)', () => {
+		const url = new URL(infisicalSecretsV3Url('https://app.infisical.com', 'proj-1', 'prod', '/db'));
+		expect(url.origin + url.pathname).toBe('https://app.infisical.com/api/v3/secrets/raw');
+		expect(url.searchParams.get('workspaceId')).toBe('proj-1');
+		expect(url.searchParams.get('environment')).toBe('prod');
+		expect(url.searchParams.get('secretPath')).toBe('/db');
+		expect(url.searchParams.get('expandSecretReferences')).toBe('true');
+		// v3 has no includeImports / viewSecretValue / projectId.
+		expect(url.searchParams.has('includeImports')).toBe(false);
+		expect(url.searchParams.has('viewSecretValue')).toBe(false);
+		expect(url.searchParams.has('projectId')).toBe(false);
+	});
+
+	test('omits empty workspaceId and environment so a service token can infer them', () => {
+		const url = new URL(infisicalSecretsV3Url('https://eu.infisical.com/', undefined, '', '/'));
+		expect(url.searchParams.has('workspaceId')).toBe(false);
+		expect(url.searchParams.has('environment')).toBe(false);
+		expect(url.searchParams.get('secretPath')).toBe('/');
+	});
+
+	test('rejects a cloud-metadata host before building the request', () => {
+		expect(() => infisicalSecretsV3Url('http://169.254.169.254', 'proj', 'dev', '/')).toThrow(/host not allowed/);
 	});
 });
 
