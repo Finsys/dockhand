@@ -335,7 +335,7 @@
 	const UPDATE_AVAILABLE_FILTER_VALUE = 'update-available';
 	const NEWER_VERSION_FILTER_VALUE = 'newer-version';
 	const COOLING_DOWN_FILTER_VALUE = 'cooling-down';
-	let statusFilter = $state<string[]>([]);
+	let statusFilter = $state<string[]>(loadStatusFilter());
 
 	// Status types with icons for filter and table
 	const statusTypes = [
@@ -391,16 +391,13 @@
 		}
 	}
 
-	function loadStatusFilter() {
-		if (typeof window !== 'undefined') {
+	function loadStatusFilter(): string[] {
+		if (typeof window === 'undefined') return [];
+		try {
 			const saved = localStorage.getItem(STATUS_FILTER_STORAGE_KEY);
-			if (saved) {
-				try {
-					statusFilter = JSON.parse(saved);
-				} catch {
-					statusFilter = [];
-				}
-			}
+			return saved ? JSON.parse(saved) : [];
+		} catch {
+			return [];
 		}
 	}
 
@@ -1622,7 +1619,6 @@
 
 	onMount(async () => {
 		loadLayoutMode();
-		loadStatusFilter();
 		terminalCustomUsers = getCustomUsers();
 
 		// Load persisted pending updates from database
