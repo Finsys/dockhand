@@ -212,10 +212,17 @@ export const sessions = sqliteTable('sessions', {
 	userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 	provider: text('provider').notNull(),
 	expiresAt: text('expires_at').notNull(),
-	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`)
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	// OIDC subject / session id, captured at login so an IdP back-channel logout token
+	// can correlate to the session(s) it ends. Null for local/LDAP/passkey and for IdPs
+	// that send no sid.
+	oidcSub: text('oidc_sub'),
+	oidcSid: text('oidc_sid')
 }, (table) => ({
 	userIdIdx: index('sessions_user_id_idx').on(table.userId),
-	expiresAtIdx: index('sessions_expires_at_idx').on(table.expiresAt)
+	expiresAtIdx: index('sessions_expires_at_idx').on(table.expiresAt),
+	oidcSubIdx: index('sessions_oidc_sub_idx').on(table.oidcSub),
+	oidcSidIdx: index('sessions_oidc_sid_idx').on(table.oidcSid)
 }));
 
 export const ldapConfig = sqliteTable('ldap_config', {

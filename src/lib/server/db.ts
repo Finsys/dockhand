@@ -1699,14 +1699,18 @@ export interface SessionData {
 	provider: string;
 	expiresAt: string;
 	createdAt: string;
+	oidcSub: string | null;
+	oidcSid: string | null;
 }
 
-export async function createSession(id: string, userId: number, provider: string, expiresAt: string): Promise<SessionData> {
+export async function createSession(id: string, userId: number, provider: string, expiresAt: string, oidcSub: string | null = null, oidcSid: string | null = null): Promise<SessionData> {
 	await db.insert(sessions).values({
 		id,
 		userId,
 		provider,
-		expiresAt
+		expiresAt,
+		oidcSub,
+		oidcSid
 	});
 	return getSession(id) as Promise<SessionData>;
 }
@@ -1730,6 +1734,32 @@ export async function deleteExpiredSessions(): Promise<number> {
 export async function deleteUserSessions(userId: number): Promise<number> {
 	await db.delete(sessions).where(eq(sessions.userId, userId));
 	return 0;
+}
+
+/**
+ * Delete the session(s) a back-channel logout token names by its OIDC sid, scoped to
+ * one provider so two IdPs cannot collide on a sid value. Returns the distinct userIds
+ * whose sessions were removed, so the caller can invalidate their token caches.
+ */
+export async function deleteSessionsByOidcSid(sid: string, provider: string): Promise<number[]> {
+	const rows = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.oidcSid, sid), eq(sessions.provider, provider))) as { userId: number }[];
+	const userIds: number[] = [...new Set(rows.map((r) => r.userId))];
+	if (userIds.length === 0) return [];
+	await db.delete(sessions).where(and(eq(sessions.oidcSid, sid), eq(sessions.provider, provider)));
+	return userIds;
+}
+
+/**
+ * Delete every session a back-channel logout token names by its OIDC sub, scoped to one
+ * provider. Used when the token carries no sid: all of that user's sessions for the
+ * provider end. Returns the distinct userIds removed.
+ */
+export async function deleteSessionsByOidcSub(sub: string, provider: string): Promise<number[]> {
+	const rows = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.oidcSub, sub), eq(sessions.provider, provider))) as { userId: number }[];
+	const userIds: number[] = [...new Set(rows.map((r) => r.userId))];
+	if (userIds.length === 0) return [];
+	await db.delete(sessions).where(and(eq(sessions.oidcSub, sub), eq(sessions.provider, provider)));
+	return userIds;
 }
 
 // =============================================================================
