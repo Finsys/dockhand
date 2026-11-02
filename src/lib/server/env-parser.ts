@@ -33,18 +33,23 @@ export function extractEnvPlaceholderReferences(value: string): string[] {
 	const trimmed = value.trim();
 	if (!trimmed) return [];
 
+	// Neutralize $$ (the Compose literal-dollar escape) before matching, so neither of the
+	// two dollars can start a reference. This also makes adjacent refs ($A$B) and a ref glued
+	// to preceding text (a$VAR) match, which a lookbehind on $ would wrongly reject.
+	const scrubbed = trimmed.replace(/\$\$/g, '\0\0');
+
 	const references = new Set<string>();
 
-	// Match ${VAR_NAME} with optional default/replacement modifiers
-	const bracedRegex = /(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?:[:\-+?][^}]*)?\}/g;
+	// ${VAR_NAME} with optional default/replacement modifiers (:-, -, +, ?).
+	const bracedRegex = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?:[:\-+?][^}]*)?\}/g;
 	let match;
-	while ((match = bracedRegex.exec(trimmed)) !== null) {
+	while ((match = bracedRegex.exec(scrubbed)) !== null) {
 		references.add(match[1]);
 	}
 
-	// Match bare $VAR_NAME (not preceded by alphanumeric char or $, not followed by { or identifier char)
-	const simpleRegex = /(?<![A-Za-z0-9\$])\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
-	while ((match = simpleRegex.exec(trimmed)) !== null) {
+	// Bare $VAR_NAME.
+	const simpleRegex = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
+	while ((match = simpleRegex.exec(scrubbed)) !== null) {
 		references.add(match[1]);
 	}
 

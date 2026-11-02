@@ -38,7 +38,7 @@ const DOCKER_COMPOSE_BUILTIN_VARS = new Set([
  * Ignores escaped $$ (Docker Compose escape syntax for literal $).
  * Returns { required: [...], optional: [...] }
  */
-export function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
+function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
 	const required: string[] = [];
 	const optional: string[] = [];
 
@@ -181,7 +181,7 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 
 		// Calculate missing and unused. Built-in Docker/Compose vars are provided implicitly
 		// by the runtime, so they're never "missing" even if not in the user's env panel.
-		// Variables referenced as placeholders within other env values are also treated as used (#1766).
+		// Variables referenced as placeholders within other env values are also treated as used.
 		const placeholderRefs = new Set<string>();
 		if (providedEnvValues) {
 			for (const val of Object.values(providedEnvValues)) {

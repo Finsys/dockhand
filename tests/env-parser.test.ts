@@ -101,9 +101,21 @@ describe('extractEnvPlaceholderReferences', () => {
 		expect(extractEnvPlaceholderReferences('$${LITERAL}')).toEqual([]);
 	});
 
-	test('ignores $ followed by digit or non-identifier', () => {
-		expect(extractEnvPlaceholderReferences('"1$abcdef1234"')).toEqual([]);
+	test('ignores $ followed by a digit (not a valid identifier)', () => {
 		expect(extractEnvPlaceholderReferences('$100')).toEqual([]);
+		expect(extractEnvPlaceholderReferences('price is $5')).toEqual([]);
+	});
+
+	test('detects a reference glued to preceding text and adjacent references', () => {
+		// Compose interpolates both of these, so neither var is "unused".
+		expect(extractEnvPlaceholderReferences('1$abcdef')).toEqual(['abcdef']);
+		expect(extractEnvPlaceholderReferences('$A$B')).toEqual(['A', 'B']);
+	});
+
+	test('a $$ escape does not swallow a following real reference', () => {
+		expect(extractEnvPlaceholderReferences('${PASSWORD}$$escaped')).toEqual(['PASSWORD']);
+		expect(extractEnvPlaceholderReferences('literal $$ then ${REAL}')).toEqual(['REAL']);
+		expect(extractEnvPlaceholderReferences('$$$VAR')).toEqual(['VAR']);
 	});
 
 	test('extracts multiple unique references', () => {
