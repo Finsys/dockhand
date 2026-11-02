@@ -2,13 +2,13 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Settings2, Archive, History } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Settings2, Archive, History, EllipsisVertical } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import BackupPanel from '../containers/BackupPanel.svelte';
@@ -72,7 +72,7 @@
 		autoUpdateSchedule: 'daily' | 'weekly' | 'custom';
 		autoUpdateCron: string;
 		webhookEnabled: boolean;
-		webhookSecret: string | null;
+		hasWebhookSecret?: boolean;
 		contextDir: string | null;
 		buildOnDeploy: boolean;
 		noBuildCache: boolean;
@@ -227,6 +227,9 @@
 	let formAutoUpdateCron = $state('0 3 * * *');
 	let formWebhookEnabled = $state(false);
 	let formWebhookSecret = $state('');
+	// In edit mode, whether the stack already has a stored webhook secret. Lets the form
+	// leave the secret untouched (send undefined) when the user does not type a new one.
+	let editHadWebhookSecret = $state(false);
 	let formContextDir = $state<string | null>(null);
 	let formBuildOnDeploy = $state(false);
 	let formNoBuildCache = $state(false);
@@ -285,7 +288,7 @@
 
 
 	// Track which gitStack was initialized to avoid repeated resets
-	let lastInitializedStackId = $state<number | null | undefined>(undefined);
+	let lastInitializedStackKey = $state<string | undefined>(undefined);
 	let isInitializing = $state(false);
 	const isConvertMode = $derived(!!convertStackName && !gitStack);
 	const isUntrackedCreateMode = $derived(!!untrackedStackName && !gitStack);
@@ -296,16 +299,19 @@
 
 	$effect(() => {
 		if (open) {
-			const currentStackId = gitStack?.id ?? null;
-			if (lastInitializedStackId !== currentStackId && !isInitializing) {
-				lastInitializedStackId = currentStackId;
+			// The init key identifies the TARGET across all four modes, because convert,
+			// untracked-create and create all have gitStack=null and must each re-init the
+			// form (stack name, title, env load) when the modal reopens in a different mode.
+			const currentStackKey = gitStack ? `git:${gitStack.id}` : convertStackName ? `convert:${convertStackName}` : untrackedStackName ? `untracked:${untrackedStackName}` : 'create';
+			if (lastInitializedStackKey !== currentStackKey && !isInitializing) {
+				lastInitializedStackKey = currentStackKey;
 				isInitializing = true;
 				resetForm().finally(() => {
 					isInitializing = false;
 				});
 			}
 		} else {
-			lastInitializedStackId = undefined;
+			lastInitializedStackKey = undefined;
 			confirmConvertToLocal = false;
 			localStackEnvVarsLoaded = false;
 			secretProviderBindingLoaded = false;
@@ -379,10 +385,6 @@
 
 	function getWebhookUrl(stackId: number): string {
 		return `${window.location.origin}/api/git/stacks/${stackId}/webhook`;
-	}
-
-	function withEnv(url: string): string {
-		return environmentId ? `${url}${url.includes('?') ? '&' : '?'}env=${environmentId}` : url;
 	}
 
 	async function copyWebhookField(text: string, type: 'url' | 'secret') {
@@ -484,7 +486,7 @@
 		if (!convertStackName) return;
 
 		try {
-			const response = await fetch(withEnv(`/api/stacks/${encodeURIComponent(convertStackName)}/env`));
+			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(convertStackName)}/env`, environmentId));
 			if (response.ok) {
 				const data = await response.json();
 				const loadedVars = data.variables || [];
@@ -611,7 +613,10 @@
 			formAutoUpdate = gitStack.autoUpdate;
 			formAutoUpdateCron = gitStack.autoUpdateCron || '0 3 * * *';
 			formWebhookEnabled = gitStack.webhookEnabled;
-			formWebhookSecret = gitStack.webhookSecret || '';
+			// The API no longer returns the secret itself; the form starts blank and the
+			// stored secret is kept unless the user types a new one (see the save below).
+			formWebhookSecret = '';
+			editHadWebhookSecret = !!gitStack.hasWebhookSecret;
 			formContextDir = gitStack.contextDir ?? null;
 			formBuildOnDeploy = gitStack.buildOnDeploy ?? false;
 			formNoBuildCache = gitStack.noBuildCache ?? false;
@@ -653,6 +658,7 @@
 			formAutoUpdateCron = '0 3 * * *';
 			formWebhookEnabled = false;
 			formWebhookSecret = '';
+			editHadWebhookSecret = false;
 			formContextDir = null;
 			formBuildOnDeploy = false;
 			formNoBuildCache = false;
@@ -701,8 +707,10 @@
 			if (!response.ok) return;
 			const sourceMap = await response.json();
 			const source = sourceMap?.[stackName];
-			if (!source) return;
-			if (!secretProviderChanged) {
+			// A missing row (deleted/renamed between page load and open) and a row with no
+			// provider binding are both savable states, not load failures: mark loaded so the
+			// convert save gate opens. Only a genuine fetch error leaves it unset (retry on reopen).
+			if (source && !secretProviderChanged) {
 				formSecretProviderId = source.secretProviderId ?? null;
 			}
 			secretProviderBindingLoaded = true;
@@ -777,8 +785,9 @@
 		}
 
 		// A secret is required unless the instance opted into secret-less webhooks
-		// (ALLOW_WEBHOOKS_WITHOUT_SECRET, for isolated networks) - mirror the server.
-		if (formWebhookEnabled && !formWebhookSecret.trim() && !$page.data.allowSecretlessWebhook) {
+		// (ALLOW_WEBHOOKS_WITHOUT_SECRET, for isolated networks) - mirror the server. A
+		// stack that already has a stored secret passes with a blank field (kept as-is).
+		if (formWebhookEnabled && !formWebhookSecret.trim() && !editHadWebhookSecret && !$page.data.allowSecretlessWebhook) {
 			errors.webhookSecret = m.stacks_git_error_webhook_secret_required();
 			hasErrors = true;
 		}
@@ -823,7 +832,14 @@
 				autoUpdate: formAutoUpdate,
 				autoUpdateCron: formAutoUpdateCron,
 				webhookEnabled: formWebhookEnabled,
-				webhookSecret: formWebhookEnabled ? formWebhookSecret : null,
+				// Disabled: clear the secret. Enabled with a typed value: set it. Enabled with
+				// a blank field but a secret already stored: send undefined so the backend
+				// keeps the existing one ("leave blank to keep").
+				webhookSecret: !formWebhookEnabled
+					? null
+					: formWebhookSecret
+						? formWebhookSecret
+						: (editHadWebhookSecret ? undefined : null),
 				contextDir: formContextDir || null,
 				buildOnDeploy: formBuildOnDeploy,
 				noBuildCache: formNoBuildCache,
@@ -861,7 +877,7 @@
 			const url = gitStack
 				? `/api/git/stacks/${gitStack.id}`
 				: convertStackName
-					? withEnv(`/api/stacks/${encodeURIComponent(convertStackName)}/attach`)
+					? appendEnvParam(`/api/stacks/${encodeURIComponent(convertStackName)}/attach`, environmentId)
 					: '/api/git/stacks';
 			const method = gitStack ? 'PUT' : 'POST';
 
@@ -1014,20 +1030,39 @@
 							{gitStack ? m.stacks_git_title_edit() : isConvertMode ? m.stacks_git_convert_to_git() : m.stacks_git_title_create()}
 						</Dialog.Title>
 						<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
-							{gitStack ? m.stacks_git_description_edit() : isConvertMode ? m.stacks_git_description_convert() : m.stacks_git_description_create()}
+							{gitStack ? m.stacks_git_description_edit() : isConvertMode ? m.stacks_git_description_convert({ name: convertStackName ?? '' }) : m.stacks_git_description_create()}
 						</Dialog.Description>
 					</div>
 				</div>
 
-				<!-- Close button -->
-				<button
-					onclick={onClose}
-					class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-				>
-					<X class="w-4 h-4" />
-				</button>
-			</div>
-		</Dialog.Header>
+				<div class="flex items-center gap-1">
+					{#if gitStack && onConvertToLocal}
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger>
+								<button
+									class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+									aria-label={m.stacks_modal_more_actions()}
+								>
+									<EllipsisVertical class="w-4 h-4" />
+								</button>
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Content align="end" class="w-44 border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+								<DropdownMenu.Item class="flex items-center gap-2 cursor-pointer text-sm" onSelect={() => (confirmConvertToLocal = true)} disabled={formSaving}>
+									<FileText class="w-4 h-4 shrink-0" />
+									{m.stacks_git_convert_to_local()}
+								</DropdownMenu.Item>
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					{/if}
+					<!-- Close button -->
+					<button
+						onclick={onClose}
+						class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+					>
+						<X class="w-4 h-4" />
+					</button>
+				</div>
+			</Dialog.Header>
 
 		<!-- Tabs (edit mode only - a git stack must exist first): Settings (deploy form),
 		     Deploys (recorded run history), and Backups. Backups is additionally gated on
@@ -1658,28 +1693,7 @@
 		{/if}
 
 		<Dialog.Footer class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex-shrink-0">
-			<div class="flex items-center justify-between w-full gap-2">
-				<div class="flex items-center gap-2">
-					{#if activeTab !== 'backups' && gitStack && onConvertToLocal}
-						<ConfirmPopover
-							open={confirmConvertToLocal}
-							action={m.confirm_action_convert()}
-							itemType={m.stacks_item_stack()}
-							itemName={gitStack.stackName}
-							title={m.stacks_git_convert_to_local()}
-							localized
-							onConfirm={onConvertToLocal}
-							onOpenChange={(open) => (confirmConvertToLocal = open)}
-						>
-							{#snippet children()}
-								<Button variant="outline" disabled={formSaving}>
-									<FileText class="w-4 h-4" />
-									{m.stacks_git_convert_to_local()}
-								</Button>
-							{/snippet}
-						</ConfirmPopover>
-					{/if}
-				</div>
+			<div class="flex items-center justify-end w-full gap-2">
 				<div class="flex items-center gap-2">
 					<Button variant="outline" onclick={onClose}>{activeTab === 'backups' ? m.ui_close() : m.stacks_git_cancel()}</Button>
 					<!-- The deploy-form save buttons belong to the Settings tab. On the Backups
@@ -1735,6 +1749,26 @@
 		<div class="flex justify-end mt-4">
 			<Button size="sm" onclick={() => showExistsWarning = false}>
 				{m.stacks_git_ok()}
+			</Button>
+		</div>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={confirmConvertToLocal}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title class="flex items-center gap-2">
+				<FileText class="w-5 h-5 text-amber-500" />
+				{m.stacks_git_convert_to_local()}
+			</Dialog.Title>
+			<Dialog.Description>
+				{m.stacks_git_convert_to_local_confirm({ name: gitStack?.stackName ?? '' })}
+			</Dialog.Description>
+		</Dialog.Header>
+		<div class="flex justify-end gap-2 mt-4">
+			<Button size="sm" variant="outline" onclick={() => (confirmConvertToLocal = false)}>{m.stacks_git_cancel()}</Button>
+			<Button size="sm" disabled={formSaving} onclick={() => { confirmConvertToLocal = false; onConvertToLocal?.(); }}>
+				{m.confirm_action_convert()}
 			</Button>
 		</div>
 	</Dialog.Content>

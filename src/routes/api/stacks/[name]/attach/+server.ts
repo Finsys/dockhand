@@ -18,10 +18,10 @@ import { createJobResponse } from '$lib/server/sse';
 import { deployGitStack } from '$lib/server/git';
 import { getStackComposeFile } from '$lib/server/stacks';
 import { parseEnvVars } from '$lib/server/env-parser';
+import { buildAttachEnvVars } from '$lib/server/stack-attach-core';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
 import { existsSync, readFileSync } from 'node:fs';
-
-const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
 /**
  * @openapi
@@ -31,7 +31,7 @@ const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
  * body: {stackName:string,repositoryId:integer,url:string,repoName:string,branch:string,credentialId:integer,composePath:string,envFilePath:string,autoUpdate:boolean,autoUpdateSchedule:string,autoUpdateCron:string,webhookEnabled:boolean,webhookSecret:string,contextDir:string,buildOnDeploy:boolean,noBuildCache:boolean,repullImages:boolean,forceRedeploy:boolean,secretProviderId:integer,envVars:array<{key:string!,value:string,isSecret:boolean}>,deployNow:boolean}
  * resp-200: Git stack created; returns the git stack record, or a job response when deployNow starts deployment
  * resp-400: Invalid conversion request or repository configuration
- * resp-403: Caller lacks stacks:edit or required secrets:view permission
+ * resp-403: Caller lacks stacks:edit or required secrets:view permission, or access denied to this environment (enterprise)
  * resp-404: Stack not found
  * resp-500: Failed to convert stack to Git management
  */
@@ -46,6 +46,11 @@ export const POST: RequestHandler = async (event) => {
 	try {
 		if (auth.authEnabled && !(await auth.can('stacks', 'edit', envIdNum))) {
 			return json({ error: 'Permission denied' }, { status: 403 });
+		}
+
+		// Environment access check (enterprise only), matching the sibling stack endpoints.
+		if (envIdNum && auth.isEnterprise && !(await auth.canAccessEnvironment(envIdNum))) {
+			return json({ error: 'Access denied to this environment' }, { status: 403 });
 		}
 
 		const source = await getStackSource(stackName, envIdNum);
@@ -88,7 +93,7 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Stack name cannot be changed during conversion' }, { status: 400 });
 		}
 
-		if (!STACK_NAME_REGEX.test(stackName)) {
+		if (!isValidStackName(stackName)) {
 			return json({ error: 'Invalid stack name' }, { status: 400 });
 		}
 
@@ -182,45 +187,8 @@ export const POST: RequestHandler = async (event) => {
 
 		if (fileVars || dbVars) {
 			const existingVars = await getStackEnvVars(stackName, envIdNum ?? null, false);
-			const existingByKey = new Map(existingVars.map((variable) => [variable.key, variable]));
-			const varsToSave = new Map<string, { key: string; value: string; isSecret: boolean }>();
-
-			for (const [key, value] of Object.entries(fileVars ?? {})) {
-				varsToSave.set(key, { key, value, isSecret: false });
-			}
-
-			if (dbVars) {
-				for (const variable of dbVars) {
-					const key = variable.key?.trim();
-					if (!key) continue;
-
-					if (variable.isSecret && variable.value === '***') {
-						const existingVar = existingByKey.get(key);
-						if (existingVar?.isSecret) {
-							varsToSave.set(key, { key, value: existingVar.value, isSecret: true });
-						}
-						continue;
-					}
-
-					varsToSave.set(key, {
-						key,
-						value: variable.value ?? '',
-						isSecret: variable.isSecret ?? false
-					});
-				}
-			} else {
-				for (const variable of existingVars) {
-					if (variable.isSecret) {
-						varsToSave.set(variable.key, {
-							key: variable.key,
-							value: variable.value,
-							isSecret: true
-						});
-					}
-				}
-			}
-
-			await setStackEnvVars(stackName, envIdNum ?? null, Array.from(varsToSave.values()));
+			const varsToSave = buildAttachEnvVars(fileVars, dbVars, existingVars);
+			await setStackEnvVars(stackName, envIdNum ?? null, varsToSave);
 		}
 
 		await auditStack(event, 'update', stackName, envIdNum ?? null, {
@@ -229,6 +197,10 @@ export const POST: RequestHandler = async (event) => {
 		await auditGitStack(event, 'create', gitStack.id, gitStack.stackName, gitStack.environmentId, {
 			action: 'convert_from_internal'
 		});
+
+		// The webhook secret must not travel back in any response; expose only the flag.
+		const { webhookSecret: _newSecret, ...safeGitStackRest } = gitStack;
+		const safeGitStack = { ...safeGitStackRest, hasWebhookSecret: !!_newSecret };
 
 		if (data.deployNow) {
 			return createJobResponse(async (send) => {
@@ -240,20 +212,20 @@ export const POST: RequestHandler = async (event) => {
 					});
 					await auditGitStack(event, 'deploy', gitStack.id, gitStack.stackName, gitStack.environmentId);
 					send('result', {
-						...gitStack,
+						...safeGitStack,
 						deployResult
 					});
 				} catch (error) {
 					console.error('Failed to deploy git stack:', error);
 					send('result', {
-						...gitStack,
+						...safeGitStack,
 						deployResult: { success: false, error: 'Failed to deploy git stack' }
 					});
 				}
 			}, request);
 		}
 
-		return json(gitStack);
+		return json(safeGitStack);
 	} catch (error: any) {
 		console.error('Failed to convert local stack to git:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {

@@ -43,7 +43,14 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	try {
 
 		const stacks = await getGitStacks(envIdNum);
-		return json(stacks);
+		// The webhook secret authenticates the public deploy-trigger endpoints, so it must
+		// not travel to a viewer. Expose only whether one is set; the real value stays in
+		// the DB where webhook verification reads it directly.
+		const safeStacks = stacks.map(({ webhookSecret, ...rest }) => ({
+			...rest,
+			hasWebhookSecret: !!webhookSecret
+		}));
+		return json(safeStacks);
 	} catch (error) {
 		console.error('Failed to get git stacks:', error);
 		return json({ error: 'Failed to get git stacks' }, { status: 500 });
@@ -183,6 +190,10 @@ export const POST: RequestHandler = async (event) => {
 			forceRedeploy: data.forceRedeploy ?? false
 		});
 
+		// The webhook secret must not travel back in any response; expose only the flag.
+		const { webhookSecret: _newSecret, ...safeGitStackRest } = gitStack;
+		const safeGitStack = { ...safeGitStackRest, hasWebhookSecret: !!_newSecret };
+
 		// Create stack_sources entry so the stack appears in the list immediately
 		await upsertStackSource({
 			stackName: trimmedStackName,
@@ -230,20 +241,20 @@ export const POST: RequestHandler = async (event) => {
 					});
 					await auditGitStack(event, 'deploy', gitStack.id, gitStack.stackName, gitStack.environmentId);
 					send('result', {
-						...gitStack,
+						...safeGitStack,
 						deployResult: deployResult
 					});
 				} catch (error) {
 					console.error('Failed to deploy git stack:', error);
 					send('result', {
-						...gitStack,
+						...safeGitStack,
 						deployResult: { success: false, error: 'Failed to deploy git stack' }
 					});
 				}
 			}, request);
 		}
 
-		return json(gitStack);
+		return json(safeGitStack);
 	} catch (error: any) {
 		console.error('Failed to create git stack:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {

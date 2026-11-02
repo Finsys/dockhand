@@ -51,6 +51,11 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Permission denied' }, { status: 403 });
 		}
 
+		// Environment access check (enterprise only), matching the sibling stack endpoints.
+		if (gitStack.environmentId && auth.isEnterprise && !(await auth.canAccessEnvironment(gitStack.environmentId))) {
+			return json({ error: 'Access denied to this environment' }, { status: 403 });
+		}
+
 		const composeResult = await getStackComposeFile(
 			gitStack.stackName,
 			gitStack.environmentId ?? null

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -12,7 +13,7 @@
 	import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 	import { classifyMarker, isInlineProviderRef, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown, EllipsisVertical } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import DeploysPanel from './DeploysPanel.svelte';
@@ -2268,15 +2269,34 @@
 					</div>
 				</div>
 
-				<!-- Close button -->
-				<button
-					onclick={tryClose}
-					class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-				>
-					<X class="w-4 h-4" />
-				</button>
-			</div>
-		</Dialog.Header>
+				<div class="flex items-center gap-1">
+					{#if !readonly && mode === 'edit' && onConvertToGit}
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger>
+								<button
+									class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+									aria-label={m.stacks_modal_more_actions()}
+								>
+									<EllipsisVertical class="w-4 h-4" />
+								</button>
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Content align="end" class="w-44 border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+								<DropdownMenu.Item class="flex items-center gap-2 cursor-pointer text-sm" onSelect={onConvertToGit} disabled={saving || loading}>
+									<GitGraph class="w-4 h-4 shrink-0" />
+									{m.stacks_git_convert_to_git()}
+								</DropdownMenu.Item>
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					{/if}
+					<!-- Close button -->
+					<button
+						onclick={tryClose}
+						class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+					>
+						<X class="w-4 h-4" />
+					</button>
+				</div>
+			</Dialog.Header>
 
 		<!-- View tabs — left-aligned underline bar under the header, matched to
 		     GitStackModal for a consistent look across the stack modals. -->
@@ -2751,21 +2771,13 @@
 
 		<!-- Footer -->
 		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0">
-			<div class="flex items-center gap-2">
-				<div class="text-xs text-zinc-500 dark:text-zinc-400">
-					{#if readonly}
-						{m.stacks_modal_read_only()}
-					{:else if isDirty}
-						<span class="text-amber-600 dark:text-amber-500">{m.stacks_modal_unsaved_changes()}</span>
-					{:else}
-						{m.stacks_modal_no_changes()}
-					{/if}
-				</div>
-				{#if !readonly && mode === 'edit' && onConvertToGit}
-					<Button variant="outline" onclick={onConvertToGit} disabled={saving || loading}>
-						<GitGraph class="w-4 h-4" />
-						{m.stacks_git_convert_to_git()}
-					</Button>
+			<div class="text-xs text-zinc-500 dark:text-zinc-400">
+				{#if readonly}
+					{m.stacks_modal_read_only()}
+				{:else if isDirty}
+					<span class="text-amber-600 dark:text-amber-500">{m.stacks_modal_unsaved_changes()}</span>
+				{:else}
+					{m.stacks_modal_no_changes()}
 				{/if}
 			</div>
 
