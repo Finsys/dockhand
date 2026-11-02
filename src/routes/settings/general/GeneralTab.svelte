@@ -737,6 +737,19 @@ services:
 							     page is where personal choices live, and this one goes with them. -->
 							{#if !$authStore.authEnabled}
 								<LanguageSelector />
+							{:else}
+								<!-- Language is per-user; with auth on it lives in the profile.
+								     Show a pointer in the selector's spot so it does not look
+								     like the option vanished. -->
+								<div class="space-y-1.5">
+									<div class="flex items-center gap-2 text-sm font-medium">
+										<Globe class="w-4 h-4 text-muted-foreground" />
+										{m.settings_general_language_label()}
+									</div>
+									<p class="text-xs text-muted-foreground">
+										{m.settings_general_language_in_profile()} <a href="/profile" class="text-primary hover:underline font-medium">{m.settings_general_theme_defaults_link()}</a>.
+									</p>
+								</div>
 							{/if}
 							<!-- With auth on the toggles edit the GLOBAL defaults, so they wait for
 							     those to load; binding globalValue=undefined first would show the
@@ -748,10 +761,10 @@ services:
 								<IndentGuidesToggle globalValue={$authStore.authEnabled ? globalIndentGuides : undefined} />
 							{/if}
 							{#if $authStore.authEnabled}
-								<div class="text-xs text-muted-foreground flex items-start gap-1.5 mt-2 p-2 bg-muted/50 rounded-md">
-									<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+								<div class="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2 mt-2 p-2.5 bg-amber-500/10 border border-amber-500/40 rounded-md">
+									<Info class="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
 									<div>
-										<p>{m.settings_general_theme_defaults_before()} <strong>{m.settings_general_theme_defaults_strong()}</strong> {m.settings_general_theme_defaults_middle()} <em>{m.settings_general_theme_defaults_you()}</em> {m.settings_general_theme_defaults_after()} <a href="/profile" class="text-primary hover:underline">{m.settings_general_theme_defaults_link()}</a>.</p>
+										<p>{m.settings_general_theme_defaults_before()} <strong>{m.settings_general_theme_defaults_strong()}</strong> {m.settings_general_theme_defaults_middle()} <em>{m.settings_general_theme_defaults_you()}</em> {m.settings_general_theme_defaults_after()} <a href="/profile" class="text-primary hover:underline font-medium">{m.settings_general_theme_defaults_link()}</a>.</p>
 									</div>
 								</div>
 							{/if}
