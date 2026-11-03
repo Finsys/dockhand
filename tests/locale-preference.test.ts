@@ -30,6 +30,7 @@ describe('asLocale', () => {
 		expect(asLocale('es-ES')).toBe('es-ES');
 		expect(asLocale('uk')).toBe('uk');
 		expect(asLocale('pt-BR')).toBe('pt-BR');
+		expect(asLocale('tr')).toBe('tr');
 	});
 
 	test('refuses anything else, so a stale or hand-edited value cannot take effect', () => {
@@ -68,6 +69,7 @@ describe('fromNavigator', () => {
 	test('a region whose bare language is carried still resolves', () => {
 		expect(fromNavigator(['pl-PL'])).toBe('pl');
 		expect(fromNavigator(['uk-UA', 'en'])).toBe('uk');
+		expect(fromNavigator(['tr-TR', 'en'])).toBe('tr');
 	});
 
 	test('fr-CA is taken as itself rather than collapsing to fr-FR', () => {
