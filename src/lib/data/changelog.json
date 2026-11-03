@@ -7,6 +7,7 @@
       { "type": "feature", "text": "OIDC back-channel logout ends a Dockhand session when the identity provider signals logout (#1835)" },
       { "type": "feature", "text": "Ukrainian interface translation (#1839, PR#1839, @TripShuti)" },
       { "type": "feature", "text": "Brazilian Portuguese interface translation (PR#1851, @lucasskluser)" },
+      { "type": "feature", "text": "Turkish interface translation (PR#1853, @Gorke07)" },
       { "type": "feature", "text": "Infisical bulk pull now includes secrets from folder imports (#1829, PR#1844, @gorillka)" },
       { "type": "feature", "text": "convert a stack between local and git management without recreating it (#636, PR#795, @barrelltitor)" },
       { "type": "fix", "text": "git stack files keep their executable bit when deployed to a Hawser remote host" },
