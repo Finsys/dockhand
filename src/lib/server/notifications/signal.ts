@@ -13,7 +13,7 @@
  */
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
 
-export async function sendSignal(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendSignal(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	const isSecure = appriseUrl.startsWith('signals');
 	const raw = appriseUrl.replace(/^signals?:\/\//, '');
 
@@ -57,7 +57,7 @@ export async function sendSignal(appriseUrl: string, payload: NotificationPayloa
 				recipients,
 				message: messageText
 			})
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

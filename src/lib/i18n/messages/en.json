@@ -6680,6 +6680,8 @@
 	"settings_notifications_yes": "Yes",
 	"settings_notifications_no": "No",
 	"settings_notifications_skip_tls_verify": "Skip TLS verify",
+	"settings_notifications_webhook_skip_tls_verify": "Skip TLS certificate verification",
+	"settings_notifications_webhook_skip_tls_verify_hint": "Applies only to HTTPS webhooks in this channel. HTTPS remains encrypted, but the server’s identity is no longer verified. Allows self-signed certificates and hostname mismatches.",
 	"settings_notifications_username": "Username",
 	"settings_notifications_password": "Password",
 	"settings_notifications_password_keep_placeholder": "Leave blank to keep existing",

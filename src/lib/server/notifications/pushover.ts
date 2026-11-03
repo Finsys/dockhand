@@ -2,7 +2,7 @@
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
 import { parsePushoverUrl } from '$lib/utils/notification-parsers';
 
-export async function sendPushover(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendPushover(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	const parsed = parsePushoverUrl(appriseUrl);
 	if (!parsed) {
 		return { success: false, error: 'Invalid Pushover URL format. Expected: pushover://user_key/api_token[/device]' };
@@ -25,7 +25,7 @@ export async function sendPushover(appriseUrl: string, payload: NotificationPayl
 				// Optional: a comma-separated device list restricts delivery; omit to reach all devices.
 				...(device ? { device } : {})
 			})
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

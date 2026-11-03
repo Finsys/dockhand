@@ -2,7 +2,7 @@
 import { escapeTelegramMarkdown, parseTelegramUrl } from '$lib/utils/notification-parsers';
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
 
-export async function sendTelegram(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendTelegram(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	const parsed = parseTelegramUrl(appriseUrl);
 	if (!parsed) {
 		return { success: false, error: 'Invalid Telegram URL format. Expected: tgram://bot_token/chat_id or tgram://bot_token/chat_id:topic_id' };
@@ -28,7 +28,7 @@ export async function sendTelegram(appriseUrl: string, payload: NotificationPayl
 					is_disabled: true
 				}
 			})
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const errorData = await response.json().catch(() => ({})) as { description?: string };

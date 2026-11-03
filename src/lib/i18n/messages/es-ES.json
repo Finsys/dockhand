@@ -6725,6 +6725,8 @@
 	"settings_notifications_yes": "Sí",
 	"settings_notifications_no": "No",
 	"settings_notifications_skip_tls_verify": "Omitir la verificación TLS",
+	"settings_notifications_webhook_skip_tls_verify": "Omitir la verificación del certificado TLS",
+	"settings_notifications_webhook_skip_tls_verify_hint": "Solo se aplica a los webhooks HTTPS de este canal. HTTPS sigue cifrado, pero ya no se verifica la identidad del servidor. Permite certificados autofirmados y nombres de host que no coinciden.",
 	"settings_notifications_username": "Nombre de usuario",
 	"settings_notifications_password": "Contraseña",
 	"settings_notifications_password_keep_placeholder": "Déjala en blanco para conservar la actual",

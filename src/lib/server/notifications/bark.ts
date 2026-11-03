@@ -15,7 +15,7 @@
 import { notificationFetch } from './shared';
 import type { NotificationPayload, NotificationResult } from './shared';
 
-export async function sendBark(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendBark(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	const isSecure = appriseUrl.startsWith('barks');
 	const path = appriseUrl.replace(/^barks?:\/\//, '');
 
@@ -98,7 +98,7 @@ export async function sendBark(appriseUrl: string, payload: NotificationPayload)
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json; charset=utf-8' },
 			body: JSON.stringify(body)
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

@@ -6675,6 +6675,8 @@
 	"settings_notifications_yes": "是",
 	"settings_notifications_no": "否",
 	"settings_notifications_skip_tls_verify": "跳过 TLS 验证",
+	"settings_notifications_webhook_skip_tls_verify": "跳过 TLS 证书验证",
+	"settings_notifications_webhook_skip_tls_verify_hint": "仅适用于此渠道中的 HTTPS Webhook。HTTPS 仍保持加密，但不再验证服务器身份。允许自签名证书和主机名不匹配。",
 	"settings_notifications_username": "用户名",
 	"settings_notifications_password": "密码",
 	"settings_notifications_password_keep_placeholder": "留空保持不变",

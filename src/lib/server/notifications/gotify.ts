@@ -2,7 +2,7 @@
 import { buildGotifyUrl } from '$lib/utils/notification-parsers';
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
 
-export async function sendGotify(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendGotify(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	const parsed = buildGotifyUrl(appriseUrl);
 	if (!parsed) {
 		return { success: false, error: 'Invalid Gotify URL format. Expected: gotify://hostname/token' };
@@ -20,7 +20,7 @@ export async function sendGotify(appriseUrl: string, payload: NotificationPayloa
 				message: payload.message,
 				priority: parsed.priority ?? defaultPriority
 			})
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

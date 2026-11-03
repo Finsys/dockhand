@@ -7,6 +7,7 @@
  */
 
 import { isSafeNotificationUrl } from '../url-safety';
+import { getTlsSkipVerifyDispatcher } from '../dns-dispatcher';
 
 export interface NotificationPayload {
 	title: string;
@@ -51,7 +52,7 @@ const NOTIFICATION_TIMEOUT_MS = (() => {
  * Also applies a per-request timeout — a hung endpoint must not pin the request
  * indefinitely and block the rest of the dispatch.
  */
-export async function notificationFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
+export async function notificationFetch(input: string | URL, init: RequestInit = {}, skipTlsVerify = false): Promise<Response> {
 	const target = typeof input === 'string' ? input : input.toString();
 	const safe = isSafeNotificationUrl(target);
 	if (!safe.ok) {
@@ -59,6 +60,8 @@ export async function notificationFetch(input: string | URL, init: RequestInit =
 	}
 	const response = await fetch(input, {
 		...init,
+		...(new URL(target).protocol === 'https:' && skipTlsVerify === true
+			? { dispatcher: getTlsSkipVerifyDispatcher() } : {}),
 		redirect: 'manual',
 		signal: init.signal ?? AbortSignal.timeout(NOTIFICATION_TIMEOUT_MS)
 	});

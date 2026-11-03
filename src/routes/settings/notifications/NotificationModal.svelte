@@ -4,6 +4,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Badge } from '$lib/components/ui/badge';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import { Plus, Check, RefreshCw, Mail, Zap, Send, CheckCircle2, XCircle, Bell, HelpCircle, Settings } from 'lucide-svelte';
@@ -61,6 +62,7 @@
 	let formSmtpToEmails = $state('');
 	// Apprise specific
 	let formAppriseUrls = $state('');
+	let formWebhookSkipTlsVerify = $state(false);
 	// System events
 	let formSystemEvents = $state<string[]>([]);
 	let activeTab = $state<'channel' | 'events'>('channel');
@@ -84,6 +86,7 @@
 		formSmtpFromName = '';
 		formSmtpToEmails = '';
 		formAppriseUrls = '';
+		formWebhookSkipTlsVerify = false;
 		formSystemEvents = [];
 		activeTab = 'channel';
 		formError = '';
@@ -116,6 +119,7 @@
 					formSmtpToEmails = notification.config.to_emails?.join(', ') || '';
 				} else {
 					formAppriseUrls = notification.config.urls?.join('\n') || '';
+					formWebhookSkipTlsVerify = (notification.config.skipTlsVerify ?? notification.config.zabbixSkipTlsVerify) === true;
 				}
 
 				// Load system events (filter to only system-scoped events)
@@ -153,7 +157,8 @@
 			};
 		} else {
 			return {
-				urls: formAppriseUrls.split('\n').map(u => u.trim()).filter(Boolean)
+				urls: formAppriseUrls.split('\n').map(u => u.trim()).filter(Boolean),
+				skipTlsVerify: formWebhookSkipTlsVerify || undefined
 			};
 		}
 	}
@@ -465,6 +470,13 @@ zabbix://hostname/api_jsonrpc.php?token=TOKEN&amp;host=HOST&amp;key=ITEM_KEY
 zabbixs://hostname/api_jsonrpc.php?token=TOKEN&amp;host=HOST&amp;key=ITEM_KEY"
 						class="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 					></textarea>
+					<div class="space-y-2">
+						<div class="flex items-center gap-2">
+							<Checkbox id="notif-webhook-skip-tls" bind:checked={formWebhookSkipTlsVerify} aria-describedby="notif-webhook-tls-hint" />
+							<Label for="notif-webhook-skip-tls">{m.settings_notifications_webhook_skip_tls_verify()}</Label>
+						</div>
+						<p id="notif-webhook-tls-hint" class="text-xs text-muted-foreground">{m.settings_notifications_webhook_skip_tls_verify_hint()}</p>
+					</div>
 					<p class="text-xs text-muted-foreground">
 						{m.settings_notifications_builtin_channels()}
 					</p>

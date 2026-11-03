@@ -26,7 +26,8 @@ interface ZabbixApiResponse {
 
 export async function sendZabbix(
 	zabbixUrl: string,
-	payload: NotificationPayload
+	payload: NotificationPayload,
+	skipTlsVerify = false
 ): Promise<NotificationResult> {
 	try {
 		const secure = /^zabbixs:\/\//i.test(zabbixUrl);
@@ -109,7 +110,7 @@ export async function sendZabbix(
 				'Accept': 'application/json'
 			},
 			body: JSON.stringify(requestBody)
-		});
+		}, skipTlsVerify);
 
 		const responseText = await response.text();
 

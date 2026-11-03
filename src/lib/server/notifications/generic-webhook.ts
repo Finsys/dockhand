@@ -1,7 +1,7 @@
 /** Generic JSON webhook. json:// or jsons:// (HTTPS); json://user:pass@host/path sends Basic auth. */
 import { notificationFetch, drainResponse, splitBasicAuth, type NotificationPayload, type NotificationResult } from './shared';
 
-export async function sendGenericWebhook(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendGenericWebhook(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	// json://hostname/path or jsons://hostname/path
 	const scheme = appriseUrl.startsWith('jsons') ? 'https://' : 'http://';
 	const rest = appriseUrl.replace(/^jsons?:\/\//, '');
@@ -30,7 +30,7 @@ export async function sendGenericWebhook(appriseUrl: string, payload: Notificati
 				environment: payload.environmentName || null,
 				timestamp: new Date().toISOString()
 			})
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

@@ -7139,6 +7139,8 @@
 	"settings_notifications_yes": "Да",
 	"settings_notifications_no": "Нет",
 	"settings_notifications_skip_tls_verify": "Пропускать проверку TLS",
+	"settings_notifications_webhook_skip_tls_verify": "Пропустить проверку TLS-сертификата",
+	"settings_notifications_webhook_skip_tls_verify_hint": "Применяется только к HTTPS-вебхукам в этом канале. HTTPS остаётся зашифрованным, но подлинность сервера больше не проверяется. Разрешает самоподписанные сертификаты и несовпадение имён хостов.",
 	"settings_notifications_username": "Имя пользователя",
 	"settings_notifications_password": "Пароль",
 	"settings_notifications_password_keep_placeholder": "Оставьте пустым, чтобы не изменять текущий",

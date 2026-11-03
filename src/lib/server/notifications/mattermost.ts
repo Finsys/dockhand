@@ -44,7 +44,7 @@ export function buildMattermostBody(
 	return body;
 }
 
-export async function sendMattermost(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendMattermost(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	// mmost://[botname@]hostname[:port][/path]/token or mmosts://...
 	const isSecure = appriseUrl.startsWith('mmosts');
 	const protocol = isSecure ? 'https' : 'http';
@@ -77,7 +77,7 @@ export async function sendMattermost(appriseUrl: string, payload: NotificationPa
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body)
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

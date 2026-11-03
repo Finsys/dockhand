@@ -17,7 +17,7 @@
  */
 import { notificationFetch, drainResponse, splitBasicAuth, type NotificationPayload, type NotificationResult } from './shared';
 
-export async function sendApprise(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendApprise(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	const isSecure = appriseUrl.startsWith('apprises');
 	const raw = appriseUrl.replace(/^apprises?:\/\//, '');
 
@@ -78,7 +78,7 @@ export async function sendApprise(appriseUrl: string, payload: NotificationPaylo
 			method: 'POST',
 			headers,
 			body: JSON.stringify(body)
-		});
+		}, skipTlsVerify);
 
 		// Apprise-API uses specific status codes:
 		//   200 → success, 204 → key not configured, 424 → at least one

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.55",
+    "version": "1.0.56",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -19279,6 +19279,9 @@
                               "type": "string"
                             }
                           },
+                          "skipTlsVerify": {
+                            "type": "boolean"
+                          },
                           "password": {
                             "type": "string"
                           }
@@ -19315,6 +19318,7 @@
                       "urls": [
                         "string"
                       ],
+                      "skipTlsVerify": true,
                       "password": "string"
                     },
                     "eventTypes": [
@@ -19468,6 +19472,9 @@
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "skipTlsVerify": {
+                        "type": "boolean"
                       }
                     }
                   },
@@ -19574,6 +19581,9 @@
                             "type": "string"
                           }
                         },
+                        "skipTlsVerify": {
+                          "type": "boolean"
+                        },
                         "password": {
                           "type": "string"
                         }
@@ -19608,6 +19618,7 @@
                     "urls": [
                       "string"
                     ],
+                    "skipTlsVerify": true,
                     "password": "string"
                   },
                   "eventTypes": [
@@ -19776,6 +19787,9 @@
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "skipTlsVerify": {
+                        "type": "boolean"
                       }
                     }
                   },
@@ -20049,6 +20063,9 @@
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "skipTlsVerify": {
+                        "type": "boolean"
                       }
                     }
                   }
@@ -29073,6 +29090,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "envValues": {
+                    "type": "object",
+                    "properties": {}
                   }
                 }
               },

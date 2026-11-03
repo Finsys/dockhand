@@ -7123,6 +7123,8 @@
 	"settings_notifications_yes": "Так",
 	"settings_notifications_no": "Ні",
 	"settings_notifications_skip_tls_verify": "Пропустити перевірку TLS",
+	"settings_notifications_webhook_skip_tls_verify": "Пропустити перевірку TLS-сертифіката",
+	"settings_notifications_webhook_skip_tls_verify_hint": "Застосовується лише до HTTPS-вебхуків у цьому каналі. HTTPS залишається зашифрованим, але справжність сервера більше не перевіряється. Дозволяє самопідписані сертифікати та невідповідність імен хостів.",
 	"settings_notifications_username": "Ім’я користувача",
 	"settings_notifications_password": "Пароль",
 	"settings_notifications_password_keep_placeholder": "Залиште поле порожнім, щоб зберегти",
