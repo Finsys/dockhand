@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.55",
+    "version": "1.0.56",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -9624,7 +9624,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "The body carries the container create-options (image, name, env, ports, volumes, …) alongside the two control flags below; `repullImage` pulls the image before recreation and `startAfterUpdate` starts the new container once created.",
+        "description": "The body carries the container create-options (image, name, env, ports, volumes, …) alongside the two control flags below; `repullImage` pulls the image before recreation and `startAfterUpdate` starts the new container once created. Omit `volumeBinds` or send null to preserve existing mounts; send an array to replace the mappings, including an empty array to remove them all.",
         "requestBody": {
           "required": true,
           "content": {
