@@ -1,7 +1,7 @@
 /** Discord webhook notifications. discord:// or discords://. */
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
 
-export async function sendDiscord(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendDiscord(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	// discord://webhook_id/webhook_token or discords://...
 	const url = appriseUrl.replace(/^discords?:\/\//, 'https://discord.com/api/webhooks/');
 	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
@@ -20,7 +20,7 @@ export async function sendDiscord(appriseUrl: string, payload: NotificationPaylo
 					})
 				}]
 			})
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

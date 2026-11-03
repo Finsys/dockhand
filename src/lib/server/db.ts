@@ -1229,6 +1229,9 @@ export interface SmtpConfig {
 
 export interface AppriseConfig {
 	urls: string[];
+	skipTlsVerify?: boolean;
+	/** Legacy option; only applies to Zabbix until the channel is saved again. */
+	zabbixSkipTlsVerify?: boolean;
 }
 
 // Helper to encrypt sensitive fields in notification config

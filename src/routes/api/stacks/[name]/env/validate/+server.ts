@@ -38,7 +38,7 @@ const DOCKER_COMPOSE_BUILTIN_VARS = new Set([
  * Ignores escaped $$ (Docker Compose escape syntax for literal $).
  * Returns { required: [...], optional: [...] }
  */
-export function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
+function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
 	const required: string[] = [];
 	const optional: string[] = [];
 

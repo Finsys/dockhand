@@ -67,7 +67,7 @@ export function resolveNtfyEndpoint(cleanPath: string, isSecure: boolean): { url
 	return { url: `https://ntfy.sh/${cleanPath}`, authHeader: null };
 }
 
-export async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendNtfy(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	// Query params: ?auth=TOKEN &tags=ship,whale &title=Custom &priority=5 &email=me@example.com
 	const isSecure = appriseUrl.startsWith('ntfys');
 	const path = appriseUrl.replace(/^ntfys?:\/\//, '');
@@ -119,7 +119,7 @@ export async function sendNtfy(appriseUrl: string, payload: NotificationPayload)
 			method: 'POST',
 			headers,
 			body: payload.message
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

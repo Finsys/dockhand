@@ -1,7 +1,7 @@
 /** Slack incoming webhook. slack:// or slacks:// or a raw hooks.slack.com URL. */
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
 
-export async function sendSlack(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+export async function sendSlack(appriseUrl: string, payload: NotificationPayload, skipTlsVerify = false): Promise<NotificationResult> {
 	// slack://token_a/token_b/token_c or webhook URL
 	let url: string;
 	if (appriseUrl.includes('hooks.slack.com')) {
@@ -20,7 +20,7 @@ export async function sendSlack(appriseUrl: string, payload: NotificationPayload
 			body: JSON.stringify({
 				text: `*${payload.title}*${envTag}\n${payload.message}`
 			})
-		});
+		}, skipTlsVerify);
 
 		if (!response.ok) {
 			const text = await response.text().catch(() => '');

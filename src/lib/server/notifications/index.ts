@@ -53,7 +53,7 @@ async function sendAppriseNotification(config: AppriseConfig, payload: Notificat
 
 	for (const url of config.urls) {
 		try {
-			const result = await sendToAppriseUrl(url, payload);
+			const result = await sendToAppriseUrl(url, payload, config);
 			if (!result.success && result.error) {
 				errors.push(result.error);
 			}
@@ -71,7 +71,7 @@ async function sendAppriseNotification(config: AppriseConfig, payload: Notificat
 
 // Route a single Apprise URL to the right sender. The switch is the ONLY
 // place that needs to grow when a new provider is added.
-async function sendToAppriseUrl(url: string, payload: NotificationPayload): Promise<NotificationResult> {
+async function sendToAppriseUrl(url: string, payload: NotificationPayload, config: AppriseConfig): Promise<NotificationResult> {
 	try {
 		// Custom schemes like 'tgram://' aren't valid URLs to new URL(),
 		// so we match the prefix directly.
@@ -80,48 +80,49 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 			return { success: false, error: 'Invalid Apprise URL format - missing protocol' };
 		}
 		const protocol = protocolMatch[1].toLowerCase();
+		const skipTlsVerify = config.skipTlsVerify === true;
 
 		switch (protocol) {
 			case 'discord':
 			case 'discords':
-				return await sendDiscord(url, payload);
+				return await sendDiscord(url, payload, skipTlsVerify);
 			case 'slack':
 			case 'slacks':
-				return await sendSlack(url, payload);
+				return await sendSlack(url, payload, skipTlsVerify);
 			case 'mmost':
 			case 'mmosts':
-				return await sendMattermost(url, payload);
+				return await sendMattermost(url, payload, skipTlsVerify);
 			case 'tgram':
-				return await sendTelegram(url, payload);
+				return await sendTelegram(url, payload, skipTlsVerify);
 			case 'gotify':
 			case 'gotifys':
-				return await sendGotify(url, payload);
+				return await sendGotify(url, payload, skipTlsVerify);
 			case 'ntfy':
 			case 'ntfys':
-				return await sendNtfy(url, payload);
+				return await sendNtfy(url, payload, skipTlsVerify);
 			case 'bark':
 			case 'barks':
-				return await sendBark(url, payload);
+				return await sendBark(url, payload, skipTlsVerify);
 			case 'signal':
 			case 'signals':
-				return await sendSignal(url, payload);
+				return await sendSignal(url, payload, skipTlsVerify);
 			case 'apprise':
 			case 'apprises':
-				return await sendApprise(url, payload);
+				return await sendApprise(url, payload, skipTlsVerify);
 			case 'pushover':
 			case 'pover':
-				return await sendPushover(url, payload);
+				return await sendPushover(url, payload, skipTlsVerify);
 			case 'mqtt':
 			case 'mqtts':
 				return await sendMqtt(url, payload);
 			case 'json':
 			case 'jsons':
-				return await sendGenericWebhook(url, payload);
+				return await sendGenericWebhook(url, payload, skipTlsVerify);
 			case 'workflows':
-				return await sendWorkflows(url, payload);
+				return await sendWorkflows(url, payload, skipTlsVerify);
 			case 'zabbix':
 			case 'zabbixs':
-				return await sendZabbix(url, payload);
+				return await sendZabbix(url, payload, (config.skipTlsVerify ?? config.zabbixSkipTlsVerify) === true);
 			default:
 				return { success: false, error: `Unsupported Apprise protocol: ${protocol}` };
 		}

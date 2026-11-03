@@ -162,3 +162,15 @@ export function getStreamingDispatcher(): Dispatcher {
 	}
 	return streamingDispatcher;
 }
+
+// Only explicitly opted-in requests use this dispatcher; global TLS verification stays enabled.
+let tlsSkipVerifyDispatcher: Dispatcher | undefined;
+export function getTlsSkipVerifyDispatcher(): Dispatcher {
+	if (!tlsSkipVerifyDispatcher) {
+		const connect = { ...(ALLOW_IPV6 ? {} : connectOptions), rejectUnauthorized: false };
+		tlsSkipVerifyDispatcher = hasProxy
+			? new EnvHttpProxyAgent({ connect, requestTls: connect })
+			: new Agent({ connect });
+	}
+	return tlsSkipVerifyDispatcher;
+}

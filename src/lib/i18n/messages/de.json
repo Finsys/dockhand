@@ -6962,6 +6962,8 @@
 	"settings_notifications_yes": "Ja",
 	"settings_notifications_no": "Nein",
 	"settings_notifications_skip_tls_verify": "TLS-Prüfung überspringen",
+	"settings_notifications_webhook_skip_tls_verify": "TLS-Zertifikatsprüfung überspringen",
+	"settings_notifications_webhook_skip_tls_verify_hint": "Gilt nur für HTTPS-Webhooks in diesem Kanal. HTTPS bleibt verschlüsselt, aber die Identität des Servers wird nicht mehr geprüft. Erlaubt selbstsignierte Zertifikate und abweichende Hostnamen.",
 	"settings_notifications_username": "Benutzername",
 	"settings_notifications_password": "Passwort",
 	"settings_notifications_password_keep_placeholder": "Leer lassen, um das bestehende beizubehalten",

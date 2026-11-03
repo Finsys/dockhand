@@ -6694,6 +6694,8 @@
 	"settings_notifications_yes": "Evet",
 	"settings_notifications_no": "Hayır",
 	"settings_notifications_skip_tls_verify": "TLS doğrulamasını atla",
+	"settings_notifications_webhook_skip_tls_verify": "TLS sertifika doğrulamasını atla",
+	"settings_notifications_webhook_skip_tls_verify_hint": "Yalnızca bu kanaldaki HTTPS webhook’ları için geçerlidir. HTTPS şifreli kalır, ancak sunucunun kimliği artık doğrulanmaz. Kendinden imzalı sertifikalara ve ana bilgisayar adı uyuşmazlıklarına izin verir.",
 	"settings_notifications_username": "Kullanıcı adı",
 	"settings_notifications_password": "Parola",
 	"settings_notifications_password_keep_placeholder": "Mevcut olanı korumak için boş bırakın",
