@@ -17,4 +17,8 @@ describe('cronstrueLocaleFor', () => {
 	test('an unknown locale falls back to English', () => {
 		expect(cronstrueLocaleFor('xx')).toBe('en');
 	});
+
+	test('Brazilian Portuguese uses its regional cron translation', () => {
+		expect(cronstrueLocaleFor('pt-BR')).toBe('pt_BR');
+	});
 });
