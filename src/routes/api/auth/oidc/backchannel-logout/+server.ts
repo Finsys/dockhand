@@ -41,8 +41,11 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	// 400 with a no-store header; the IdP is the only caller and nothing here is cacheable.
+	// Log the rejection: a silent 400 is indistinguishable from a POST that never arrived,
+	// which makes a misconfigured IdP logout impossible to debug.
 	const bad = (reason: string) => {
 		recordFailedAttempt(rateLimitKey);
+		console.warn(`[Auth] back-channel logout rejected (${clientIp}): ${reason}`);
 		return json({ error: reason }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
 	};
 
@@ -66,24 +69,28 @@ export const POST: RequestHandler = async (event) => {
 	const contexts = await getOidcVerificationContexts(claimedIssuer);
 	if (contexts.length === 0) return bad('the logout token issuer matches no configured provider');
 
-	// Try each provider sharing this issuer: with different client ids only the one the
-	// token was addressed to (aud/azp) verifies. Keep the last failure to report if none do.
+	// Try each provider sharing this issuer. With different client ids only the one the
+	// token was addressed to (aud/azp) verifies. When several verify (the same IdP
+	// registered more than once: same issuer AND client id), the token belongs to all of
+	// them, so the session delete below runs under each - the session may live under any
+	// one. The verified claims are the token's own, identical whichever context's keys
+	// prove the signature, so verify once and reuse the first result.
 	let result;
-	let ctx;
+	const verifiedProviders: string[] = [];
 	let lastError: unknown;
 	for (const candidate of contexts) {
 		try {
-			result = await verifyLogoutTokenWithKeys(logoutToken, candidate.keys, {
+			const r = await verifyLogoutTokenWithKeys(logoutToken, candidate.keys, {
 				issuer: candidate.issuer,
 				clientId: candidate.clientId
 			});
-			ctx = candidate;
-			break;
+			if (!result) result = r;
+			verifiedProviders.push(candidate.provider);
 		} catch (error) {
 			lastError = error;
 		}
 	}
-	if (!result || !ctx) {
+	if (!result || verifiedProviders.length === 0) {
 		return bad(lastError instanceof Error ? lastError.message : 'the logout token could not be verified');
 	}
 
@@ -103,12 +110,14 @@ export const POST: RequestHandler = async (event) => {
 	// Only a token with NO sid at all ends the user's whole set for the provider by sub;
 	// branching on which claim the token supplied, not on whether a row matched, keeps a
 	// single-session logout from silently escalating to a sub-wide one.
-	let affectedUserIds: number[] = [];
+	const affected = new Set<number>();
 	try {
-		if (result.sid) {
-			affectedUserIds = await deleteSessionsByOidcSid(result.sid, ctx.provider);
-		} else if (result.sub) {
-			affectedUserIds = await deleteSessionsByOidcSub(result.sub, ctx.provider);
+		for (const provider of verifiedProviders) {
+			if (result.sid) {
+				for (const id of await deleteSessionsByOidcSid(result.sid, provider)) affected.add(id);
+			} else if (result.sub) {
+				for (const id of await deleteSessionsByOidcSub(result.sub, provider)) affected.add(id);
+			}
 		}
 	} catch (error) {
 		// Release the jti reservation so the IdP's retry performs the logout rather than
@@ -118,15 +127,17 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'logout could not be completed' }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
 	}
 
+	const affectedUserIds = [...affected];
 	for (const userId of affectedUserIds) {
 		invalidateTokenCacheForUser(userId);
 	}
 
 	await auditAuth(event, 'logout', result.sub ?? result.sid ?? 'unknown', {
-		provider: ctx.provider,
+		provider: verifiedProviders.join(','),
 		backchannel: true,
 		sessions: affectedUserIds.length
 	});
 
+	console.log(`[Auth] back-channel logout accepted: provider=${verifiedProviders.join(',')} by=${result.sid ? 'sid' : 'sub'} sessions=${affectedUserIds.length}`);
 	return json({ success: true }, { headers: { 'Cache-Control': 'no-store' } });
 };
