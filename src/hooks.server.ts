@@ -23,7 +23,7 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
 import { isPublicPath } from '$lib/server/public-paths-core';
-import { isForbiddenCrossOrigin, isCsrfExemptPath } from '$lib/server/csrf-origin-core';
+import { isForbiddenCrossOrigin, isCsrfExemptPath, parseTrustedHostnames, csrfOriginCheckDisabled } from '$lib/server/csrf-origin-core';
 import { evaluateExposure } from '$lib/server/exposure-warning';
 import { METRICS_PUBLIC } from '$lib/server/metrics';
 import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
@@ -430,6 +430,12 @@ const securityHeaders: Handle = async ({ event, resolve }) => {
 // Own CSRF origin check (SvelteKit's built-in is disabled in svelte.config.js so public
 // signature-authenticated cross-origin endpoints can be exempted). Reject a cross-site
 // form-content write before the auth handle processes it.
+// Operator escape hatches for the origin check, read once at startup: TRUSTED_ORIGINS marks
+// extra hostnames same-site (for a reverse proxy that rewrites the Origin host), and
+// DISABLE_CSRF_ORIGIN_CHECK turns the check off entirely (last resort).
+const CSRF_TRUSTED_HOSTNAMES = parseTrustedHostnames(process.env.TRUSTED_ORIGINS);
+const CSRF_ORIGIN_CHECK_DISABLED = csrfOriginCheckDisabled(process.env.DISABLE_CSRF_ORIGIN_CHECK);
+
 const csrfHandle: Handle = async ({ event, resolve }) => {
 	if (
 		isForbiddenCrossOrigin({
@@ -439,7 +445,9 @@ const csrfHandle: Handle = async ({ event, resolve }) => {
 			urlOrigin: event.url.origin,
 			isExemptPath: isCsrfExemptPath(event.url.pathname),
 			hasSessionCookie: !!event.cookies.get(SESSION_COOKIE),
-			secFetchSite: event.request.headers.get('sec-fetch-site')
+			secFetchSite: event.request.headers.get('sec-fetch-site'),
+			trustedHostnames: CSRF_TRUSTED_HOSTNAMES,
+			disabled: CSRF_ORIGIN_CHECK_DISABLED
 		})
 	) {
 		return new Response('Cross-site form submissions are forbidden', { status: 403 });

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { isForbiddenCrossOrigin, isCsrfExemptPath } from '../src/lib/server/csrf-origin-core';
+import { isForbiddenCrossOrigin, isCsrfExemptPath, parseTrustedHostnames, csrfOriginCheckDisabled } from '../src/lib/server/csrf-origin-core';
 
 const SELF = 'https://dockhand.example.com';
 // Default request shape for a cookie-authenticated browser request (the CSRF-eligible case).
@@ -75,10 +75,19 @@ describe('isForbiddenCrossOrigin - cookie-authed with NO Origin: Sec-Fetch-Site 
 		expect(isForbiddenCrossOrigin({ ...base, method: 'POST', contentType: 'text/plain', origin: null, secFetchSite: 'same-site' })).toBe(true);
 	});
 
-	test('cookie-authed form POST with NEITHER Origin NOR Sec-Fetch-Site is forbidden (fail closed)', () => {
-		// A legacy browser or a header-stripping proxy carrying a session cookie - portainer's
-		// conservative choice. A non-browser client would have no cookie (covered above).
-		expect(isForbiddenCrossOrigin({ ...base, method: 'POST', contentType: 'text/plain', origin: null, secFetchSite: null })).toBe(true);
+	test('cookie-authed request with NEITHER Origin NOR Sec-Fetch-Site is ALLOWED (non-browser client)', () => {
+		// No browser cross-site mutating request can have no Origin AND no Sec-Fetch-Site: a form
+		// POST always carries an Origin, a cross-site fetch is preflighted. So this triple is a
+		// non-browser client holding a session cookie (script/CI/test runner), not a forgery.
+		expect(isForbiddenCrossOrigin({ ...base, method: 'POST', contentType: 'text/plain', origin: null, secFetchSite: null })).toBe(false);
+	});
+
+	test('bodyless cookie DELETE with no Origin, no content-type, no Sec-Fetch-Site is ALLOWED (the build-5957 shape)', () => {
+		// The exact shape the integration suite sends: a session cookie, a bodyless DELETE (so no
+		// Content-Type), and a server-side fetch that attaches neither Origin nor Sec-Fetch-Site.
+		// Empty content-type is form-reachable, so this previously fell through to a 403.
+		expect(isForbiddenCrossOrigin({ ...base, method: 'DELETE', contentType: null, origin: null, secFetchSite: null })).toBe(false);
+		expect(isForbiddenCrossOrigin({ ...base, method: 'POST', contentType: null, origin: null, secFetchSite: null })).toBe(false);
 	});
 
 	test('Sec-Fetch-Site is ignored when an Origin is present (hostname decides)', () => {
@@ -115,5 +124,82 @@ describe('isCsrfExemptPath', () => {
 	test('does not exempt an unrelated path', () => {
 		expect(isCsrfExemptPath('/api/stacks/x/stop')).toBe(false);
 		expect(isCsrfExemptPath('/api/git/webhook/abc')).toBe(false); // non-numeric id
+	});
+});
+
+describe('operator escape hatches', () => {
+	// The exact attack the check blocks by default: cookie-authed cross-host form POST.
+	const attack = { ...base, method: 'POST', contentType: 'text/plain', origin: 'https://proxy-rewritten.example.net' };
+
+	test('without the hatches, a cross-host form POST stays 403', () => {
+		expect(isForbiddenCrossOrigin(attack)).toBe(true);
+	});
+
+	test('TRUSTED_ORIGINS hostname allows an Origin a proxy rewrote to that host', () => {
+		expect(isForbiddenCrossOrigin({ ...attack, trustedHostnames: ['proxy-rewritten.example.net'] })).toBe(false);
+		// case-insensitive, and only the LISTED host is trusted - a different cross-host still 403s.
+		expect(isForbiddenCrossOrigin({ ...attack, origin: 'https://PROXY-Rewritten.Example.NET', trustedHostnames: ['proxy-rewritten.example.net'] })).toBe(false);
+		expect(isForbiddenCrossOrigin({ ...attack, origin: 'https://evil.com', trustedHostnames: ['proxy-rewritten.example.net'] })).toBe(true);
+	});
+
+	test('the allowlist is EXACT host match, not a suffix/prefix substring (bypass guard)', () => {
+		const trusted = ['proxy-rewritten.example.net'];
+		// A suffix attack: attacker.com owns a subdomain that ends with the trusted host text.
+		expect(isForbiddenCrossOrigin({ ...attack, origin: 'https://proxy-rewritten.example.net.attacker.com', trustedHostnames: trusted })).toBe(true);
+		// A prefix attack: a host that starts with the trusted text.
+		expect(isForbiddenCrossOrigin({ ...attack, origin: 'https://evil-proxy-rewritten.example.net', trustedHostnames: trusted })).toBe(true);
+		// A bare substring anywhere.
+		expect(isForbiddenCrossOrigin({ ...attack, origin: 'https://x-proxy-rewritten.example.net-y.evil.com', trustedHostnames: trusted })).toBe(true);
+	});
+
+	test('DISABLE_CSRF_ORIGIN_CHECK turns the whole check off (pre-1.0.57 behavior)', () => {
+		expect(isForbiddenCrossOrigin({ ...attack, disabled: true })).toBe(false);
+		// Even a no-cookie / exempt combination is unaffected - disabled short-circuits first.
+		expect(isForbiddenCrossOrigin({ ...attack, disabled: true, secFetchSite: 'cross-site' })).toBe(false);
+	});
+
+	test('the hatches never widen past their input: empty list / absent flag keep the default 403', () => {
+		expect(isForbiddenCrossOrigin({ ...attack, trustedHostnames: [] })).toBe(true);
+		expect(isForbiddenCrossOrigin({ ...attack, disabled: false })).toBe(true);
+	});
+});
+
+describe('parseTrustedHostnames', () => {
+	test('CSV of bare hostnames, lowercased and trimmed', () => {
+		expect(parseTrustedHostnames('a.example.com, B.Example.com ,c.test')).toEqual(['a.example.com', 'b.example.com', 'c.test']);
+	});
+
+	test('a full origin is reduced to its hostname (so it matches the hostname compare)', () => {
+		expect(parseTrustedHostnames('https://app.example.com:8443')).toEqual(['app.example.com']);
+		expect(parseTrustedHostnames('host.example.com:3000')).toEqual(['host.example.com']);
+	});
+
+	test('a bare IPv6 literal keeps all its hextets (the :port strip must not eat the last one)', () => {
+		// A URL Origin for an IPv6 host is bracketed, so a bare entry must stay intact to match it
+		// via the full-origin form; the regression was fe80::1 -> fe80: which trusts nothing.
+		expect(parseTrustedHostnames('fe80::1')).toEqual(['fe80::1']);
+		expect(parseTrustedHostnames('2001:db8::1')).toEqual(['2001:db8::1']);
+		// A bracketed / full-origin IPv6 reduces to the bracketed hostname URL reports.
+		expect(parseTrustedHostnames('https://[fe80::1]:9000')).toEqual(['[fe80::1]']);
+	});
+
+	test('blank / empty / unparseable entries are dropped (fail-safe: never widen to everything)', () => {
+		expect(parseTrustedHostnames('')).toEqual([]);
+		expect(parseTrustedHostnames(null)).toEqual([]);
+		expect(parseTrustedHostnames(undefined)).toEqual([]);
+		expect(parseTrustedHostnames('  ,  , ')).toEqual([]);
+		expect(parseTrustedHostnames('https://')).toEqual([]);
+	});
+});
+
+describe('csrfOriginCheckDisabled', () => {
+	test('only an explicit true/1 disables', () => {
+		expect(csrfOriginCheckDisabled('true')).toBe(true);
+		expect(csrfOriginCheckDisabled('1')).toBe(true);
+		expect(csrfOriginCheckDisabled('false')).toBe(false);
+		expect(csrfOriginCheckDisabled('0')).toBe(false);
+		expect(csrfOriginCheckDisabled('')).toBe(false);
+		expect(csrfOriginCheckDisabled(null)).toBe(false);
+		expect(csrfOriginCheckDisabled('TRUE')).toBe(false); // exact match only, no accidental enabling
 	});
 });
