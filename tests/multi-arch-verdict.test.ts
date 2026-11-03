@@ -107,6 +107,72 @@ describe('multiArchVerdict', () => {
 	});
 });
 
+describe('multiArchVerdict with the running image digest (the authoritative local side)', () => {
+	const running = (result: unknown) => async () => result as any;
+	// The container is REALLY running AMD64; the tag's current index has NEW_AMD64. Even though
+	// the local RepoDigests index has floated to list NEW_AMD64, the running digest is the truth:
+	// it is a real update. This is the case a floated RepoDigests index wrongly reports as "same".
+	test('a same-version rebuild is a real update when the running digest is behind the current index', async () => {
+		const r = reader({ tag: ok(index(NEW_AMD64)), [OLD_INDEX]: ok(index(NEW_AMD64)) });
+		const v = await multiArchVerdict({ tag: 'tag', localDigests: [OLD_INDEX], runningDigest: running({ digest: AMD64 }), readIndex: r.readIndex, platform: amd64 });
+		expect(v).toEqual({ kind: 'different' });
+	});
+
+	test('the running digest equal to the current platform child is up to date', async () => {
+		const r = reader({ tag: ok(index(AMD64)) });
+		const v = await multiArchVerdict({ tag: 'tag', localDigests: [OLD_INDEX], runningDigest: running({ digest: AMD64 }), readIndex: r.readIndex, platform: amd64 });
+		expect(v).toEqual({ kind: 'same' });
+		// The running digest answers it; the local RepoDigests index is never read.
+		expect(r.calls).toEqual(['tag']);
+	});
+
+	test('a per-arch pin (child of the current index) short-circuits BEFORE the running lookup', async () => {
+		// localDigestIsIndexChild wins first; the running resolver is never called (no daemon cost).
+		const r = reader({ tag: ok(index(AMD64)) });
+		let called = false;
+		const v = await multiArchVerdict({ tag: 'tag', localDigests: [AMD64], runningDigest: async () => { called = true; return { noSignal: true }; }, readIndex: r.readIndex, platform: amd64 });
+		expect(v).toEqual({ kind: 'same' });
+		expect(called).toBe(false);
+	});
+
+	test('a sibling-arch-only index move is NOT an update: the running platform child is unchanged', async () => {
+		const r = reader({ tag: ok(index(AMD64, NEW_AMD64)) });
+		const v = await multiArchVerdict({ tag: 'tag', localDigests: [OLD_INDEX], runningDigest: running({ digest: AMD64 }), readIndex: r.readIndex, platform: amd64 });
+		expect(v).toEqual({ kind: 'same' });
+	});
+
+	test('the running digest needs the platform; an unknown platform is unknown', async () => {
+		const r = reader({ tag: ok(index(NEW_AMD64)) });
+		const v = await multiArchVerdict({ tag: 'tag', localDigests: [OLD_INDEX], runningDigest: running({ digest: AMD64 }), readIndex: r.readIndex, platform: async () => null });
+		expect(v.kind).toBe('unknown');
+	});
+
+	test('a FAILED running lookup is unknown, never the guessed fallback (the transient-error fix)', async () => {
+		// A 5xx / connection error on ?manifests=true must NOT collapse into the floated-index
+		// fallback and report "same" - it is undecidable, so the verdict is unknown.
+		const r = reader({ tag: ok(index(NEW_AMD64)), [OLD_INDEX]: ok(index(NEW_AMD64)) });
+		const v = await multiArchVerdict({ tag: 'tag', localDigests: [OLD_INDEX], runningDigest: running({ unknown: true, reason: 'daemon 500' }), readIndex: r.readIndex, platform: amd64 });
+		expect(v).toEqual({ kind: 'unknown', reason: 'daemon 500' });
+		// It did NOT fall into the index loop (OLD_INDEX never read).
+		expect(r.calls).toEqual(['tag']);
+	});
+
+	test('noSignal (classic store / old daemon) falls back to the RepoDigests index loop unchanged', async () => {
+		// Same inputs as the index-loop test above must give the same verdict via fallback.
+		const r = reader({ tag: ok(index(NEW_AMD64)), [OLD_INDEX]: ok(index(AMD64)) });
+		const v = await multiArchVerdict({ tag: 'tag', localDigests: [OLD_INDEX], runningDigest: running({ noSignal: true }), readIndex: r.readIndex, platform: amd64 });
+		expect(v).toEqual({ kind: 'different' });
+		expect(r.calls).toEqual(['tag', OLD_INDEX]);
+	});
+
+	test('no runningDigest resolver at all falls back to the index loop (a caller that cannot read it)', async () => {
+		const r = reader({ tag: ok(index(NEW_AMD64)), [OLD_INDEX]: ok(index(AMD64)) });
+		const v = await multiArchVerdict({ tag: 'tag', localDigests: [OLD_INDEX], readIndex: r.readIndex, platform: amd64 });
+		expect(v).toEqual({ kind: 'different' });
+		expect(r.calls).toEqual(['tag', OLD_INDEX]);
+	});
+});
+
 describe('readWithRetry', () => {
 	const scripted = (...answers: IndexRead[]) => {
 		let i = 0;

@@ -193,7 +193,7 @@ describe('localImageMatchesRegistry wires the phantom-update check', () => {
 	});
 
 	test('the caller clears a same verdict and turns unknown into an error, never an update', () => {
-		expect(src).toContain('const multiArch = await localImageMatchesRegistry(imageName, localDigests, envId, registryDigest);');
+		expect(src).toContain('const multiArch = await localImageMatchesRegistry(imageName, localDigests, envId, registryDigest, currentImageId);');
 		expect(src).toContain("if (multiArch.kind === 'same') {");
 		expect(src).toContain("if (multiArch.kind === 'unknown') {");
 	});
