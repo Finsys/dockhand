@@ -6,6 +6,7 @@
     "changes": [
       { "type": "feature", "text": "OIDC back-channel logout ends a Dockhand session when the identity provider signals logout (#1835)" },
       { "type": "feature", "text": "Ukrainian interface translation (#1839, PR#1839, @TripShuti)" },
+      { "type": "feature", "text": "Brazilian Portuguese interface translation (PR#1851, @lucasskluser)" },
       { "type": "feature", "text": "Infisical bulk pull now includes secrets from folder imports (#1829, PR#1844, @gorillka)" },
       { "type": "feature", "text": "convert a stack between local and git management without recreating it (#636, PR#795, @barrelltitor)" },
       { "type": "fix", "text": "git stack files keep their executable bit when deployed to a Hawser remote host" },
@@ -13,7 +14,10 @@
       { "type": "fix", "text": "the containers and stacks status filter survives a page refresh (#1842)" },
       { "type": "fix", "text": "git stack files over 10 MB reach a Hawser agent instead of being dropped (#1845)" },
       { "type": "fix", "text": "env vars used only as placeholders in other env values are no longer flagged unused (#1766, PR#1804, @Totopo27)" },
-      { "type": "fix", "text": "update bundled dependencies (nodemailer, undici)" }
+      { "type": "fix", "text": "update bundled dependencies (nodemailer, undici)" },
+      { "type": "fix", "text": "detect a same-version rebuild of a floating multi-arch tag by the image the container actually runs (#1848)" },
+      { "type": "fix", "text": "stop sending a container exit notification for a non-terminating signal like a terminal resize (#1849)" },
+      { "type": "fix", "text": "view and download container files whose names contain characters like { } or =" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.57"
   },
