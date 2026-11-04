@@ -17,6 +17,7 @@ import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
+import { isSshRepoUrl } from '$lib/server/git-error';
 
 // Stack name validation: Docker Compose requires lowercase; must start with a
 // letter or number, and contain only lowercase letters, numbers, hyphens, underscores
@@ -139,6 +140,11 @@ export const POST: RequestHandler = async (event) => {
 				const credential = credentials.find(c => c.id === data.credentialId);
 				if (!credential) {
 					return json({ error: 'Invalid credential ID' }, { status: 400 });
+				}
+				if (credential.authType === 'password' && isSshRepoUrl(data.url)) {
+					return json({
+						error: 'Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.'
+					}, { status: 400 });
 				}
 			}
 
