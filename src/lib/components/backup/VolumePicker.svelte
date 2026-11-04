@@ -81,25 +81,27 @@
 			</div>
 		{/if}
 
-		<!-- List always shown: informational when "all" is on, selectable when off. -->
-		<div class="divide-y max-h-40 overflow-y-auto">
+		<!-- List always shown: informational when "all" is on, selectable when off.
+		     overflow-x-auto + nowrap rows let long bind paths be scrolled horizontally
+		     (hover title still shows the full path). (#1857) -->
+		<div class="divide-y max-h-64 overflow-y-auto overflow-x-auto">
 			{#each volumes as vol (vol.key)}
-				<label class="flex items-center gap-2 px-3 py-1.5 text-xs" class:cursor-pointer={!allVolumes && !vol.unbackupable} class:opacity-50={vol.unbackupable}>
+				<label class="flex items-center gap-2 px-3 py-1.5 text-xs w-max min-w-full" class:cursor-pointer={!allVolumes && !vol.unbackupable} class:opacity-50={vol.unbackupable}>
 					<Checkbox
 						checked={!vol.unbackupable && (allVolumes || selectedVolumes.includes(vol.key))}
 						disabled={allVolumes || vol.unbackupable}
 						onCheckedChange={() => !vol.unbackupable && toggleVolume(vol.key)}
-						class="h-3.5 w-3.5"
+						class="h-3.5 w-3.5 shrink-0"
 					/>
 					<MountTypeBadge type={vol.mountType} size="sm" file={fileKeys?.has(vol.key) ?? false} />
-						<span class="font-mono truncate">{vol.name}</span>
+						<span class="font-mono whitespace-nowrap" title={vol.name}>{vol.name}</span>
 						{#if vol.source && vol.source !== vol.name}
-							<span class="text-muted-foreground font-mono truncate">{m.backupui_from_source({ source: vol.source })}</span>
+							<span class="text-muted-foreground font-mono whitespace-nowrap" title={vol.source}>{m.backupui_from_source({ source: vol.source })}</span>
 						{/if}
 						{#if vol.unbackupable}
 							<span class="text-muted-foreground ml-auto shrink-0 italic">{m.backupui_not_backed_up()}</span>
 						{:else if vol.mountPoint}
-							<span class="text-muted-foreground ml-auto truncate">{vol.mountPoint}</span>
+							<span class="text-muted-foreground ml-4 whitespace-nowrap" title={vol.mountPoint}>{vol.mountPoint}</span>
 						{/if}
 					</label>
 				{/each}
