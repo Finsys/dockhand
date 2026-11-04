@@ -1,8 +1,7 @@
 [
   {
     "version": "1.0.57",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-11-04",
     "changes": [
       { "type": "feature", "text": "OIDC back-channel logout ends a Dockhand session when the identity provider signals logout (#1835)" },
       { "type": "feature", "text": "Ukrainian interface translation (#1839, PR#1839, @TripShuti)" },
@@ -18,7 +17,10 @@
       { "type": "fix", "text": "update bundled dependencies (nodemailer, undici)" },
       { "type": "fix", "text": "detect a same-version rebuild of a floating multi-arch tag by the image the container actually runs (#1848)" },
       { "type": "fix", "text": "stop sending a container exit notification for a non-terminating signal like a terminal resize (#1849)" },
-      { "type": "fix", "text": "view and download container files whose names contain characters like { } or =" }
+      { "type": "fix", "text": "view and download container files whose names contain characters like { } or =" },
+      { "type": "fix", "text": "always show the file action buttons on touch devices (#1776, PR#1854, @Totopo27)" },
+      { "type": "fix", "text": "widen the edit-backup dialog so bind-mount paths are not cut off, with the full path on hover (#1857)" },
+      { "type": "fix", "text": "security hardening: path-write guards, deploy-env filtering, origin checks and framing headers" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.57"
   },
