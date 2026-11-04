@@ -3,20 +3,32 @@
  * without importing git.ts's heavy deps (db/docker). No I/O here.
  */
 
+export function isSshRepoUrl(url: string | null | undefined): boolean {
+	const u = (url || '').trim();
+	if (!u) return false;
+	if (u.startsWith('git@') || u.startsWith('ssh://')) return true;
+	const schemeMatch = u.match(/^[a-z][a-z0-9+.-]*:/i);
+	if (schemeMatch) {
+		return schemeMatch[0].slice(0, -1).toLowerCase() === 'ssh';
+	}
+	const colonIdx = u.indexOf(':');
+	return colonIdx > 0;
+}
+
 /**
- * The permission-denied message, tailored to the auth in use (#1509). A token/password
- * credential paired with an `git@...` SSH URL is the common trap: git uses the SSH
- * transport and never applies the token, so it fails with a public-key error - blaming
+ * The permission-denied message, tailored to the auth in use (#1509, #1862). A token/password
+ * credential paired with an SSH URL (git@... or ssh://...) is the common trap: git uses the SSH
+ * transport and cannot take passwords non-interactively, so it fails with a public-key error - blaming
  * "SSH credentials" then is actively misleading. Point at the real cause instead.
  */
 export function permissionDeniedMessage(
 	authType?: string | null,
 	url?: string | null
 ): string {
-	const isSshUrl = !!url && url.startsWith('git@');
+	const isSsh = isSshRepoUrl(url);
 	if (authType === 'password') {
-		if (isSshUrl) {
-			return 'Permission denied. This credential uses a token, but the repository URL is an SSH URL (git@...). Use an https:// URL for token authentication.';
+		if (isSsh) {
+			return 'Permission denied. Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.';
 		}
 		return 'Permission denied. Check your access token and that it has repository access.';
 	}

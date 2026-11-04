@@ -754,6 +754,18 @@
 		}
 	}
 
+	function isSshUrl(url: string) {
+		const u = (url || '').trim();
+		if (!u) return false;
+		if (u.startsWith('git@') || u.startsWith('ssh://')) return true;
+		const schemeMatch = u.match(/^[a-z][a-z0-9+.-]*:/i);
+		if (schemeMatch) {
+			return schemeMatch[0].slice(0, -1).toLowerCase() === 'ssh';
+		}
+		const colonIdx = u.indexOf(':');
+		return colonIdx > 0;
+	}
+
 	async function saveGitStack(deployAfterSave: boolean = false) {
 		if (isInitializing || !conversionDataReady) return;
 
@@ -782,6 +794,14 @@
 		if (formRepoMode === 'new' && !formNewRepoUrl.trim()) {
 			errors.repoUrl = m.stacks_git_error_repo_url_required();
 			hasErrors = true;
+		}
+
+		if (formRepoMode === 'new' && formNewRepoCredentialId) {
+			const cred = credentials.find(c => c.id === formNewRepoCredentialId);
+			if (cred?.authType === 'password' && isSshUrl(formNewRepoUrl)) {
+				errors.repoUrl = 'Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.';
+				hasErrors = true;
+			}
 		}
 
 		// A secret is required unless the instance opted into secret-less webhooks
@@ -1237,7 +1257,15 @@
 									bind:value={formNewRepoUrl}
 									placeholder="https://github.com/user/repo.git"
 									class={errors.repoUrl ? 'border-destructive focus-visible:ring-destructive' : ''}
-									oninput={() => errors.repoUrl = undefined}
+									oninput={() => {
+										errors.repoUrl = undefined;
+										if (isSshUrl(formNewRepoUrl)) {
+											const cred = credentials.find(c => c.id === formNewRepoCredentialId);
+											if (cred?.authType === 'password') {
+												formNewRepoCredentialId = null;
+											}
+										}
+									}}
 								/>
 								{#if errors.repoUrl}
 									<p class="text-xs text-destructive">{errors.repoUrl}</p>
@@ -1296,7 +1324,8 @@
 												</span>
 											</Select.Item>
 											{#each credentials as cred}
-												<Select.Item value={cred.id.toString()}>
+												{@const disabled = cred.authType === 'password' && isSshUrl(formNewRepoUrl)}
+												<Select.Item value={cred.id.toString()} {disabled}>
 													<span class="flex items-center gap-2">
 														{#if cred.authType === 'ssh'}
 															<KeyRound class="w-4 h-4 text-muted-foreground" />
@@ -1305,7 +1334,7 @@
 														{:else}
 															<Key class="w-4 h-4 text-muted-foreground" />
 														{/if}
-														{cred.name} ({getAuthLabel(cred.authType)})
+														{cred.name} ({getAuthLabel(cred.authType)}){#if disabled} (unsupported with SSH){/if}
 													</span>
 												</Select.Item>
 											{/each}
