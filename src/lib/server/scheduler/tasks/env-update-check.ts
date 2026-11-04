@@ -19,9 +19,12 @@ import {
 	clearPendingContainerUpdates,
 	addPendingContainerUpdate,
 	removePendingContainerUpdate,
-	getPendingContainerUpdates
+	getPendingContainerUpdates,
+	getEnvSetting,
+	setEnvSetting
 } from '../../db';
-import { checkNewerVersion, type ImageCreatedAtProbe } from '../../semver/check';
+import { checkNewerVersion, type RunningImageCheck } from '../../semver/check';
+import { isBeyondNotified, notifiedMarkFor, type NotifiedMark } from '../../semver/notified-mark';
 import { userCheckListedAfter } from '../../semver/tag-source-core';
 import { parseTag } from '../../semver/tag-parser';
 import { parseImageReference } from '../../registry/image-ref';
@@ -38,7 +41,7 @@ import {
 	tagImage,
 	inspectImage,
 	getTagArtifactKind,
-	getRegistryTagCreatedAt,
+	getRegistryTagImage,
 } from '../../docker';
 import { withPullRetry, withCheckRetry, createRegistryThrottle } from '../../pull-retry';
 import type { ImageEnvLabels } from '../../container-env-merge';
@@ -65,6 +68,14 @@ interface UpdateInfo {
 
 // Track running update checks to prevent concurrent execution
 const runningUpdateChecks = new Set<number>();
+
+/** Per-environment setting: container name -> the newer version last notified. */
+const SEMVER_NOTIFIED_KEY = 'semver_notified';
+
+function imageRepo(imageName: string): string {
+	const { registry, repo } = parseImageReference(imageName);
+	return `${registry}/${repo}`;
+}
 
 /**
  * Execute environment update check job.
@@ -134,22 +145,22 @@ export async function runEnvUpdateCheckJob(
 		// The global opt-out for moved-digest reports on pinned images (#1780); the
 		// per-container label can still override it either way.
 		const reportPinnedGlobal = await getPinnedDigestReportEnabled();
-		// Remember the target we last surfaced per container, so we only notify when
-		// a NEW newer version appears - not on every scheduled run. Read before clear.
-		const previousSemverTargets = new Map<string, string>();
-		// Read before clear: also what a container whose check fails keeps.
+		// Read before clear: what a container whose check fails keeps.
 		const previousRows = await getPendingContainerUpdates(environmentId).catch(() => []);
+		// What each container was last notified about, by name (an update recreates the
+		// container under a new id), so we notify only when a suggestion goes beyond it.
+		const notifiedMarks: Record<string, NotifiedMark> = semverEnabled
+			? ((await getEnvSetting(SEMVER_NOTIFIED_KEY, environmentId).catch(() => null)) ?? {})
+			: {};
 		if (semverEnabled) {
-			try {
-				for (const row of previousRows) {
-					if (row.newerVersion) {
-						try {
-							const nv = JSON.parse(row.newerVersion) as NewerVersion;
-							previousSemverTargets.set(row.containerId, nv.tag);
-						} catch { /* ignore malformed */ }
-					}
-				}
-			} catch { /* non-fatal */ }
+			// Before any mark was stored, the suggestion on show is what was notified.
+			for (const row of previousRows) {
+				if (!row.newerVersion || notifiedMarks[row.containerName]) continue;
+				try {
+					const nv = JSON.parse(row.newerVersion) as NewerVersion;
+					notifiedMarks[row.containerName] = notifiedMarkFor(nv, imageRepo(row.currentImage));
+				} catch { /* ignore malformed */ }
+			}
 		}
 		// Collected here so a single notification can summarise all newly-found versions.
 		const newSemverFindings: { containerName: string; imageName: string; newerVersion: NewerVersion }[] = [];
@@ -288,39 +299,40 @@ export async function runEnvUpdateCheckJob(
 							`  [${container.name}] dockhand.version.pattern ignored - ${patternRejection}`
 						);
 					}
-					// A version tag names what a maintainer called a build, not when it was
-					// made, so a repo still carrying high-sorting old tags offers them as
-					// upgrades. The running image's build date is read locally; the
-					// candidate's comes from the registry, for the chosen candidate only.
-					let staleCheck: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null } | undefined;
+					// Candidates are compared with the running image itself, so a tag holding
+					// it under another index is not offered. A version tag names what a
+					// maintainer called a build, not when it was made, so with
+					// rejectOlderImages a repo's high-sorting old tags are dropped too: the
+					// running image's build date is read locally, the candidates' from the
+					// registry.
+					const runningImage: RunningImageCheck = {
+						probeImage: (registry, repo, digest) => getRegistryTagImage(registry, repo, digest, environmentId),
+						currentImageId
+					};
 					// Skipped for a floating tag: checkNewerVersion short-circuits on one,
 					// so the inspect would buy nothing.
 					if (semverConfig.rejectOlderImages && parseTag(parseImageReference(imageName).tag, versionPattern)) {
-						const currentCreatedAt = await inspectImage(currentImageId, environmentId)
+						runningImage.currentCreatedAt = await inspectImage(currentImageId, environmentId)
 							.then((img: any) => (typeof img?.Created === 'string' ? img.Created : null))
 							.catch(() => null);
-						if (currentCreatedAt) {
-							staleCheck = {
-								probeCreatedAt: (registry, repo, digest) =>
-									getRegistryTagCreatedAt(registry, repo, digest, environmentId),
-								currentCreatedAt
-							};
-						}
 					}
+					const tagTransform = tagTransformFromLabels(inspectData.Config?.Labels);
 					const newer = await checkNewerVersion(
 						imageName,
-						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels), tagTransform: tagTransformFromLabels(inspectData.Config?.Labels) },
+						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels), tagTransform },
 						getTagArtifactKind,
 						result.localDigests ?? [],
-						staleCheck,
+						runningImage,
 						// Run now from Schedules lists afresh, like the containers page button.
 						triggeredBy === 'manual' ? userCheckListedAfter(startTime) : undefined
 					).catch(() => null);
 					if (newer) {
 						semverByContainer.set(container.id, newer);
 						await log(`    NEWER VERSION: ${newer.tag} (${newer.bump})`);
-						if (previousSemverTargets.get(container.id) !== newer.tag) {
+						const repo = imageRepo(imageName);
+						if (isBeyondNotified(newer, repo, notifiedMarks[container.name], { versionPattern, tagTransform })) {
 							newSemverFindings.push({ containerName: container.name, imageName, newerVersion: newer });
+							notifiedMarks[container.name] = notifiedMarkFor(newer, repo);
 						}
 					}
 				}
@@ -375,6 +387,13 @@ export async function runEnvUpdateCheckJob(
 				message: `${newSemverFindings.length} container${newSemverFindings.length !== 1 ? 's have' : ' has'} a newer version tag published (advisory - not auto-applied):\n${lines}`,
 				type: 'info'
 			}, environmentId);
+		}
+		if (semverEnabled) {
+			// A run that finds nothing keeps the mark, so a suggestion that comes back is
+			// not news; only containers that are gone drop theirs.
+			const names = new Set(containers.map((c) => c.name));
+			const kept = Object.fromEntries(Object.entries(notifiedMarks).filter(([name]) => names.has(name)));
+			await setEnvSetting(SEMVER_NOTIFIED_KEY, kept, environmentId).catch(() => {});
 		}
 
 		// Summary
