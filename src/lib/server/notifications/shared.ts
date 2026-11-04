@@ -15,11 +15,26 @@ export interface NotificationPayload {
 	environmentId?: number;
 	environmentName?: string;
 	eventType?: string;
+	stack?: string | null;
+	container?: string;
+	containerId?: string;
 	/**
 	 * Files to attach. Only SMTP can carry these - a webhook channel has nowhere to put
 	 * them, so a payload that NEEDS an attachment must be sent to an SMTP channel.
 	 */
 	attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
+}
+
+export function containerNotificationContext(
+	containerId: string,
+	containerName?: string,
+	actorAttributes: Record<string, string> = {}
+): Pick<NotificationPayload, 'stack' | 'container' | 'containerId'> {
+	return {
+		stack: actorAttributes['com.docker.compose.project'] || null,
+		container: containerName || containerId.substring(0, 12),
+		containerId
+	};
 }
 
 export interface NotificationResult {
