@@ -65,6 +65,7 @@ const KNOWN_EXPORTS = [
 	'updateGitStack',
 	'upsertStackSource',
 	'getEnvironment',
+	'logContainerEvent',
 	'getSecretEnvVarsAsRecord',
 	'getNonSecretEnvVarsAsRecord'
 ] as const;

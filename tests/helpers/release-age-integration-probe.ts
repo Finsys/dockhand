@@ -39,6 +39,7 @@ let executions: any[] = [];
 let replacementInspections = 0;
 let lastUpdated = 0;
 let removedPending = 0;
+const loggedEvents: any[] = [];
 let current = {
 	Id: originalId, Name: '/app', Image: old,
 	// Begin with a container previously created from an immutable ID, to check the next update.
@@ -67,7 +68,12 @@ const db = {
 		pendingUpdates.push(args);
 		// Upsert into the saved rows too, so the order of clear and insert is observable.
 		pendingStore = [...pendingStore.filter(r => r.containerId !== args[1]), { containerId: args[1], containerName: args[2], currentImage: args[3], ...args[4] }];
-	}, removePendingContainerUpdate: async () => { removedPending++; }, removePendingContainerUpdateByName: async () => { removedPending++; }, getPendingContainerUpdates: async () => [...pendingStore]
+	}, removePendingContainerUpdate: async () => { removedPending++; }, removePendingContainerUpdateByName: async () => { removedPending++; }, getPendingContainerUpdates: async () => [...pendingStore],
+	logContainerEvent: async (data: any) => {
+		const saved = { id: loggedEvents.length + 1, ...data };
+		loggedEvents.push(saved);
+		return saved;
+	}
 };
 mock.module(root + 'db', () => db);
 mock.module(root + 'hawser', () => ({ sendEdgeRequest: noop, sendEdgeStreamRequest: noop, isEdgeConnected: () => false }));
@@ -394,6 +400,9 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(body.results[0].success, true, JSON.stringify(body));
 	assert.equal(body.results[0].warnings[0].status, 'warning');
 	assert.match(body.results[0].warnings[0].message, /Pulling it anyway/);
+	assert.equal(loggedEvents.length, 1);
+	assert.equal(loggedEvents[0].action, 'update');
+	assert.equal(loggedEvents[0].containerId, createdId);
 } else if (phase === 'warning-stream') {
 	const { POST } = await import('../../src/routes/api/containers/batch-update-stream/+server');
 	const { getJob } = await import(root + 'jobs');
@@ -404,6 +413,9 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(job.status, 'done', JSON.stringify(job));
 	const warning = job.lines.find((l: any) => l.data.pullStatus === 'warning');
 	assert.match(warning?.data.pullMessage, /Pulling it anyway/);
+	assert.equal(loggedEvents.length, 1);
+	assert.equal(loggedEvents[0].action, 'update');
+	assert.equal(loggedEvents[0].containerId, createdId);
 } else {
 	if (phase.startsWith('env')) {
 		const { runEnvUpdateCheckJob } = await import(root + 'scheduler/tasks/env-update-check');
@@ -416,6 +428,7 @@ if (phase === 'metadata-info-failure') {
 		assert.equal(ageChecks, 1, 'Scheduler must reach the actual age deferral gate');
 		assert.equal(pullReferences.length, 0, 'Young images must be deferred before moving any tag');
 		assert.equal(createBody, undefined);
+		assert.equal(loggedEvents.length, 0);
 		assert.ok(logs.some(line => line.includes('2 hour(s) remain')), JSON.stringify(logs));
 		if (phase.startsWith('env')) {
 			// A held update is persisted so the UI can show it as waiting across a
@@ -432,6 +445,7 @@ if (phase === 'metadata-info-failure') {
 		assert.equal(createBody, undefined, 'Systemd owns both recreation and rollback');
 		assert.equal(lastUpdated, 0, 'An unverified replacement must not be marked as updated');
 		assert.equal(removedPending, 0, 'A failed update must remain pending');
+		assert.equal(loggedEvents.length, 0, 'A failed update must not log an update activity event');
 		assert.ok(!executions.some(e => e.status === 'success'), JSON.stringify(executions));
 		assert.ok(executions.some(e => e.status === 'failed'), JSON.stringify(executions));
 		if (scanning) assert.deepEqual(scans, [approved]);
@@ -463,6 +477,11 @@ if (phase === 'metadata-info-failure') {
 		if (scanning) assert.deepEqual(scans, [approved], 'Quadlet must scan the same approved image selected for respawn');
 		assert.equal(createBody, undefined, 'Systemd owns recreation');
 		assert.ok(executions.some(e => e.status === 'success'), JSON.stringify(executions));
+		assert.equal(loggedEvents.length, 1);
+		assert.equal(loggedEvents[0].action, 'update');
+		assert.equal(loggedEvents[0].containerId, createdId);
+		assert.equal(loggedEvents[0].containerName, 'app');
+		assert.equal(loggedEvents[0].image, image);
 		if (phase.startsWith('env')) assert.equal(pendingUpdates.length, 1, 'Mature update must be surfaced to the environment UI');
 	} else {
 		assert.ok(createBody, JSON.stringify(executions));
@@ -473,6 +492,11 @@ if (phase === 'metadata-info-failure') {
 		if (!phase.includes('disabled')) assert.equal(portableImageReference(createBody.Image, createBody.Labels), image.split(':')[0] + '@' + digest);
 		if (scanning) assert.deepEqual(scans, [approved], 'Scan the same image that will be created');
 		assert.ok(executions.some(e => e.status === 'success'), JSON.stringify(executions));
+		assert.equal(loggedEvents.length, 1);
+		assert.equal(loggedEvents[0].action, 'update');
+		assert.equal(loggedEvents[0].containerId, createdId);
+		assert.equal(loggedEvents[0].containerName, 'app');
+		assert.equal(loggedEvents[0].image, image);
 		if (phase.includes('portable')) await assertPortableRoundTrip(image.split(':')[0] + '@' + digest);
 	}
 }
