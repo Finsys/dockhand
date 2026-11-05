@@ -11,6 +11,8 @@ import { trackedImageReference } from '$lib/utils/tracked-image';
 import type { ScheduleTrigger, VulnerabilityCriteria } from '../../db';
 import {
 	getAutoUpdateSettingById,
+	getEnvironment,
+	logContainerEvent,
 	updateAutoUpdateLastChecked,
 	updateAutoUpdateLastUpdated,
 	createScheduleExecution,
@@ -19,6 +21,7 @@ import {
 	saveVulnerabilityScan,
 	removePendingContainerUpdateByName
 } from '../../db';
+import { containerEventEmitter } from '../../event-collector';
 import {
 	pullImage,
 	listContainers,
@@ -722,7 +725,7 @@ export async function recreateContainer(
 
 		log?.(`Recreating container: ${containerName} (image: ${imageName})`);
 
-		await recreateContainerFromInspect(inspectData, imageName, envId, log, oldImageConfig, verifiedImageId, verifiedImageReference);
+		const { Id: newContainerId } = await recreateContainerFromInspect(inspectData, imageName, envId, log, oldImageConfig, verifiedImageId, verifiedImageReference);
 
 		// Parent recreate SUCCEEDED (a failure would have thrown and rolled the parent
 		// back to its original id, leaving children valid). Repoint any dependent
@@ -736,6 +739,30 @@ export async function recreateContainer(
 			}
 		} catch (e: any) {
 			log?.(`WARNING: dependent-child reconnect step errored (parent update stands): ${e?.message}`);
+		}
+
+		// Docker has no "updated" container action for image recreation (its raw 'update'
+		// event only fires for cgroup resource-limit changes), so record an 'update'
+		// activity row and broadcast it to live SSE listeners here alongside the
+		// container_updated notification (#1864).
+		try {
+			const env = envId != null ? await getEnvironment(envId) : undefined;
+			if (env?.collectActivity !== false) {
+				const savedEvent = await logContainerEvent({
+					environmentId: envId ?? null,
+					containerId: newContainerId || oldParentId,
+					containerName,
+					image: imageName || null,
+					action: 'update',
+					actorAttributes: inspectData.Config?.Labels || null,
+					timestamp: new Date().toISOString()
+				});
+				if (savedEvent) {
+					containerEventEmitter.emit('event', savedEvent);
+				}
+			}
+		} catch (e: any) {
+			log?.(`WARNING: failed to log container update activity event (update stands): ${e?.message}`);
 		}
 
 		// recreateContainer is only ever called to UPDATE a container's image (scheduled
