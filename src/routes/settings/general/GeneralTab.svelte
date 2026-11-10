@@ -8,7 +8,7 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass, Layers } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass, Layers, Pin } from 'lucide-svelte';
 	import { STACK_LOG_OPERATIONS, type StackLogOperation } from '$lib/utils/stack-log-operations';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
@@ -422,8 +422,12 @@ services:
 	let semverMaxBump = $state<'patch' | 'minor' | 'major'>('major');
 	let semverMatchFlavor = $state(true);
 	let semverIncludePrerelease = $state(false);
-	let semverRejectOlderImages = $state(true);
+	let semverRejectOlderImages = $state(false);
 	let semverLoaded = $state(false);
+
+	// Global opt-out for moved-digest reports on pinned `tag@sha256:` images (#1780).
+	let pinnedDigestReport = $state(true);
+	let pinnedDigestReportLoaded = $state(false);
 
 	// The global theme defaults (what a new user starts with). With auth on the theme
 	// toggles here edit these, not the admin's own profile. Rendering waits on
@@ -451,7 +455,7 @@ services:
 				semverMaxBump = c.maxBump ?? 'major';
 				semverMatchFlavor = c.matchFlavor ?? true;
 				semverIncludePrerelease = c.includePrerelease ?? false;
-				semverRejectOlderImages = c.rejectOlderImages ?? true;
+				semverRejectOlderImages = c.rejectOlderImages ?? false;
 			}
 			// A refusal means the values on screen are the built-in defaults, never the
 			// configuration, so the save effect stays disarmed rather than writing a
@@ -461,6 +465,16 @@ services:
 		} catch {
 			// The request never landed, so nothing says this account may not save.
 			semverLoaded = true;
+		}
+
+		try {
+			const res = await fetch('/api/settings/pinned-digest-report');
+			if (res.ok) pinnedDigestReport = (await res.json()).enabled ?? true;
+			// Same disarm rule as semver: a refusal means the on-screen value is the
+			// default, so the save effect must not write it back.
+			pinnedDigestReportLoaded = res.status !== 401 && res.status !== 403;
+		} catch {
+			pinnedDigestReportLoaded = true;
 		}
 
 		try {
@@ -497,6 +511,23 @@ services:
 	$effect(() => {
 		semverEnabled; semverMaxBump; semverMatchFlavor; semverIncludePrerelease;
 		if (semverLoaded) saveSemverConfig();
+	});
+
+	async function savePinnedDigestReport() {
+		try {
+			await fetch('/api/settings/pinned-digest-report', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ enabled: pinnedDigestReport })
+			});
+		} catch {
+			toast.error(m.settings_general_toast_pinned_digest_save_failed());
+		}
+	}
+
+	$effect(() => {
+		pinnedDigestReport;
+		if (pinnedDigestReportLoaded) savePinnedDigestReport();
 	});
 </script>
 
@@ -706,6 +737,19 @@ services:
 							     page is where personal choices live, and this one goes with them. -->
 							{#if !$authStore.authEnabled}
 								<LanguageSelector />
+							{:else}
+								<!-- Language is per-user; with auth on it lives in the profile.
+								     Show a pointer in the selector's spot so it does not look
+								     like the option vanished. -->
+								<div class="space-y-1.5">
+									<div class="flex items-center gap-2 text-sm font-medium">
+										<Globe class="w-4 h-4 text-muted-foreground" />
+										{m.settings_general_language_label()}
+									</div>
+									<p class="text-xs text-muted-foreground">
+										{m.settings_general_language_in_profile()} <a href="/profile" class="text-primary hover:underline font-medium">{m.settings_general_theme_defaults_link()}</a>.
+									</p>
+								</div>
 							{/if}
 							<!-- With auth on the toggles edit the GLOBAL defaults, so they wait for
 							     those to load; binding globalValue=undefined first would show the
@@ -717,10 +761,10 @@ services:
 								<IndentGuidesToggle globalValue={$authStore.authEnabled ? globalIndentGuides : undefined} />
 							{/if}
 							{#if $authStore.authEnabled}
-								<div class="text-xs text-muted-foreground flex items-start gap-1.5 mt-2 p-2 bg-muted/50 rounded-md">
-									<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+								<div class="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2 mt-2 p-2.5 bg-amber-500/10 border border-amber-500/40 rounded-md">
+									<Info class="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
 									<div>
-										<p>{m.settings_general_theme_defaults_before()} <strong>{m.settings_general_theme_defaults_strong()}</strong> {m.settings_general_theme_defaults_middle()} <em>{m.settings_general_theme_defaults_you()}</em> {m.settings_general_theme_defaults_after()} <a href="/profile" class="text-primary hover:underline">{m.settings_general_theme_defaults_link()}</a>.</p>
+										<p>{m.settings_general_theme_defaults_before()} <strong>{m.settings_general_theme_defaults_strong()}</strong> {m.settings_general_theme_defaults_middle()} <em>{m.settings_general_theme_defaults_you()}</em> {m.settings_general_theme_defaults_after()} <a href="/profile" class="text-primary hover:underline font-medium">{m.settings_general_theme_defaults_link()}</a>.</p>
 									</div>
 								</div>
 							{/if}
@@ -1212,6 +1256,27 @@ services:
 						bind:includePrerelease={semverIncludePrerelease}
 						bind:rejectOlderImages={semverRejectOlderImages}
 					/>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<Pin class="w-4 h-4" />
+						{m.settings_general_pinned_digest_title()}
+					</Card.Title>
+					<Card.Description>
+						{m.settings_general_pinned_digest_description()}
+					</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0">
+							<div class="text-sm font-medium">{m.settings_general_pinned_digest_toggle()}</div>
+							<p class="text-xs text-muted-foreground mt-0.5">{m.settings_general_pinned_digest_hint()}</p>
+						</div>
+						<TogglePill bind:checked={pinnedDigestReport} disabled={!$canAccess('settings', 'edit')} />
+					</div>
 				</Card.Content>
 			</Card.Root>
 			{/if}

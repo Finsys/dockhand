@@ -45,7 +45,8 @@
 		PackageCheck,
 		FolderCheck,
 		Eraser,
-		ShieldCheck
+		ShieldCheck,
+		Square
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { DataGrid } from '$lib/components/data-grid';
@@ -166,7 +167,7 @@
 
 	interface ScheduleExecution {
 		id: number;
-		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
+		scheduleType: 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
 		scheduleId: number;
 		environmentId: number | null;
 		entityName: string;
@@ -185,7 +186,7 @@
 	interface Schedule {
 		key: string; // Unique key: type-id
 		id: number;
-		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
+		type: 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
 		name: string;
 		entityName: string;
 		description?: string;
@@ -207,6 +208,8 @@
 		dataSubset?: string;
 		// Repo prune specific fields
 		maxUnused?: string;
+		// Scheduled start/stop: whether the container's labels set it
+		source?: 'ui' | 'label';
 	}
 
 	// State
@@ -978,6 +981,10 @@
 						{:else if filterTypes.length === 1}
 							{#if filterTypes[0] === 'container_update'}
 								{m.schedules_type_container_updates()}
+							{:else if filterTypes[0] === 'container_start'}
+								{m.schedules_type_container_starts()}
+							{:else if filterTypes[0] === 'container_stop'}
+								{m.schedules_type_container_stops()}
 							{:else if filterTypes[0] === 'git_stack_sync'}
 								{m.schedules_type_git_stack_syncs()}
 							{:else if filterTypes[0] === 'env_update_check'}
@@ -1017,6 +1024,14 @@
 					<Select.Item value="container_update">
 						<CircleArrowUp class="w-4 h-4 mr-2 inline text-green-500 drop-shadow-[0_0_3px_rgba(34,197,94,0.4)]" />
 						{m.schedules_type_container_updates()}
+					</Select.Item>
+					<Select.Item value="container_start">
+						<Play class="w-4 h-4 mr-2 inline text-emerald-500" />
+						{m.schedules_type_container_starts()}
+					</Select.Item>
+					<Select.Item value="container_stop">
+						<Square class="w-4 h-4 mr-2 inline text-rose-500" />
+						{m.schedules_type_container_stops()}
 					</Select.Item>
 					<Select.Item value="git_stack_sync">
 						<GitBranch class="w-4 h-4 mr-2 inline text-purple-500 drop-shadow-[0_0_3px_rgba(168,85,247,0.4)]" />
@@ -1234,6 +1249,10 @@
 				<div class="flex flex-wrap items-center gap-2">
 					{#if schedule.type === 'container_update'}
 						<CircleArrowUp class="w-4 h-4 text-green-500 glow-green shrink-0" />
+					{:else if schedule.type === 'container_start'}
+						<Play class="w-4 h-4 text-emerald-500 shrink-0" />
+					{:else if schedule.type === 'container_stop'}
+						<Square class="w-4 h-4 text-rose-500 shrink-0" />
 					{:else if schedule.type === 'git_stack_sync'}
 						<GitBranch class="w-4 h-4 text-emerald-500 shrink-0" />
 					{:else if schedule.type === 'env_update_check'}
@@ -1274,6 +1293,11 @@
 									{m.schedules_desc_check_scan_update()}
 								{:else}
 									{m.schedules_desc_check_update()}
+								{/if}
+							{:else if schedule.type === 'container_start' || schedule.type === 'container_stop'}
+								<span class="truncate">{schedule.type === 'container_start' ? m.schedules_desc_container_start() : m.schedules_desc_container_stop()}</span>
+								{#if schedule.source === 'label'}
+									<Badge variant="outline" class="text-xs shrink-0">{m.schedules_badge_from_labels()}</Badge>
 								{/if}
 							{:else if schedule.type === 'git_stack_sync'}
 								{m.schedules_desc_git_sync()}
@@ -1455,7 +1479,7 @@
 							<Play class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-500" />
 						</button>
 					{/if}
-					{#if canEditSchedules && !schedule.isSystem}
+					{#if canEditSchedules && !schedule.isSystem && schedule.source !== 'label'}
 						{@const scheduleKey = getScheduleKey(schedule)}
 						<ConfirmPopover
 							open={confirmDeleteId === scheduleKey}
@@ -1626,6 +1650,10 @@
 			<Dialog.Title class="flex items-center gap-2">
 				{#if selectedExecution?.scheduleType === 'container_update'}
 					<CircleArrowUp class="w-5 h-5 text-green-500 glow-green" />
+				{:else if selectedExecution?.scheduleType === 'container_start'}
+					<Play class="w-5 h-5 text-emerald-500" />
+				{:else if selectedExecution?.scheduleType === 'container_stop'}
+					<Square class="w-5 h-5 text-rose-500" />
 				{:else if selectedExecution?.scheduleType === 'git_stack_sync'}
 					<GitBranch class="w-5 h-5 text-emerald-500" />
 				{:else if selectedExecution?.scheduleType === 'env_update_check'}
@@ -1640,7 +1668,7 @@
 				{m.schedules_execution_details()}
 				{#if selectedExecution}
 					<span class="text-muted-foreground font-normal">
-						({#if selectedExecution.scheduleType === 'container_update'}{m.schedules_type_container_update()}{:else if selectedExecution.scheduleType === 'env_update_check'}{m.schedules_type_environment_update()}{:else if selectedExecution.scheduleType === 'git_stack_sync'}{m.schedules_type_git_stack_sync()}{:else if selectedExecution.scheduleType === 'backup'}{m.schedules_type_backup()}{:else if selectedExecution.scheduleType === 'repo_prune'}{m.schedules_type_repo_prune()}{:else if selectedExecution.scheduleType === 'repo_check'}{m.schedules_type_repo_check()}{:else if selectedExecution.scheduleType === 'repo_verify'}{m.schedules_type_data_verify()}{:else if selectedExecution.scheduleType === 'stack_deploy'}{m.schedules_type_stack_deploy()}{:else if selectedExecution.scheduleType === 'deploy_log_reconcile'}{m.schedules_type_deploy_log_reconcile()}{:else}{m.schedules_type_system_job()}{/if})
+						({#if selectedExecution.scheduleType === 'container_update'}{m.schedules_type_container_update()}{:else if selectedExecution.scheduleType === 'container_start'}{m.schedules_type_container_start()}{:else if selectedExecution.scheduleType === 'container_stop'}{m.schedules_type_container_stop()}{:else if selectedExecution.scheduleType === 'env_update_check'}{m.schedules_type_environment_update()}{:else if selectedExecution.scheduleType === 'git_stack_sync'}{m.schedules_type_git_stack_sync()}{:else if selectedExecution.scheduleType === 'backup'}{m.schedules_type_backup()}{:else if selectedExecution.scheduleType === 'repo_prune'}{m.schedules_type_repo_prune()}{:else if selectedExecution.scheduleType === 'repo_check'}{m.schedules_type_repo_check()}{:else if selectedExecution.scheduleType === 'repo_verify'}{m.schedules_type_data_verify()}{:else if selectedExecution.scheduleType === 'stack_deploy'}{m.schedules_type_stack_deploy()}{:else if selectedExecution.scheduleType === 'deploy_log_reconcile'}{m.schedules_type_deploy_log_reconcile()}{:else}{m.schedules_type_system_job()}{/if})
 					</span>
 				{/if}
 			</Dialog.Title>

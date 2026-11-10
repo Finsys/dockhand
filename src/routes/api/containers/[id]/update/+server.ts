@@ -3,7 +3,7 @@ import { json } from '@sveltejs/kit';
 import { inspectContainer, pullImage, updateContainer, type CreateContainerOptions } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
-import { removePendingContainerUpdate } from '$lib/server/db';
+import { removePendingContainerUpdate, renameScheduledContainerAction } from '$lib/server/db';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
@@ -79,7 +79,16 @@ export const POST: RequestHandler = async (event) => {
 
 		console.log(`Updating container ${params.id} with name: ${options.name}`);
 
+		// The recreate can carry a new name; settings keyed by the name have to follow it.
+		const oldName = (await inspectContainer(params.id, envIdNum).catch(() => null))?.Name?.replace(/^\//, '');
+
 		const container = await updateContainer(params.id, options, startAfterUpdate, envIdNum);
+
+		if (envIdNum && oldName && options.name && options.name !== oldName) {
+			await renameScheduledContainerAction(oldName, options.name, envIdNum).catch((e) =>
+				console.error('Failed to move the scheduled start/stop to the new name:', e)
+			);
+		}
 
 		// Clear pending update indicator (if any) since container was just updated
 		if (envIdNum) {

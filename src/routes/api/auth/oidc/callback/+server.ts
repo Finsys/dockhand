@@ -82,7 +82,7 @@ export const GET: RequestHandler = async (event) => {
 		// Named, not a bare 'oidc': logging out has to know which provider to end the
 		// session with, and the column already holds this shape for the user row.
 		const sessionProvider = result.providerName ? `oidc:${result.providerName}` : 'oidc';
-		await createUserSession(result.user.id, sessionProvider, cookies, event.request);
+		await createUserSession(result.user.id, sessionProvider, cookies, event.request, { oidcSub: result.oidcSub, oidcSid: result.oidcSid });
 		console.log(`[Auth] OIDC login successful: user=${result.user.username} provider=${result.providerName || 'oidc'} ip=${clientIp}`);
 
 		// Audit log

@@ -16,7 +16,7 @@
 # Rebuild trigger: the pipeline is change-gated on this file — bumping this comment
 # forces a rebuild so the versioned/-baseline tags are (re)published.
 # (revert rclone — the rclone: backend is unfinished/removed; see vault rclone.md)
-FROM alpine:3.21
+FROM alpine:3.24
 
 # OpenSSH is required by restic's native sftp: backend. Password and agent auth are
 # disabled at runtime; the client uses Dockhand's temporary key and known_hosts files.

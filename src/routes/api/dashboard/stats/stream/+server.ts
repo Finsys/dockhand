@@ -20,7 +20,7 @@ import {
 	DockerConnectionError
 } from '$lib/server/docker';
 import { listComposeStacks } from '$lib/server/stacks';
-import { countLivePending } from '$lib/server/pending-updates-core';
+import { countLivePending, countImageUpdates, countLivePinnedDigest, countPinnedDigest, countLiveNewerVersion, countNewerVersion } from '$lib/server/pending-updates-core';
 import { authorize } from '$lib/server/authorize';
 import { prefersJSON, sseToJSON } from '$lib/server/sse';
 import type { EnvironmentStats } from '../+server';
@@ -130,7 +130,7 @@ async function getEnvironmentStatsProgressive(
 		labels: parseLabels(env.labels),
 		connectionType: (env.connectionType as 'socket' | 'direct' | 'hawser-standard' | 'hawser-edge') || 'socket',
 		online: false,
-		containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 },
+		containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0, pinnedDigest: 0 , newerVersion: 0 },
 		images: { total: 0, totalSize: 0 },
 		volumes: { total: 0, totalSize: 0 },
 		containersSize: 0,
@@ -194,7 +194,9 @@ async function getEnvironmentStatsProgressive(
 
 		// pendingUpdates is live-matched below once the container list is fetched (#1006);
 		// seed to the raw count so a container-list timeout still shows something.
-		envStats.containers.pendingUpdates = pendingUpdates.length;
+		envStats.containers.pendingUpdates = countImageUpdates(pendingUpdates);
+		envStats.containers.pinnedDigest = countPinnedDigest(pendingUpdates);
+		envStats.containers.newerVersion = countNewerVersion(pendingUpdates);
 
 		if (recentEventsResult.events.length > 0) {
 			envStats.recentEvents = recentEventsResult.events.map(e => ({
@@ -288,6 +290,8 @@ async function getEnvironmentStatsProgressive(
 				// guaranteed real here (the null-guard above threw on a timeout), so no
 				// empty-list fallback needed - unlike the non-stream twin.
 				envStats.containers.pendingUpdates = countLivePending(pendingUpdates, containers.map((c: any) => c.id));
+				envStats.containers.pinnedDigest = countLivePinnedDigest(pendingUpdates, containers.map((c: any) => c.id));
+				envStats.containers.newerVersion = countLiveNewerVersion(pendingUpdates, containers.map((c: any) => c.id));
 				envStats.loading!.containers = false;
 
 				onPartialUpdate({

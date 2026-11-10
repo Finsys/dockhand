@@ -59,7 +59,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="max-w-3xl h-[70vh] flex flex-col">
+	<Dialog.Content class="max-w-5xl h-[85vh] flex flex-col">
 		<Dialog.Header class="pb-0">
 			<Dialog.Title class="flex items-center gap-2 text-base">
 				<Archive class="w-4 h-4" />

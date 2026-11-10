@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { Component, Snippet } from 'svelte';
+	import type { Snippet } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { currentEnvironment } from '$lib/stores/environment';
@@ -24,7 +25,7 @@
 		iconImage = undefined,
 		iconName = undefined
 	}: {
-		icon: Component;
+		icon: IconComponent;
 		title: string;
 		name?: string;
 		envName?: string;

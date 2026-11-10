@@ -29,7 +29,7 @@
 		imagePruneCron: string;
 		imagePruneMode: 'dangling' | 'all';
 		imagePruneLastPruned?: string;
-		imagePruneLastResult?: { spaceReclaimed: number; imagesRemoved: number };
+		imagePruneLastResult?: { spaceReclaimed?: number; imagesRemoved: number };
 		// Timezone
 		timezone: string;
 	}
@@ -231,7 +231,9 @@
 						<p class="text-xs text-muted-foreground">
 							{m.settings_envs_prune_last_pruned({ date: formatDateTime(imagePruneLastPruned) })}
 							{#if imagePruneLastResult}
-								- {m.settings_envs_prune_last_result({ count: imagePruneLastResult.imagesRemoved, size: formatBytes(imagePruneLastResult.spaceReclaimed) })}
+								- {imagePruneLastResult.spaceReclaimed === undefined
+									? m.settings_envs_prune_last_result_count({ count: imagePruneLastResult.imagesRemoved })
+									: m.settings_envs_prune_last_result({ count: imagePruneLastResult.imagesRemoved, size: formatBytes(imagePruneLastResult.spaceReclaimed) })}
 							{/if}
 						</p>
 					</div>

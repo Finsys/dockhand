@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isSafeNotificationUrl } from '../url-safety';
 import { validImageCreatedAt } from '../minimum-release-age-core';
+import { forgetRegistryAuth } from './auth-cache';
 
 export interface ImagePlatform {
 	os: string;
@@ -110,6 +111,7 @@ export async function fetchImageCreatedAt(request: ImageAgeRequest, fetchMetadat
 				}
 				if (!response.ok || Number(response.headers.get('Content-Length')) > limit) {
 					await response.body?.cancel();
+					if (response.status === 401 && authorization === request.authorization) forgetRegistryAuth(authorization, request.registry);
 					throw new Error('Registry metadata unavailable or too large');
 				}
 				const reader = response.body?.getReader();

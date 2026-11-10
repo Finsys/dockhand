@@ -4,7 +4,7 @@ import '$lib/server/dns-dispatcher.js';
 import { initDatabase, hasAnyUser } from '$lib/server/db';
 import { startSubprocesses, stopSubprocesses } from '$lib/server/subprocess-manager';
 import { startScheduler } from '$lib/server/scheduler';
-import { isAuthEnabled, validateSession } from '$lib/server/auth';
+import { isAuthEnabled, validateSession, SESSION_COOKIE } from '$lib/server/auth';
 import { validateApiToken } from '$lib/server/api-tokens';
 import { requestContext } from '$lib/server/request-context';
 import { setServerStartTime } from '$lib/server/uptime';
@@ -19,9 +19,13 @@ import { rmSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import type { HandleServerError, Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
+import { sequence } from '@sveltejs/kit/hooks';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
 import { isPublicPath } from '$lib/server/public-paths-core';
+import { isForbiddenCrossOrigin, isCsrfExemptPath, parseTrustedHostnames, csrfOriginCheckDisabled } from '$lib/server/csrf-origin-core';
+import { evaluateExposure } from '$lib/server/exposure-warning';
+import { METRICS_PUBLIC } from '$lib/server/metrics';
 import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
 // Side-effect import: installs globalThis.__authenticateWsUpgrade and
 // globalThis.__canAccessEnvForUser used by the raw WS upgrade handlers in
@@ -178,6 +182,14 @@ if (!initialized) {
 		cleanupOrphanedScannerContainers().catch(err => {
 			console.error('Failed to cleanup orphaned scanner containers:', err);
 		});
+		// Warn once at startup if this instance is listening beyond localhost with auth
+		// off and the Docker socket writable - the config that makes it one request from
+		// host takeover. The UI shows the same warning; this covers headless operators.
+		evaluateExposure(process.env.HOST || '0.0.0.0').then(warn => {
+			if (warn) {
+				console.warn('[SECURITY] Dockhand is listening beyond localhost with authentication disabled and the Docker socket mounted read-write. If this instance is reachable from the internet, enable authentication (Settings > Authentication) or keep Dockhand behind a firewall or VPN.');
+			}
+		}).catch(() => { /* best-effort */ });
 		// Start background subprocesses and the scheduler only AFTER credential
 		// migration/rotation has settled, so a scheduled backup can't decrypt a
 		// destination password mid-rotation (new key against old-key ciphertext).
@@ -275,7 +287,7 @@ function isStaticAsset(pathname: string): boolean {
 		pathname.endsWith('.js');
 }
 
-export const handle: Handle = async ({ event, resolve }) => {
+const authHandle: Handle = async ({ event, resolve }) => {
 	// Skip auth for static assets
 	if (isStaticAsset(event.url.pathname)) {
 		return resolve(event);
@@ -352,7 +364,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		const ctx = { user, authEnabled: true, authMethod };
 
 		// Public paths don't require authentication
-		if (isPublicPath(event.url.pathname)) {
+		if (isPublicPath(event.url.pathname, METRICS_PUBLIC)) {
 			return requestContext.run(ctx, async () => compressResponse(event.request, await resolve(event)));
 		}
 
@@ -396,6 +408,54 @@ export const handle: Handle = async ({ event, resolve }) => {
 		rssAfterOp('http', httpBefore);
 	}
 };
+
+// Framing protection on content responses: no cross-origin page can embed the UI in a
+// frame and overlay it, so a click on the attacker's page cannot be redressed onto a
+// Dockhand control. The app uses no iframes, so `DENY` / `frame-ancestors 'none'` is
+// safe. nosniff stops a response being read as a type the server did not send. These
+// land on responses that flow back through resolve(); a thrown redirect/error exit is
+// built by SvelteKit outside the hook chain and carries no framable content anyway.
+const securityHeaders: Handle = async ({ event, resolve }) => {
+	const response = await resolve(event);
+	response.headers.set('X-Frame-Options', 'DENY');
+	// Do not clobber a route that set its own CSP (e.g. the icon proxy's sandbox policy
+	// over untrusted SVG bytes); only add framing protection where there is none.
+	if (!response.headers.has('Content-Security-Policy')) {
+		response.headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+	}
+	response.headers.set('X-Content-Type-Options', 'nosniff');
+	return response;
+};
+
+// Own CSRF origin check (SvelteKit's built-in is disabled in svelte.config.js so public
+// signature-authenticated cross-origin endpoints can be exempted). Reject a cross-site
+// form-content write before the auth handle processes it.
+// Operator escape hatches for the origin check, read once at startup: TRUSTED_ORIGINS marks
+// extra hostnames same-site (for a reverse proxy that rewrites the Origin host), and
+// DISABLE_CSRF_ORIGIN_CHECK turns the check off entirely (last resort).
+const CSRF_TRUSTED_HOSTNAMES = parseTrustedHostnames(process.env.TRUSTED_ORIGINS);
+const CSRF_ORIGIN_CHECK_DISABLED = csrfOriginCheckDisabled(process.env.DISABLE_CSRF_ORIGIN_CHECK);
+
+const csrfHandle: Handle = async ({ event, resolve }) => {
+	if (
+		isForbiddenCrossOrigin({
+			method: event.request.method,
+			contentType: event.request.headers.get('content-type'),
+			origin: event.request.headers.get('origin'),
+			urlOrigin: event.url.origin,
+			isExemptPath: isCsrfExemptPath(event.url.pathname),
+			hasSessionCookie: !!event.cookies.get(SESSION_COOKIE),
+			secFetchSite: event.request.headers.get('sec-fetch-site'),
+			trustedHostnames: CSRF_TRUSTED_HOSTNAMES,
+			disabled: CSRF_ORIGIN_CHECK_DISABLED
+		})
+	) {
+		return new Response('Cross-site form submissions are forbidden', { status: 403 });
+	}
+	return resolve(event);
+};
+
+export const handle: Handle = sequence(securityHeaders, csrfHandle, authHandle);
 
 export const handleError: HandleServerError = ({ error, event }) => {
 	// Skip logging 404 errors - they're expected for missing routes

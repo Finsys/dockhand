@@ -43,6 +43,17 @@ const useHttps = HTTPS_MODE === 'on';
 // passthrough, which calls `handler` directly and so never reaches that listener.
 let hstsHeader = null;
 
+// Framing/sniffing protection on EVERY response, including static files that
+// adapter-node's sirv serves before the SvelteKit hook runs (so the hook's own
+// headers never reach them). X-Frame-Options and nosniff are safe to set here and
+// are overwritten with the same value by the hook on page/API responses; CSP
+// frame-ancestors is left to the hook so a route's own CSP (e.g. the icon proxy's
+// sandbox) is not clobbered.
+function setFramingHeaders(res) {
+	if (!res.getHeader('X-Frame-Options')) res.setHeader('X-Frame-Options', 'DENY');
+	if (!res.getHeader('X-Content-Type-Options')) res.setHeader('X-Content-Type-Options', 'nosniff');
+}
+
 let server;
 if (useHttps) {
 	const certPath = process.env.HTTPS_CERT_PATH;
@@ -124,11 +135,13 @@ if (useHttps) {
 
 	server = createHttpsServer(tlsOptions, (req, res) => {
 		if (hstsHeader) res.setHeader('Strict-Transport-Security', hstsHeader);
+		setFramingHeaders(res);
 		handler(req, res);
 	});
 } else {
 	console.log(`[HTTPS] mode=off (set HTTPS_MODE=on to enable native TLS)`);
 	server = createHttpServer((req, res) => {
+		setFramingHeaders(res);
 		handler(req, res);
 	});
 }
@@ -245,6 +258,7 @@ server.on('upgrade', async (req, socket, head) => {
 		res.setHeader('Connection', 'close');
 		// Set per response by the HTTPS listener, which this path does not go through.
 		if (hstsHeader) res.setHeader('Strict-Transport-Security', hstsHeader);
+		setFramingHeaders(res);
 		handler(req, res);
 		return;
 	}

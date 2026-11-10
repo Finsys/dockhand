@@ -4,6 +4,7 @@ import { getRegistries, createRegistry, setDefaultRegistry } from '$lib/server/d
 import { authorize } from '$lib/server/authorize';
 import { auditRegistry } from '$lib/server/audit';
 import { parseRegistryUrl, DOCKER_HUB_HOSTS } from '$lib/server/docker';
+import { isSafeRegistryHost } from '$lib/server/registry-auth';
 
 /**
  * @openapi
@@ -63,8 +64,16 @@ export const POST: RequestHandler = async (event) => {
 		const trimmedUsername = typeof data.username === 'string' ? data.username.trim() : undefined;
 		const trimmedPassword = typeof data.password === 'string' ? data.password.trim() : undefined;
 
-		// Diagnostic logging (#1105) — never logs the plaintext credential
+		// Reject a URL that points at loopback or cloud metadata before it is stored, so a
+		// later registry-browsing fetch cannot be aimed at an internal service. A LAN host
+		// stays allowed for self-hosted registries.
 		const { host: normalizedHost } = parseRegistryUrl(data.url);
+		const urlSafety = isSafeRegistryHost(normalizedHost);
+		if (!urlSafety.ok) {
+			return json({ error: `Registry URL is not allowed: ${urlSafety.reason}` }, { status: 400 });
+		}
+
+		// Diagnostic logging (#1105) — never logs the plaintext credential
 		const hubTag = DOCKER_HUB_HOSTS.has(normalizedHost) ? ' (docker-hub)' : '';
 		console.log(`[Registry] create: url=${data.url} normalized=${normalizedHost}${hubTag} user(len=${trimmedUsername?.length ?? 0}) pw(len=${trimmedPassword?.length ?? 0})`);
 

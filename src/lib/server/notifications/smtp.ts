@@ -2,6 +2,7 @@
 import nodemailer from 'nodemailer';
 import type { SmtpConfig } from '../db';
 import type { NotificationPayload, NotificationResult } from './shared';
+import { buildSmtpHtml } from './smtp-core';
 
 export async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPayload): Promise<NotificationResult> {
 	try {
@@ -18,19 +19,9 @@ export async function sendSmtpNotification(config: SmtpConfig, payload: Notifica
 			} : undefined
 		});
 
-		const envBadge = payload.environmentName
-			? `<span style="display: inline-block; background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">${payload.environmentName}</span>`
-			: '';
 		const envText = payload.environmentName ? ` [${payload.environmentName}]` : '';
 
-		const html = `
-			<div style="font-family: sans-serif; padding: 20px;">
-				<h2 style="margin: 0 0 10px 0;">${payload.title}${envBadge}</h2>
-				<p style="margin: 0; white-space: pre-wrap;">${payload.message}</p>
-				<hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-				<p style="margin: 0; font-size: 12px; color: #666;">Sent by Dockhand</p>
-			</div>
-		`;
+		const html = buildSmtpHtml(payload.title, payload.message, payload.environmentName);
 
 		await transporter.sendMail({
 			from: config.from_name ? `"${config.from_name}" <${config.from_email}>` : config.from_email,

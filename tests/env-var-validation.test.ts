@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
+import { extractEnvPlaceholderReferences } from '../src/lib/server/env-parser';
 
 // Replicate the extractComposeVars function from the validate endpoint
 function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
@@ -256,6 +257,94 @@ services:
 			// Should NOT detect "abcdef1234" as a variable
 			expect(result.required).toHaveLength(0);
 			expect(result.optional).toHaveLength(0);
+		});
+	});
+
+	describe('placeholder in env values (#1766)', () => {
+		function validateEnv(
+			yaml: string,
+			definedVars: string[],
+			envValues: Record<string, string> = {}
+		) {
+			const { required, optional } = extractComposeVars(yaml);
+			const defined = [...definedVars].sort();
+			const placeholderRefs = new Set<string>();
+			for (const val of Object.values(envValues)) {
+				if (typeof val === 'string') {
+					for (const ref of extractEnvPlaceholderReferences(val)) {
+						placeholderRefs.add(ref);
+					}
+				}
+			}
+			const missing = required.filter((v) => !defined.includes(v));
+			const unused = defined.filter(
+				(v) => !required.includes(v) && !optional.includes(v) && !placeholderRefs.has(v)
+			);
+			return {
+				valid: missing.length === 0,
+				required,
+				optional,
+				defined,
+				missing,
+				unused
+			};
+		}
+
+		test('marks variable used when referenced by another env variable placeholder', () => {
+			const yaml = `
+services:
+  web:
+    image: nginx
+    environment:
+      - API_URL=\${API_URL}
+`;
+			// API_URL is in compose, BASE_URL is only referenced inside API_URL's value
+			const defined = ['API_URL', 'BASE_URL'];
+			const envValues = {
+				API_URL: '${BASE_URL}/api/v1',
+				BASE_URL: 'https://example.com'
+			};
+
+			const result = validateEnv(yaml, defined, envValues);
+			expect(result.valid).toBe(true);
+			expect(result.required).toEqual(['API_URL']);
+			expect(result.missing).toEqual([]);
+			// BASE_URL must NOT be marked as unused because API_URL references it
+			expect(result.unused).not.toContain('BASE_URL');
+			expect(result.unused).toEqual([]);
+		});
+
+		test('detects bare $VAR placeholder in env values', () => {
+			const yaml = `
+services:
+  app:
+    image: \${APP_IMAGE}
+`;
+			const defined = ['APP_IMAGE', 'REGISTRY', 'TAG'];
+			const envValues = {
+				APP_IMAGE: '$REGISTRY/myapp:$TAG',
+				REGISTRY: 'docker.io',
+				TAG: 'latest'
+			};
+
+			const result = validateEnv(yaml, defined, envValues);
+			expect(result.unused).toEqual([]);
+		});
+
+		test('still marks genuinely unused variables as unused', () => {
+			const yaml = `
+services:
+  web:
+    image: \${IMAGE}
+`;
+			const defined = ['IMAGE', 'LEFTOVER_VAR'];
+			const envValues = {
+				IMAGE: 'redis:alpine',
+				LEFTOVER_VAR: 'nobody_uses_me'
+			};
+
+			const result = validateEnv(yaml, defined, envValues);
+			expect(result.unused).toEqual(['LEFTOVER_VAR']);
 		});
 	});
 });

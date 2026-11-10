@@ -8,6 +8,7 @@
 import { homedir } from 'node:os';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { assertSafeContainerPath } from './container-path-core';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { Readable } from 'node:stream';
@@ -15,9 +16,9 @@ import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
 import { toWebReadableStream } from './node-readable-stream';
-import { buildImagePruneFilters } from './image-prune-core';
+import { buildImagePruneFilters, pruneAllUnused, holderFailureWarning, type ImagePruneResult } from './image-prune-core';
 import { demuxDockerStream } from './docker-demux-core';
-import { isDockerProbePath, isDockerNetworkError } from './docker-probe-core';
+import { isExpectedConnectionError, isQuietDockerFailure, transportTimeoutError } from './docker-probe-core';
 import {
 	computeRequestTimeoutMs,
 	isPrunePath,
@@ -26,13 +27,15 @@ import {
 } from './backups/request-timeout';
 import { helperWaitDeadline, helperExitFromState, helperFailureDetail, needsDaemonErrorLookup } from './helper-wait-core';
 import { cancelReaderOnAbort } from './reader-abort-core';
-import { configuredMacAddress, endpointWithoutGeneratedMac } from './endpoint-mac-core';
+import { configuredMacAddress, endpointForRecreate } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
 import { mapContainerNetworks } from '$lib/utils/network-identity';
 import type { Environment } from './db';
 import { getSetting } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
-import { portableImageReference, trackedImageLabels, trackedImageReference } from '../utils/tracked-image';
+import { imageCheckPlan, resolvePinnedToDigest, isDigestBasedImage, portableImageReference, trackedImageLabels, trackedImageReference } from '../utils/tracked-image';
+// Re-exported: the updaters import it from here, and it belongs beside imagePinning.
+export { isDigestBasedImage };
 import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs, imageReleaseAgeStatus, type ImageCreationMetadata } from './minimum-release-age';
 import { manualPullAgeWarning, verifiedImagePullPlan } from './minimum-release-age-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
@@ -45,16 +48,21 @@ import { parseImageReference } from './registry/image-ref';
 import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
 export { parseImageReference } from './registry/image-ref';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
-import { encodeRegistryAuth, fetchRegistryToken, isSafeRegistryHost } from './registry-auth';
+import { encodeRegistryAuth, isSafeRegistryHost } from './registry-auth';
+import { registryAuthHeader } from './registry/auth-header';
+import { forgetRegistryAuth } from './registry/auth-cache';
+import { parseRegistryUrl, pickRegistryCredentials } from './registry/credential-match';
+export { parseRegistryUrl };
 import { describeRegistryFailure } from './registry-failure-core';
 import {
 	getRegistryBearerToken as registryBearerToken,
 	getRegistryManifestDigestDirectDetailed as manifestDigestDirect,
 	getRegistrySchemeForHost as registrySchemeForHost,
+	readManifestIndex,
 	type RegistryPorts
 } from './registry/manifest-digest';
 import { classifyManifest, type ArtifactKind } from './semver/manifest-artifact';
-import { isSystemContainer, classifyEmptyDigestImage, localDigestIsIndexChild, indexChildDigests } from './scheduler/tasks/update-utils';
+import { isSystemContainer, classifyEmptyDigestImage, indexChildDigests, multiArchVerdict, runningPlatformChildDigest, readWithRetry, cachedIndexReader, type MultiArchVerdict, type RunningDigestResult } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
 import { getInstanceId } from './backups/identity';
 import { isOwnedBackupHelper } from './backups/reap-core';
@@ -434,7 +442,7 @@ export function httpsAgentRequest(
 		// Honor AbortSignal from caller (e.g., AbortSignal.timeout(5000) for ping)
 		const signal = options.signal as AbortSignal | undefined;
 		if (signal?.aborted) {
-			reject(new Error('Request aborted'));
+			reject(transportTimeoutError('Request aborted'));
 			return;
 		}
 
@@ -474,11 +482,11 @@ export function httpsAgentRequest(
 		});
 
 		req.on('error', reject);
-		req.on('timeout', () => { req.destroy(new Error('Request timeout')); });
+		req.on('timeout', () => { req.destroy(transportTimeoutError('Request timeout')); });
 
 		if (signal) {
 			signal.addEventListener('abort', () => {
-				req.destroy(new Error('Request aborted'));
+				req.destroy(transportTimeoutError('Request aborted'));
 			}, { once: true });
 		}
 
@@ -824,9 +832,12 @@ function logDockerFetchFailure(
 	msg: string,
 	error: unknown
 ) {
-	// For probing endpoints failing with expected network reachability errors (e.g. host is powered off),
-	// downgrade to debug/warn to avoid error log flooding (#1739).
-	if (isDockerProbePath(path) && isDockerNetworkError(error)) {
+	// A probe that cannot reach an offline host says nothing a reader needs: the
+	// environment already shows as offline, and the attempt repeats every cycle. It stays
+	// in the log on stdout rather than as an error, so a log collector filtering on stderr
+	// is not flooded. A probe failing for any OTHER reason - a bad token, an expired
+	// certificate - is still an error, because that one needs acting on.
+	if (isQuietDockerFailure(path, error)) {
 		console.debug(`[Docker] ${targetLabel}: ${method} ${path} probe failed after ${elapsed}ms (host offline/unreachable): ${msg}`);
 	} else {
 		console.error(`[Docker] ${targetLabel}: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
@@ -2548,9 +2559,9 @@ export async function recreateContainerFromInspect(
 	if (!isSharedNetwork && initialNetworkName && initialNetworkConfig) {
 		// An auto-assigned MAC must not follow the container: on daemons that derive it
 		// from the IP, the replacement gets a new address and the carried MAC then
-		// collides with whoever inherits the old one (#1618). Only a configured MAC
-		// survives; otherwise Docker derives a fresh one.
-		const endpointConfig = endpointWithoutGeneratedMac({ ...initialNetworkConfig });
+		// collides with whoever inherits the old one (#1618). Only a configured MAC, or one
+		// derived from an IP the endpoint pins, survives; otherwise Docker derives a fresh one.
+		const endpointConfig = endpointForRecreate({ ...initialNetworkConfig });
 		createConfig.NetworkingConfig = {
 			EndpointsConfig: {
 				[initialNetworkName]: endpointConfig
@@ -2589,8 +2600,8 @@ export async function recreateContainerFromInspect(
 			const nc = netConfig as any;
 			if (nc.NetworkID) {
 				try {
-					// Same rule as the creation endpoint above: never carry a generated MAC.
-					const settings = endpointWithoutGeneratedMac({ ...nc });
+					// Same rule as the creation endpoint above.
+					const settings = endpointForRecreate({ ...nc });
 					await connectContainerToNetworkRaw(nc.NetworkID, newContainerId, settings, envId);
 				} catch (netError: any) {
 					log?.(`Warning: Failed to connect to network "${netName}": ${netError.message}`);
@@ -3266,8 +3277,8 @@ function logAuthDiagnostics(
 export async function buildRegistryAuthHeader(imageName: string): Promise<Record<string, string>> {
 	const headers: Record<string, string> = {};
 	try {
-		const { registry } = parseImageReference(imageName);
-		const creds = await findRegistryCredentials(registry);
+		const { registry, repo } = parseImageReference(imageName);
+		const creds = await findRegistryCredentials(registry, repo);
 		if (creds) {
 			// Docker Engine requires 'https://index.docker.io/v1/' as serveraddress
 			// for Docker Hub auth — just the hostname is treated as unauthenticated
@@ -3460,8 +3471,17 @@ export async function getImageHistory(id: string, envId?: number | null) {
 	return dockerJsonRequest(`/images/${encodeURIComponent(id)}/history`, {}, envId);
 }
 
+/** The fields callers read off an image inspect. */
+export interface ImageInspect {
+	Id: string;
+	RepoTags?: string[] | null;
+	RepoDigests?: string[] | null;
+	Created?: string;
+	Config?: ImageEnvLabels;
+}
+
 export async function inspectImage(id: string, envId?: number | null) {
-	return dockerJsonRequest(`/images/${encodeURIComponent(id)}/json`, {}, envId);
+	return dockerJsonRequest<ImageInspect>(`/images/${encodeURIComponent(id)}/json`, {}, envId);
 }
 
 /**
@@ -3484,79 +3504,54 @@ export async function imageManifestDigest(id: string, envId?: number | null): Pr
 
 
 /**
- * Parse a registry URL into host and path components.
- * Handles URLs with or without protocol, and preserves organization paths.
- *
- * Examples:
- *   'https://registry.example.com/org' -> { host: 'registry.example.com', path: '/org', fullRegistry: 'registry.example.com/org' }
- *   'ghcr.io' -> { host: 'ghcr.io', path: '', fullRegistry: 'ghcr.io' }
- *   'registry.example.com:5000/myorg' -> { host: 'registry.example.com:5000', path: '/myorg', fullRegistry: 'registry.example.com:5000/myorg' }
+ * The digest of the image a container is ACTUALLY running, for the daemon's platform, read
+ * from `GET /images/{id}/json?manifests=true` (containerd image store, API 1.48+). Unlike the
+ * image's RepoDigests index, this does not float when a sibling tag is later pulled, so the
+ * update check uses it as the authoritative local side. Tri-state (`RunningDigestResult`):
+ * - `{ digest }`      the running platform child was resolved.
+ * - `{ noSignal }`    the daemon answered but reports no per-arch manifest for this platform
+ *                     (classic store / API < 1.48 answer 200 with no `Manifests`) - the caller
+ *                     falls back to the RepoDigests-index comparison. This is NOT an error.
+ * - `{ unknown }`     the request FAILED (a transient 5xx / connection error); the read is
+ *                     undecidable, so the caller must surface `unknown`, never guess `same`.
  */
-export function parseRegistryUrl(url: string): { host: string; path: string; fullRegistry: string; protocol: string } {
-	// Detect protocol (default to https)
-	const protocol = url.startsWith('http://') ? 'http' : 'https';
-	// Remove protocol
-	const withoutProtocol = url.replace(/^https?:\/\//, '');
-	// Remove trailing slash
-	const trimmed = withoutProtocol.replace(/\/$/, '');
-	// Split on first slash (after port if present)
-	const slashIndex = trimmed.indexOf('/');
-	if (slashIndex === -1) {
-		return { host: trimmed, path: '', fullRegistry: trimmed, protocol };
+export async function runningPlatformDigest(
+	id: string,
+	platform: { os: string; architecture: string; variant?: string },
+	envId?: number | null
+): Promise<RunningDigestResult> {
+	let data: { Manifests?: unknown };
+	try {
+		data = await dockerJsonRequest<{ Manifests?: unknown }>(
+			`/images/${encodeURIComponent(id)}/json?manifests=true`, {}, envId
+		);
+	} catch (e) {
+		// A genuine failure (daemon reachable but 5xx, or connection error) is undecidable, not
+		// "no signal" - do not let it collapse into the RepoDigests fallback and guess "same".
+		return { unknown: true, reason: e instanceof Error ? e.message : String(e) };
 	}
-	const host = trimmed.substring(0, slashIndex);
-	const path = trimmed.substring(slashIndex); // includes leading /
-	return { host, path, fullRegistry: trimmed, protocol };
+	const digest = runningPlatformChildDigest(data?.Manifests, platform);
+	return digest ? { digest } : { noSignal: true };
 }
 
 /**
- * Find registry credentials from Dockhand's stored registries.
- * Matches by registry URL including organization path if present.
- *
- * Matching logic:
- * - Full match: stored 'registry.example.com/org' matches requested 'registry.example.com/org'
- * - Host-only stored: stored 'registry.example.com' matches requested 'registry.example.com/org'
- *   (allows a single credential entry to work for all org paths)
+ * Find registry credentials from Dockhand's stored registries for an image's registry
+ * host and repo. Matching rules: pickRegistryCredentials (longest stored path wins).
  */
-export async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
+export async function findRegistryCredentials(registryHost: string, repo: string): Promise<{ username: string; password: string } | null> {
 	try {
 		// Import here to avoid circular dependency
 		const { getRegistries } = await import('./db.js');
 		const registries = await getRegistries();
 
+		const picked = pickRegistryCredentials(registries, registryHost, repo, DOCKER_HUB_HOSTS);
+		if (picked) {
+			console.log(`[Registry] matched stored=${picked.registry.url} requested=${registryHost}/${repo} via=${picked.via}`);
+			// Older rows may hold untrimmed credentials
+			return { username: picked.registry.username!.trim(), password: picked.registry.password!.trim() };
+		}
+
 		const requested = parseRegistryUrl(registryHost);
-
-		for (const reg of registries) {
-			const stored = parseRegistryUrl(reg.url);
-
-			// Match if:
-			// 1. Full registry paths match exactly, OR
-			// 2. Hosts match and stored registry has no path (applies to any org)
-			if (stored.fullRegistry === requested.fullRegistry ||
-			    (stored.host === requested.host && !stored.path)) {
-				if (reg.username && reg.password) {
-					const via = stored.fullRegistry === requested.fullRegistry ? 'full' : 'host-only';
-					console.log(`[Registry] matched stored=${reg.url} requested=${registryHost} via=${via}`);
-					// Normalize legacy creds saved before #1105 trim fix
-					return { username: reg.username.trim(), password: reg.password.trim() };
-				}
-			}
-		}
-
-		// Bidirectional Docker Hub alias matching:
-		// If the requested host is any Docker Hub variant, match against any stored Docker Hub variant
-		if (DOCKER_HUB_HOSTS.has(requested.host)) {
-			for (const reg of registries) {
-				const stored = parseRegistryUrl(reg.url);
-				if (DOCKER_HUB_HOSTS.has(stored.host)) {
-					if (reg.username && reg.password) {
-						console.log(`[Registry] matched stored=${reg.url} requested=${registryHost} via=hub-alias`);
-						return { username: reg.username.trim(), password: reg.password.trim() };
-					}
-				}
-			}
-		}
-
 		// No stored credentials matched. This is NOT an error for public images —
 		// anonymous access still works; it just means no auth header is attached.
 		// (A Docker Hub entry configured without a username/password is anonymous,
@@ -3603,117 +3598,18 @@ async function getRegistryBearerToken(registry: string, repo: string, signal?: A
  * @param registryUrl - Full registry URL (e.g., 'https://ghcr.io' or 'https://registry.example.com/org')
  * @param scope - Token scope (e.g., 'registry:catalog:*' or 'repository:user/repo:pull')
  * @param credentials - Optional credentials { username, password }
+ * @param signal - Optional deadline for the challenge and token requests together
+ * @param cache - false to always ask the registry (callers that do not drop a rejected header)
  * @returns Authorization header value (e.g., 'Bearer xxx' or 'Basic xxx') or null
  */
 export async function getRegistryAuthHeader(
 	registryUrl: string,
 	scope: string,
-	credentials?: { username: string; password: string } | null
+	credentials?: { username: string; password: string } | null,
+	signal?: AbortSignal,
+	cache = true
 ): Promise<string | null> {
-	try {
-		// Parse URL to extract host (V2 API is always at the host root)
-		const parsed = parseRegistryUrl(registryUrl);
-		const hostSafety = isSafeRegistryHost(parsed.host);
-		if (!hostSafety.ok) {
-			console.error(`[Registry] Refusing auth challenge for ${parsed.host}: ${hostSafety.reason}`);
-			return null;
-		}
-		const apiBaseUrl = `${parsed.protocol}://${parsed.host}`;
-
-		// Step 1: Challenge request to /v2/ (always at registry root, not under org path).
-		// Do not follow redirects; a 3xx is treated as a non-401 below.
-		const challengeResponse = await fetch(`${apiBaseUrl}/v2/`, {
-			method: 'GET',
-			headers: { 'User-Agent': 'Dockhand/1.0' },
-			redirect: 'manual'
-		});
-
-		// If 200, no auth needed
-		if (challengeResponse.ok) {
-			await drainResponse(challengeResponse);
-			return null;
-		}
-
-		// If not 401, something else is wrong
-		if (challengeResponse.status !== 401) {
-			await drainResponse(challengeResponse);
-			console.error(`Registry challenge failed: ${challengeResponse.status}`);
-			return null;
-		}
-
-		// Step 2: Parse WWW-Authenticate header
-		const wwwAuth = challengeResponse.headers.get('WWW-Authenticate') || '';
-		const challenge = wwwAuth.toLowerCase();
-
-		if (challenge.startsWith('basic')) {
-			// Basic auth - use credentials if we have them
-			await drainResponse(challengeResponse);
-			if (credentials) {
-				const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
-				return `Basic ${basicAuth}`;
-			}
-			return null;
-		}
-
-		if (!challenge.startsWith('bearer')) {
-			await drainResponse(challengeResponse);
-			console.error(`Unsupported auth type: ${wwwAuth}`);
-			return null;
-		}
-
-		// Drain 401 response body before bearer token fetch (required by Node.js/Undici for connection reuse)
-		await drainResponse(challengeResponse);
-
-		// Parse bearer challenge: Bearer realm="...",service="...",scope="..."
-		const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
-		const serviceMatch = wwwAuth.match(/service="([^"]+)"/i);
-
-		if (!realmMatch) {
-			console.error('No realm in WWW-Authenticate header');
-			return null;
-		}
-
-		const realm = realmMatch[1];
-		const service = serviceMatch ? serviceMatch[1] : '';
-
-		// Step 3: Request token from realm (with credentials if available).
-		// Empty scope is allowed — means "no specific resource permission".
-		// Useful for credential validation: some registries (Docker Hub)
-		// reject privileged scopes like registry:catalog:* even for valid
-		// users, so omitting scope is the only reliable login check.
-		const tokenUrl = new URL(realm);
-		if (service) tokenUrl.searchParams.set('service', service);
-		if (scope) tokenUrl.searchParams.set('scope', scope);
-
-		const authHeader = credentials
-			? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
-			: null;
-		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader);
-
-		if (!tokenResponse.ok) {
-			const errorBody = (await tokenResponse.text().catch(() => '')).slice(0, 300).replace(/\s+/g, ' ').trim();
-			const finalNote = tokenResponse.url && tokenResponse.url !== tokenUrl.toString()
-				? ` (final ${new URL(tokenResponse.url).origin})`
-				: '';
-			const identity = credentials
-				? ` as ${credentials.username.slice(0, 4)}...(len=${credentials.username.length})`
-				: ' anonymously';
-			console.error(`[Registry] Token request failed: ${tokenResponse.status} at ${tokenUrl.origin}${finalNote}, sent${identity}${errorBody ? ` - response: ${errorBody}` : ''}`);
-			return null;
-		}
-
-		const tokenData = await tokenResponse.json() as { token?: string; access_token?: string };
-		const token = tokenData.token || tokenData.access_token || null;
-
-		return token ? `Bearer ${token}` : null;
-
-	} catch (e) {
-		const errorMsg = e instanceof Error ? e.message : String(e);
-		const cause = (e as any)?.cause;
-		const causeMsg = cause ? ` (cause: ${cause})` : '';
-		console.error('[Registry] Failed to get auth header:', errorMsg + causeMsg);
-		return null;
-	}
+	return registryAuthHeader(registryUrl, scope, credentials, { parseRegistryUrl, signal, cache });
 }
 
 /**
@@ -3731,6 +3627,14 @@ export async function getRegistryAuth(
 	// Parse registry URL to extract host and organization path
 	const parsed = parseRegistryUrl(registry.url);
 
+	// SSRF guard: a registry URL is user-supplied, so block a host that points at
+	// loopback or cloud metadata before any browsing request is built. A self-hosted
+	// registry on a LAN is still allowed (same policy as the update-check path).
+	const hostSafety = isSafeRegistryHost(parsed.host);
+	if (!hostSafety.ok) {
+		throw new Error(`Registry host is not allowed: ${hostSafety.reason}`);
+	}
+
 	// V2 API endpoints are always at the registry host root
 	const baseUrl = `${parsed.protocol}://${parsed.host}`;
 
@@ -3739,7 +3643,8 @@ export async function getRegistryAuth(
 		? { username: registry.username, password: registry.password }
 		: null;
 
-	const authHeader = await getRegistryAuthHeader(registry.url, scope, credentials);
+	// Registry browsing makes few requests and does not drop a rejected header, so it skips the cache.
+	const authHeader = await getRegistryAuthHeader(registry.url, scope, credentials, undefined, false);
 
 	return { baseUrl, orgPath: parsed.path, authHeader };
 }
@@ -3770,6 +3675,13 @@ export interface HarborCatalogResult {
 export async function isHarborRegistry(registryUrl: string): Promise<boolean> {
 	const parsed = parseRegistryUrl(registryUrl);
 	const host = parsed.host;
+
+	// This is the first registry-browsing fetch, so apply the SSRF guard here too: a host
+	// pointing at loopback or cloud metadata is never probed (treated as not-Harbor; the
+	// token flow refuses it as well). A LAN host stays allowed.
+	if (!isSafeRegistryHost(host).ok) {
+		return false;
+	}
 
 	const cached = harborDetectionCache.get(host);
 	if (cached && Date.now() - cached.ts < HARBOR_CACHE_TTL) {
@@ -3912,6 +3824,7 @@ export async function harborListRepositories(
 	pageSize: number = 100
 ): Promise<HarborCatalogResult> {
 	const parsed = parseRegistryUrl(registry.url);
+	if (!isSafeRegistryHost(parsed.host).ok) throw new Error('Registry host is not allowed');
 	const baseUrl = `${parsed.protocol}://${parsed.host}/api/v2.0`;
 	const headers = harborHeaders(registry);
 
@@ -3958,6 +3871,7 @@ export async function harborSearchRepositories(
 	limit: number = 25
 ): Promise<string[]> {
 	const parsed = parseRegistryUrl(registry.url);
+	if (!isSafeRegistryHost(parsed.host).ok) throw new Error('Registry host is not allowed');
 	const baseUrl = `${parsed.protocol}://${parsed.host}/api/v2.0`;
 	const headers = harborHeaders(registry);
 
@@ -3992,54 +3906,14 @@ export async function harborSearchRepositories(
 	return results;
 }
 
-/**
- * Check the registry for the current manifest digest of an image.
- * Simple HEAD request to get Docker-Content-Digest header.
- * Docker stores the manifest list digest in RepoDigests, so we compare that directly.
- */
-/** Direct registry request with upstream diagnostic details. */
-async function getRegistryManifestDigestDirectDetailed(
-	imageName: string, signal?: AbortSignal
-): Promise<{ digest: string | null; reason?: string }> {
-	return manifestDigestDirect(imageName, registryPorts(), signal);
+/** The tag's digest, read by Dockhand straight from the registry with its stored credentials. */
+export async function getRegistryManifestDigest(imageName: string, _envId?: number | null, signal?: AbortSignal): Promise<string | null> {
+	return (await getRegistryManifestDigestDetailed(imageName, _envId, signal)).digest;
 }
 
-/** The target daemon can resolve private registries that Dockhand itself cannot
- * reach (especially through Hawser). This endpoint reads metadata, not layers. */
-async function getDockerDistributionDigest(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<string | null> {
-	try {
-		const headers = await buildRegistryAuthHeader(imageName);
-		const response = await dockerFetch(`/distribution/${encodeURIComponent(imageName)}/json`, { headers, signal }, envId);
-		if (!response.ok) {
-			console.warn(`[Registry] Docker distribution inspect for ${imageName} returned HTTP ${response.status}`);
-			await drainResponse(response);
-			return null;
-		}
-		const data = await response.json() as { Descriptor?: { digest?: unknown } };
-		const digest = data.Descriptor?.digest;
-		return typeof digest === 'string' && /^sha256:[a-f0-9]{64}$/i.test(digest) ? digest : null;
-	} catch (error) {
-		console.warn(`[Registry] Docker distribution inspect failed for ${imageName}:`, error);
-		return null;
-	}
-}
-
-/** With a cooldown enabled, resolve the digest on the target environment first.
- * Otherwise retain the direct registry HEAD without an extra daemon request. */
-export async function getRegistryManifestDigest(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<string | null> {
-	return (await getRegistryManifestDigestDetailed(imageName, envId, signal)).digest;
-}
-
-export async function getRegistryManifestDigestDetailed(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<{ digest: string | null; reason?: string }> {
-	const { registry } = parseImageReference(imageName);
-	if (!isSafeRegistryHost(registry).ok) return { digest: null, reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
+export async function getRegistryManifestDigestDetailed(imageName: string, _envId?: number | null, signal?: AbortSignal): Promise<{ digest: string | null; reason?: string }> {
 	signal?.throwIfAborted();
-	if ((await getMinimumReleaseAgeConfig(envId)).hours > 0) {
-		const daemonDigest = await getDockerDistributionDigest(imageName, envId, signal);
-		signal?.throwIfAborted();
-		if (daemonDigest) return { digest: daemonDigest };
-	}
-	return getRegistryManifestDigestDirectDetailed(imageName, signal);
+	return manifestDigestDirect(imageName, registryPorts(), signal);
 }
 
 // Cache only verified creation dates, keyed by immutable digest and target platform.
@@ -4133,6 +4007,7 @@ export async function getTagArtifactKind(
 		});
 		if (!res.ok) {
 			await drainResponse(res);
+			if (res.status === 401) forgetRegistryAuth(token, registry);
 			return { kind: 'image', digest: null };
 		}
 		const digest = res.headers.get('Docker-Content-Digest');
@@ -4148,52 +4023,53 @@ export async function getTagArtifactKind(
 	}
 }
 
-/**
- * A multi-arch tag is a manifest list / OCI image index: the list has one digest,
- * and each per-architecture child manifest has its own. `docker pull` usually records
- * the INDEX digest in RepoDigests, but some pulls leave only the PER-ARCH child digest.
- * getRegistryManifestDigest() (a HEAD) always returns the index digest, so a local
- * per-arch digest never matches it -> phantom "update available" (#1367).
- *
- * Fetches the index body and returns true if any local digest is one of its per-arch
- * child digests (same image, just recorded per-arch). Best-effort: ANY failure
- * (network, timeout, non-index body, unauthenticated) returns false so the caller
- * keeps its existing "update available" verdict. NEVER throws, own short timeout, and
- * runs ONLY on the already-flagged-as-update path - it can't slow or break the common
- * case. A false "update available" is acceptable; breaking the check is not.
- */
-async function localDigestMatchesRegistryChild(
-	imageName: string,
-	localDigests: string[]
-): Promise<boolean> {
-	try {
-		const { registry, repo, tag } = parseImageReference(imageName);
-		if (!isSafeRegistryHost(registry).ok) return false;
-		const token = await getRegistryBearerToken(registry, repo);
-		const scheme = await getRegistrySchemeForHost(registry);
-		const headers: Record<string, string> = {
-			'User-Agent': 'Dockhand/1.0',
-			'Accept': [
-				'application/vnd.docker.distribution.manifest.list.v2+json',
-				'application/vnd.oci.image.index.v1+json'
-			].join(', ')
-		};
-		if (token) headers['Authorization'] = token;
+/** Index reads by digest, shared by every check (see cachedIndexReader). */
+const indexByDigest = new Map<string, unknown>();
 
-		const response = await fetch(`${scheme}://${registry}/v2/${repo}/manifests/${tag}`, {
-			method: 'GET',
-			headers,
-			signal: AbortSignal.timeout(8000)
-		});
-		if (!response.ok) {
-			await drainResponse(response);
-			return false;
+/**
+ * Whether an index-digest mismatch on a multi-arch tag is a real update (see
+ * `multiArchVerdict`). Each read gets one retry after a transient failure; a check that
+ * still cannot read the registry answers `unknown` rather than guessing.
+ */
+async function localImageMatchesRegistry(
+	imageName: string,
+	localDigests: string[],
+	envId?: number | null,
+	registryDigest?: string,
+	runningImageId?: string
+): Promise<MultiArchVerdict> {
+	const { registry, repo, tag } = parseImageReference(imageName);
+	if (!isSafeRegistryHost(registry).ok) return { kind: 'unknown', reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
+	// Authenticated only when a read misses the cache.
+	let auth: Promise<[string | null, string]> | null = null;
+	const credentials = () => (auth ??= Promise.all([getRegistryBearerToken(registry, repo), getRegistrySchemeForHost(registry)]));
+	const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+	const readIndex = cachedIndexReader(async (reference) => {
+		const [token, scheme] = await credentials();
+		return readWithRetry(() => readManifestIndex(registry, repo, reference, token, scheme), sleep);
+	}, indexByDigest, `${registry}/${repo}`);
+	// Read the daemon platform once, cached, shared across the verdict's reads.
+	let platformResult: { os: string; architecture: string; variant?: string } | null | undefined;
+	const platform = async () => {
+		if (platformResult !== undefined) return platformResult;
+		try {
+			const info = await dockerJsonRequest('/info', { signal: AbortSignal.timeout(8000) }, envId) as { OSType?: string; Architecture?: string };
+			platformResult = imagePlatform(info?.OSType, info?.Architecture);
+		} catch {
+			platformResult = null;
 		}
-		const body: unknown = await response.json();
-		return localDigestIsIndexChild(localDigests, body);
-	} catch {
-		return false;
-	}
+		return platformResult;
+	};
+	return multiArchVerdict({
+		tag,
+		currentDigest: registryDigest,
+		localDigests,
+		// Resolved LAZILY inside the verdict, only after the child-match short-circuit, and only
+		// for a running image we were given - so an up-to-date pin costs no ?manifests=true call.
+		runningDigest: runningImageId ? (p) => runningPlatformDigest(runningImageId, p, envId) : undefined,
+		readIndex,
+		platform
+	});
 }
 
 export interface ImageUpdateCheckResult {
@@ -4209,6 +4085,13 @@ export interface ImageUpdateCheckResult {
 	/** The running image's RepoDigests (sha256:...), for the semver check to suppress
 	 *  a newer-version tag that resolves to the same digest already installed (#1572). */
 	localDigests?: string[];
+	/**
+	 * The reference names a tag AND the digest behind it (`repo:tag@sha256:...`), so a
+	 * moved digest is reported but never applied: pulling that reference returns the
+	 * pinned manifest, and following the tag instead would rewrite a digest the user put
+	 * in their compose on purpose. Updating it is their edit to make.
+	 */
+	pinnedToDigest?: boolean;
 }
 
 /**
@@ -4223,17 +4106,39 @@ export interface ImageUpdateCheckResult {
 export async function checkImageUpdateAvailable(
 	imageName: string,
 	currentImageId: string,
-	envId?: number
+	envId?: number,
+	reportPinnedDigest = true,
+	skipCooldown = false,
+	watchDigest = true
 ): Promise<ImageUpdateCheckResult> {
+	// A digest with no tag names one manifest, so there is nothing to follow. A tag that
+	// records its digest - the shape a base image patched for a CVE takes - is checked by
+	// its TAG. `pinnedToDigest` is set ONLY when that check found a move (hasUpdate): it
+	// means "a newer digest exists but the compose pins the old one", so the caller
+	// reports the move without applying it. A pinned tag whose digest has NOT moved is
+	// simply up to date and carries no flag, so the pin marker and the update counters
+	// never fire on a quiet pin. `reportPinnedDigest` is the admin opt-out (#1780): off,
+	// a pinned tag's digest is not asked about (plan.watchDigest), for someone who pins
+	// deliberately and never acts on a move.
+	const plan = imageCheckPlan(imageName, reportPinnedDigest);
+	if (plan.skip) {
+		return { hasUpdate: false, currentDigest: imageName.split('@')[1] };
+	}
+	const result = await checkTagForUpdate(plan.reference, currentImageId, envId, skipCooldown, watchDigest && plan.watchDigest);
+	if (!resolvePinnedToDigest(plan, result.hasUpdate)) return result;
+	// A moved digest on a pinned tag: reported with the pinned flag, never applied.
+	return { ...result, pinnedToDigest: true };
+}
+
+async function checkTagForUpdate(
+	checkedReference: string,
+	currentImageId: string,
+	envId?: number,
+	skipCooldown = false,
+	watchDigest = true
+): Promise<ImageUpdateCheckResult> {
+	const imageName = checkedReference;
 	try {
-		// Skip update check for digest-pinned images
-		// If the user explicitly pins to a digest (image@sha256:...), they don't want auto-updates
-		if (isDigestBasedImage(imageName)) {
-			return {
-				hasUpdate: false,
-				currentDigest: imageName.split('@')[1] // Extract the digest part
-			};
-		}
 
 		// Skip update check for images tagged against a localhost registry.
 		// These never resolve from inside Dockhand's container and only produce
@@ -4268,6 +4173,12 @@ export async function checkImageUpdateAvailable(
 			.map(extractDigest)
 			.filter((d): d is string => d !== null);
 
+		// Digest watching off (dockhand.watch.digest=false): no registry request at all.
+		// The local digests are still returned for the newer-version check.
+		if (!watchDigest) {
+			return { hasUpdate: false, currentDigest: currentRepoDigests[0] ?? currentImageId, localDigests };
+		}
+
 		// The RUNNING image has no repo digests. That is ambiguous: it can be a
 		// genuinely local/built image (no registry to check against), OR a registry
 		// image whose tag has since moved to a newer pull — leaving the container
@@ -4281,17 +4192,17 @@ export async function checkImageUpdateAvailable(
 		// a digest we don't have, an update is available. If the registry can't
 		// resolve it (404 / unreachable / truly local), THEN treat it as local.
 		if (localDigests.length === 0) {
-			const registryDigest = await getRegistryManifestDigest(imageName, envId);
+			const registryDigest = await getRegistryManifestDigest(checkedReference, envId);
 			const { hasUpdate, isLocalImage, registryDigest: rd } = classifyEmptyDigestImage(registryDigest);
 			if (hasUpdate && rd) {
-				const remaining = await imageCooldownRemainingMs(imageName, rd, envId);
-				if (remaining > 0) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
+				const remaining = await imageCooldownRemainingMs(checkedReference, rd, envId);
+				if (remaining > 0 && !skipCooldown) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 			}
 			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd };
 		}
 
 		// Query registry for current manifest digest
-		const { digest: registryDigest, reason: registryFailure } = await getRegistryManifestDigestDetailed(imageName, envId);
+		const { digest: registryDigest, reason: registryFailure } = await getRegistryManifestDigestDetailed(checkedReference, envId);
 
 		if (!registryDigest) {
 			// Registry unreachable or image not found - can't determine update status.
@@ -4311,14 +4222,25 @@ export async function checkImageUpdateAvailable(
 		}
 
 		// The HEAD digest (always the manifest-list/index digest) didn't match. Before
-		// declaring an update, rule out the multi-arch false positive: a local per-arch
-		// child digest won't equal the index digest even when the image is current
-		// (#1367). Best-effort GET of the index; on any failure hasUpdate stays true.
-		if (await localDigestMatchesRegistryChild(imageName, localDigests)) {
+		// declaring an update, rule out the multi-arch false positives: a local per-arch
+		// child digest never equals the index digest, and an index that moved while the
+		// daemon-platform image stayed the same is not an update either. A registry that
+		// cannot be read to decide is an error, never a guessed update.
+		const multiArch = await localImageMatchesRegistry(imageName, localDigests, envId, registryDigest, currentImageId);
+		if (multiArch.kind === 'same') {
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], localDigests };
 		}
-		const remaining = await imageCooldownRemainingMs(imageName, registryDigest, envId);
-		if (remaining > 0) {
+		if (multiArch.kind === 'unknown') {
+			return {
+				hasUpdate: false,
+				currentDigest: currentRepoDigests[0],
+				registryDigest,
+				localDigests,
+				error: `Could not confirm whether the multi-arch image is current: ${multiArch.reason}`
+			};
+		}
+		const remaining = await imageCooldownRemainingMs(checkedReference, registryDigest, envId);
+		if (remaining > 0 && !skipCooldown) {
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], registryDigest, localDigests, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 		}
 
@@ -4383,14 +4305,6 @@ export function getTempImageTag(imageName: string): string {
 	const tag = afterColon;
 
 	return `${repo}:${tag}-dockhand-pending`;
-}
-
-/**
- * Check if an image name is using a digest (sha256) instead of a tag.
- * Digest-based images don't need temp tag handling.
- */
-export function isDigestBasedImage(imageName: string): boolean {
-	return imageName.includes('@sha256:');
 }
 
 /**
@@ -5079,11 +4993,21 @@ export async function pruneContainers(envId?: number | null) {
 	return dockerJsonRequest('/containers/prune', { method: 'POST' }, envId);
 }
 
-export async function pruneImages(dangling = true, envId?: number | null) {
+function pruneAllUnusedImages(envId?: number | null): Promise<ImagePruneResult> {
+	return pruneAllUnused({
+		listImages: (filters) => dockerJsonRequest(filters ? `/images/json?filters=${filters}` : '/images/json', {}, envId),
+		listContainers: () => dockerJsonRequest('/containers/json?all=true', {}, envId),
+		prune: () => dockerJsonRequest<ImagePruneResult>(`/images/prune?filters=${buildImagePruneFilters(false)}`, { method: 'POST' }, envId),
+		remove: (ref) => dockerJsonRequest(`/images/${encodeURIComponent(ref)}`, { method: 'DELETE' }, envId),
+		log: (message) => console.log(`[Prune] env ${envId ?? 'local'}: ${message}`)
+	});
+}
+
+export async function pruneImages(dangling = true, envId?: number | null): Promise<ImagePruneResult> {
 	// dangling=true: only remove untagged images. Pass straight through —
 	// scanner images are always tagged so they can't be dangling anyway.
 	if (dangling) {
-		return dockerJsonRequest(
+		return dockerJsonRequest<ImagePruneResult>(
 			`/images/prune?filters=${buildImagePruneFilters(true)}`,
 			{ method: 'POST' },
 			envId
@@ -5097,11 +5021,7 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 	// in a finally (#625). Scanner images are third-party so we can't label them.
 	const protect = (await getSetting('protect_scanner_images')) !== false;
 	if (!protect) {
-		return dockerJsonRequest(
-			`/images/prune?filters=${buildImagePruneFilters(false)}`,
-			{ method: 'POST' },
-			envId
-		);
+		return pruneAllUnusedImages(envId);
 	}
 
 	const { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } = await import('./scanner');
@@ -5126,17 +5046,14 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 				envId
 			);
 			holderIds.push(created.Id);
-		} catch {
-			// Image not present locally → nothing to protect → no-op
+		} catch (err) {
+			const warning = holderFailureWarning(err, image, envId);
+			if (warning) console.warn(warning);
 		}
 	}
 
 	try {
-		return await dockerJsonRequest(
-			`/images/prune?filters=${buildImagePruneFilters(false)}`,
-			{ method: 'POST' },
-			envId
-		);
+		return await pruneAllUnusedImages(envId);
 	} finally {
 		for (const id of holderIds) {
 			try {
@@ -5792,7 +5709,13 @@ export async function runContainerWithStreaming(options: {
 				}
 				const detail = helperFailureDetail({ stderr: stderrText, stdout, daemonError });
 				const code = exitCode === undefined ? 'unknown (could not determine container exit status)' : String(exitCode);
-				throw new Error(`Container exited with code ${code}: ${detail}`);
+				// The message is truncated for display, but carry the FULL stderr/stdout so a
+				// caller can classify on it: a scanner's "blob not found in tar" line (the
+				// registry-fallback signal) often lands after the truncation point.
+				throw Object.assign(new Error(`Container exited with code ${code}: ${detail}`), {
+					stderr: stderrText,
+					stdout
+				});
 			}
 
 			return stdout;
@@ -6259,8 +6182,8 @@ export async function listContainerDirectory(
 	envId?: number | null,
 	useSimpleLs?: boolean
 ): Promise<{ path: string; entries: FileEntry[] }> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Commands to try in order of preference (includes /usr/sbin/ls for Wolfi/busybox images)
 	const commands = useSimpleLs
@@ -6303,8 +6226,8 @@ export async function getContainerArchive(
 	path: string,
 	envId?: number | null
 ): Promise<Response> {
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	const response = await dockerFetch(
 		`/containers/${containerId}/archive?path=${encodeURIComponent(safePath)}`,
@@ -6329,8 +6252,8 @@ export async function putContainerArchive(
 	tarData: ArrayBuffer | Uint8Array,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	const response = await dockerFetch(
 		`/containers/${containerId}/archive?path=${encodeURIComponent(safePath)}`,
@@ -6359,8 +6282,8 @@ export async function statContainerPath(
 	path: string,
 	envId?: number | null
 ): Promise<{ name: string; size: number; mode: number; mtime: string; linkTarget?: string; isDir: boolean }> {
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	const response = await dockerFetch(
 		`/containers/${containerId}/archive?path=${encodeURIComponent(safePath)}`,
@@ -6395,8 +6318,8 @@ export async function readContainerFile(
 	path: string,
 	envId?: number | null
 ): Promise<string> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Use cat to read file content
 	const output = await execInContainer(containerId, ['cat', safePath], envId);
@@ -6413,8 +6336,8 @@ export async function writeContainerFile(
 	content: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Get directory and filename
 	const parts = safePath.split('/');
@@ -6496,8 +6419,8 @@ export async function createContainerFile(
 	path: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Use touch to create empty file
 	await execInContainer(containerId, ['touch', safePath], envId);
@@ -6511,8 +6434,8 @@ export async function createContainerDirectory(
 	path: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Use mkdir -p to create directory (and parents if needed)
 	await execInContainer(containerId, ['mkdir', '-p', safePath], envId);
@@ -6526,8 +6449,8 @@ export async function deleteContainerPath(
 	path: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Safety check: don't allow deleting root or critical paths
 	const dangerousPaths = ['/', '/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/var', '/root', '/home'];
@@ -6548,9 +6471,9 @@ export async function renameContainerPath(
 	newPath: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize paths to prevent command injection
-	const safeOldPath = oldPath.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
-	const safeNewPath = newPath.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safeOldPath = assertSafeContainerPath(oldPath);
+	const safeNewPath = assertSafeContainerPath(newPath);
 
 	// Use mv to rename
 	await execInContainer(containerId, ['mv', safeOldPath, safeNewPath], envId);
@@ -6566,8 +6489,8 @@ export async function chmodContainerPath(
 	recursive: boolean = false,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Validate mode (should be octal like 755 or symbolic like u+x)
 	if (!/^[0-7]{3,4}$/.test(mode) && !/^[ugoa]*[+-=][rwxXst]+$/.test(mode)) {
@@ -6590,7 +6513,7 @@ export async function chownContainerPath(
 	recursive: boolean = false,
 	envId?: number | null
 ): Promise<void> {
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	const safePath = assertSafeContainerPath(path);
 	// `--` stops chown reading a path that begins with `-` as an option.
 	const cmd = recursive ? ['chown', '-R', owner, '--', safePath] : ['chown', owner, '--', safePath];
 	await execInContainer(containerId, cmd, envId, 'root');
@@ -6866,8 +6789,7 @@ async function cleanupStaleVolumeHelpersForEnv(envId?: number | null): Promise<n
 	} catch (err: any) {
 		// Don't spam logs for expected connection failures (offline envs, TLS mismatches, etc.)
 		const msg = err?.message || String(err);
-		const isExpected = /not connected|offline|unreachable|fetch failed|EPROTO|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH/i.test(msg);
-		if (!isExpected) {
+		if (!isExpectedConnectionError(err)) {
 			console.warn(`Failed to query stale volume helpers for env ${envId}:`, msg);
 		}
 		return 0;
@@ -6916,8 +6838,7 @@ async function cleanupStaleBackupHelpersForEnv(myInstance: string, envId?: numbe
 	} catch (err: any) {
 		// Don't spam logs for expected connection failures (offline envs, TLS mismatches, etc.)
 		const msg = err?.message || String(err);
-		const isExpected = /not connected|offline|unreachable|fetch failed|EPROTO|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH/i.test(msg);
-		if (!isExpected) {
+		if (!isExpectedConnectionError(err)) {
 			console.warn(`Failed to query orphan backup helpers for env ${envId}:`, msg);
 		}
 		return 0;
@@ -6956,8 +6877,8 @@ export async function listVolumeDirectory(
 ): Promise<{ path: string; entries: FileEntry[]; containerId: string }> {
 	const containerId = await getOrCreateVolumeHelperContainer(volumeName, envId, readOnly);
 
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 	const fullPath = `${VOLUME_MOUNT_PATH}${safePath.startsWith('/') ? safePath : '/' + safePath}`;
 
 	// Use simple ls since busybox doesn't support --time-style
@@ -6985,8 +6906,8 @@ export async function getVolumeArchive(
 ): Promise<{ response: Response; containerId: string }> {
 	const containerId = await getOrCreateVolumeHelperContainer(volumeName, envId, readOnly);
 
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 	const fullPath = `${VOLUME_MOUNT_PATH}${safePath.startsWith('/') ? safePath : '/' + safePath}`;
 
 	const response = await dockerFetch(
@@ -7015,7 +6936,7 @@ export async function statVolumePath(
 	readOnly: boolean = true
 ): Promise<{ name: string; size: number; mode: number; mtime: string; linkTarget?: string; isDir: boolean }> {
 	const containerId = await getOrCreateVolumeHelperContainer(volumeName, envId, readOnly);
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	const safePath = assertSafeContainerPath(path);
 	const fullPath = `${VOLUME_MOUNT_PATH}${safePath.startsWith('/') ? safePath : '/' + safePath}`;
 	return statContainerPath(containerId, fullPath, envId);
 }
@@ -7032,8 +6953,8 @@ export async function readVolumeFile(
 ): Promise<string> {
 	const containerId = await getOrCreateVolumeHelperContainer(volumeName, envId, readOnly);
 
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 	const fullPath = `${VOLUME_MOUNT_PATH}${safePath.startsWith('/') ? safePath : '/' + safePath}`;
 
 	// Use cat to read file content

@@ -3,6 +3,7 @@ import { downStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import type { RequestHandler } from './$types';
 
 /**
@@ -12,6 +13,7 @@ import type { RequestHandler } from './$types';
  * query: env:integer Environment id (from GET /api/environments)
  * body: {removeVolumes:boolean}
  * body-example: {"removeVolumes":false}
+ * resp-400: Invalid stack name
  * resp-200: {jobId:string!}
  * resp-200-desc: Fire-and-forget job id — poll GET /api/jobs/{jobId} for the result. Send "Accept: application/json" (without text/event-stream) to instead block and receive the final {success,output|error} synchronously.
  * resp-200-example: {"jobId":"3f9c5b1a-2e4d-4a6f-9b0a-1c7d8e9f0a1b"}
@@ -43,9 +45,14 @@ export const POST: RequestHandler = async (event) => {
 		// No body or invalid JSON - use defaults
 	}
 
+	// Validate the name shape before it is used in a filesystem path.
+	if (!isValidStackName(params.name)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
+
 	return createJobResponse(async (send) => {
 		try {
-			const stackName = decodeURIComponent(params.name);
+			const stackName = params.name;
 			const result = await downStack(stackName, envIdNum, removeVolumes, (line) => send('progress', { type: 'line', line }));
 
 			// Audit log

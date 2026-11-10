@@ -203,3 +203,119 @@ export function quoteForEnvFile(value: string): string {
 	return `"${escaped}"`;
 }
 
+
+/**
+ * A `.env` value as the editor's form shows it: quotes and escapes resolved, variable
+ * references left alone.
+ *
+ * `expandValue` is the deploy-time reading and resolves `${NAME}` as well, which a form
+ * must not do - the user typed the reference and has to keep seeing it. So this takes
+ * only the syntax half: a matching outer pair of quotes, and the `\\`, `\"`, `\n`,
+ * `\r`, `\t` and `$$` escapes that `envValueToText` writes. Those escapes are resolved
+ * whether or not the value was quoted, because an unquoted `$$` is compose's literal
+ * dollar just the same. Single quotes are literal in a `.env` file, so their content is
+ * returned untouched.
+ */
+export function envValueFromText(raw: string): string {
+	const v = raw.trim();
+	if (v.length < 2) return v;
+	const first = v[0];
+	if (first !== '"' && first !== "'") return v;
+	if (v[v.length - 1] !== first) return v;
+
+	const inner = v.slice(1, -1);
+	if (first === "'") return inner;
+
+	// `$$` is compose's escape for one literal dollar, and only inside double quotes - an
+	// unquoted or single-quoted `$$` is two characters, which is what keeps an edited
+	// password's dollars intact.
+	return inner.replace(/\\([\\"nrt])|\$\$/g, (match, escape) => {
+		if (!escape) return '$';
+		return { '\\': '\\', '"': '"', n: '\n', r: '\r', t: '\t' }[escape as string] ?? match;
+	});
+}
+
+/**
+ * The inverse: a form value written back as one `.env` token.
+ *
+ * Quoted only where the bare form would not survive being read again - a leading or
+ * trailing space is trimmed off, a `#` opens a comment, and a quote or a newline breaks
+ * the line.
+ *
+ * A `${NAME}` or `$NAME` reference is written THROUGH, not escaped: the form shows the
+ * reference the user typed, so escaping it here would hand compose a literal dollar and
+ * the variable would stop resolving. Only a dollar that starts no name is escaped, which
+ * is what keeps a value like `cost$5` intact.
+ */
+export function envValueToText(value: string): string {
+	if (value === '') return '';
+	if (!/^\s|\s$|[#"'$\\\r\n\t]/.test(value)) return value;
+
+	const escaped = value
+		.replace(/\\/g, '\\\\')
+		.replace(/"/g, '\\"')
+		.replace(/\n/g, '\\n')
+		.replace(/\r/g, '\\r')
+		.replace(/\t/g, '\\t')
+		.replace(/\$\$|\$(?![A-Za-z_{])/g, (match) => (match === '$' ? '$$' : '$$$$'));
+	return `"${escaped}"`;
+}
+
+/**
+ * A form value written back over a line that already exists, keeping that line's meaning.
+ *
+ * A form value cannot say which `.env` spelling produced it: `'${A}/y'` is a literal and
+ * `"${A}/y"` is a reference, and both read back as the same string. So a writer with only
+ * the value has to guess, and guessing turns one into the other.
+ *
+ * Two things carry over from the old text. Its bytes, when it still means the value in
+ * hand - an untouched file is then byte-identical after a save. And its QUOTING STYLE
+ * when the value did change: a single-quoted line stays single-quoted, because that is
+ * what keeps a `$` in an edited password literal instead of making it a reference.
+ */
+export function envValueToTextPreserving(value: string, existingText: string): string {
+	if (envValueFromText(existingText) === value) return existingText;
+
+	const trimmed = existingText.trim();
+	const wasLiteral = trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'");
+	// A single-quoted value admits no escape at all, so a value containing one cannot be
+	// written that way and falls back to the escaping form.
+	if (wasLiteral && !/['\r\n]/.test(value)) return `'${value}'`;
+
+	return envValueToText(value);
+}
+
+/** One `KEY=value` row of a `.env` file, as the editor's form shows it. */
+export interface EnvFileRow {
+	key: string;
+	value: string;
+}
+
+/**
+ * The ONE reader for a `.env` file on its way to the editor's form.
+ *
+ * Three callers reach the same form - the stack env API, the relocate response, and the
+ * browser loading a file off disk - so they have to agree on what a value is, or the
+ * same file shows different rows depending on how the stack was opened. Values come
+ * back through `envValueFromText`, which resolves the file's syntax and leaves a
+ * `${NAME}` reference as the user wrote it.
+ *
+ * Deploy-time reading is `parseEnvFileContent` in git.ts and is NOT this: it resolves
+ * references too, which is right for a service and wrong for a form.
+ */
+export function parseEnvFileForForm(content: string): EnvFileRow[] {
+	const rows: EnvFileRow[] = [];
+	for (const line of content.split('\n')) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith('#')) continue;
+
+		const eqIndex = trimmed.indexOf('=');
+		if (eqIndex <= 0) continue;
+
+		const key = trimmed.slice(0, eqIndex).trim();
+		if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+
+		rows.push({ key, value: envValueFromText(trimmed.slice(eqIndex + 1)) });
+	}
+	return rows;
+}

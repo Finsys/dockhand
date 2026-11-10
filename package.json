@@ -1,7 +1,7 @@
 {
 	"name": "dockhand",
 	"private": true,
-	"version": "1.0.53",
+	"version": "1.0.57",
 	"type": "module",
 	"scripts": {
 		"dev": "npx vite dev",
@@ -61,7 +61,7 @@
 		"marked": "18.0.9",
 		"modern-tar": "0.8.0",
 		"mqtt": "5.15.2",
-		"nodemailer": "10.0.10",
+		"nodemailer": "10.1.7",
 		"otpauth": "9.4.1",
 		"pdfkit": "0.20.2",
 		"postgres": "3.4.8",
@@ -71,7 +71,7 @@
 		"svelte-dnd-action": "0.9.79",
 		"svelte-sonner": "1.0.7",
 		"svg-to-pdfkit": "0.1.8",
-		"undici": "7.30.0",
+		"undici": "7.30.1",
 		"ws": "8.21.0"
 	},
 	"devDependencies": {
@@ -131,11 +131,11 @@
 		"@lezer/common": "1.5.0",
 		"@lezer/highlight": "1.2.3",
 		"devalue": "5.9.3",
-		"dompurify": "3.4.16",
-		"ip-address": "10.7.3",
+		"dompurify": "3.4.17",
+		"ip-address": "10.7.4",
 		"source-map-js": "1.2.2",
 		"jsdom": {
-			"undici": "8.11.2"
+			"undici": "8.12.2"
 		}
 	}
 }

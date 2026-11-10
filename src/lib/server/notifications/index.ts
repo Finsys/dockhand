@@ -27,7 +27,7 @@ import {
 import type { NotificationPayload, NotificationResult } from './shared';
 export type { NotificationPayload, NotificationResult } from './shared';
 // The pure docker-action -> event-type map lives in events-core (unit-testable).
-import { mapActionToEventType } from './events-core';
+import { mapActionToEventType, withoutSubscribersOf, deliveryLogLine, coveredLogLine } from './events-core';
 export { mapActionToEventType } from './events-core';
 
 import { sendSmtpNotification } from './smtp';
@@ -233,6 +233,7 @@ export async function sendEnvironmentNotification(
 			} else if (notif.channelType === 'apprise') {
 				result = await sendAppriseNotification(notif.config as AppriseConfig, enrichedPayload);
 			}
+			logDelivery(eventType, notif.channelName, notif.channelType, result);
 			if (result.success) sent++;
 			else allSuccess = false;
 		} catch (error) {
@@ -245,10 +246,23 @@ export async function sendEnvironmentNotification(
 	return { success: allSuccess, sent };
 }
 
+function logDelivery(eventType: string, channelName: string | null | undefined, channelType: string | null | undefined, result: NotificationResult): void {
+	const line = deliveryLogLine(eventType, channelName, channelType, result);
+	if (result.success) console.log(line);
+	else console.warn(line);
+}
+
+function logCovered(eventType: string, coveredBy: string | undefined, skipped: Array<string | null | undefined>): void {
+	const line = coveredLogLine(eventType, coveredBy, skipped);
+	if (line) console.log(line);
+}
+
 export async function sendEventNotification(
 	eventType: NotificationEventType,
 	payload: NotificationPayload,
-	environmentId?: number
+	environmentId?: number,
+	/** Skip the channels subscribed to this event: they get it instead of this one. */
+	coveredBy?: NotificationEventType
 ): Promise<{ success: boolean; sent: number }> {
 	let enrichedPayload: NotificationPayload = { ...payload, eventType };
 	if (environmentId) {
@@ -267,7 +281,9 @@ export async function sendEventNotification(
 
 	if (environmentId) {
 		const envNotifications = await getEnabledEnvironmentNotifications(environmentId, eventType);
-		channels = envNotifications
+		const kept = withoutSubscribersOf(envNotifications, coveredBy);
+		logCovered(eventType, coveredBy, envNotifications.filter(n => !kept.includes(n)).map(n => n.channelName));
+		channels = kept
 			.filter(n => n.channelType && n.channelName)
 			.map(n => ({
 				channel_type: n.channelType!,
@@ -275,9 +291,10 @@ export async function sendEventNotification(
 				config: n.config
 			}));
 	} else {
-		const globalSettings = await getEnabledNotificationSettings();
-		channels = globalSettings
-			.filter(s => s.eventTypes?.includes(eventType))
+		const subscribed = (await getEnabledNotificationSettings()).filter(s => s.eventTypes?.includes(eventType));
+		const kept = withoutSubscribersOf(subscribed, coveredBy);
+		logCovered(eventType, coveredBy, subscribed.filter(s => !kept.includes(s)).map(s => s.name));
+		channels = kept
 			.map(s => ({
 				channel_type: s.type,
 				channel_name: s.name,
@@ -300,6 +317,7 @@ export async function sendEventNotification(
 			} else if (channel.channel_type === 'apprise') {
 				result = await sendAppriseNotification(channel.config as AppriseConfig, enrichedPayload);
 			}
+			logDelivery(eventType, channel.channel_name, channel.channel_type, result);
 			if (result.success) sent++;
 			else allSuccess = false;
 		} catch (error) {

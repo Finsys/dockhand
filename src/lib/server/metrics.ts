@@ -32,8 +32,18 @@ import { getScannerStats } from '$lib/server/scanner';
 import { getSchedulerStats } from '$lib/server/scheduler';
 import { edgeConnections } from '$lib/server/hawser';
 import { getDatabaseStats } from '$lib/server/db/drizzle';
+import { metricsPublicFromEnv } from './metrics-access-core';
 
 export const METRICS_ENABLED = process.env.EXPORT_METRICS === 'true';
+
+/**
+ * Leaves /metrics reachable without authentication even when app auth is enabled
+ * (#1698). Opt-in and default-off: a scrape stays behind auth unless the operator
+ * deliberately exposes it, for the common case where /metrics is reached only over a
+ * trusted internal network behind a reverse proxy. It opens ONLY /metrics; every
+ * other route stays gated.
+ */
+export const METRICS_PUBLIC = metricsPublicFromEnv(process.env.EXPORT_METRICS_PUBLIC);
 
 /** How long a gathered snapshot is reused before a scrape re-collects (ms). */
 const COLLECT_TTL_MS = 15_000;

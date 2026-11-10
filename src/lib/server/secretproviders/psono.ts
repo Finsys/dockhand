@@ -28,6 +28,8 @@ import {
 import {
 	decryptSecret,
 	secretToEnvVar,
+	envVarsSecretToEntries,
+	safeKeyForLog,
 	parsePsonoReference,
 	isPsonoReference,
 	referenceValue,
@@ -275,18 +277,30 @@ export const psonoProvider: SecretProvider<PsonoConfig> = {
 			);
 		}
 		const out: Record<string, string> = {};
+		const take = (name: string, value: string) => {
+			if (out[name] !== undefined) {
+				console.warn(`[Psono] bulk: ${name} appears more than once, keeping the first`);
+				return;
+			}
+			out[name] = value;
+		};
 		for (const { id, d } of decrypted) {
 			if (d === null) continue;
+			// An Environment Variables secret holds many key/value pairs - inject each.
+			const envVars = envVarsSecretToEntries(d);
+			if (envVars !== null) {
+				for (const key of envVars.skipped) {
+					console.warn(`[Psono] bulk: ${id} env_vars key ${safeKeyForLog(key)} is not a valid variable name, skipped`);
+				}
+				for (const { name, value } of envVars.entries) take(name, value);
+				continue;
+			}
 			const pair = secretToEnvVar(d);
 			if (!pair) {
 				console.warn(`[Psono] bulk: ${id} has no usable name/value pair, skipped`);
 				continue;
 			}
-			if (out[pair.name] !== undefined) {
-				console.warn(`[Psono] bulk: ${pair.name} appears more than once, keeping the first`);
-				continue;
-			}
-			out[pair.name] = pair.value;
+			take(pair.name, pair.value);
 		}
 		return out;
 	},

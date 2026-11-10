@@ -122,12 +122,32 @@ export function isPrerelease(tag: ParsedTag): boolean {
  * differ in the per-release hash). This lets one hashed tag suggest the next
  * while still never mixing `-alpine` with bare.
  */
+// A build-counter identifier that increments on every rebuild of one upstream version
+// (`r2`, `ls121`): a KNOWN short prefix plus digits. Only these collapse to their prefix
+// in the flavor; a word carrying a version number (`php8.1`, `node18`, `cuda11.8`) is a
+// distinct VARIANT and keeps its digits, so one is never offered as an update to another.
+const BUILD_COUNTER_RE = /^(?:ls|r)\d+$/i;
+
 export function flavorOf(tag: ParsedTag): string {
-	return tag.suffix
+	const stable = tag.suffix
 		.replace(COMMIT_HASH_RE, '')
 		.replace(LS_BUILD_RE, '$1')
 		.replace(PRERELEASE_RE, (_m, delim: string) => (delim === '.' ? '' : delim))
 		.replace(/[-.]+$/, ''); // drop the delimiter the prerelease left dangling
+	// Split on `-` only, so a dotted variant version (`php8.1`) stays one identifier.
+	// A pure-numeric revision (`-1.1`) drops out, a build counter collapses to its
+	// prefix (`r2` -> `r`), and a variant token is kept whole. The dropped/collapsed
+	// digits stay in `suffix` for compareParts to order on.
+	return stable
+		.split('-')
+		.filter(Boolean)
+		.map((id) => {
+			if (/^\d+(?:\.\d+)*$/.test(id)) return ''; // numeric revision
+			if (BUILD_COUNTER_RE.test(id)) return id.replace(/\d+$/, ''); // build counter
+			return id; // variant (kept whole, digits and all)
+		})
+		.filter(Boolean)
+		.join('-');
 }
 
 /** A newer version is only offered within the SAME flavor. Exact match, prerelease-agnostic. */
@@ -135,14 +155,50 @@ export function flavorMatches(a: ParsedTag, b: ParsedTag): boolean {
 	return flavorOf(a) === flavorOf(b);
 }
 
-/** Compare two version tuples pairwise (missing segments count as 0). <0, 0, or >0. */
+/**
+ * Whether `candidate` is a CalVer tag that must NOT be offered as an update to a
+ * SemVer `current`. A repo that publishes both `3.1.0` and a
+ * date-based `2025.1.1` sorts the CalVer one higher numerically, but it is a
+ * different versioning scheme, not a newer release. A SemVer current (major < 100)
+ * never upgrades to a 4-digit-year CalVer (major >= 2000) or an Ubuntu-style
+ * `YY.0M` CalVer (e.g. `20.04`). The reverse (CalVer current) is unaffected.
+ */
+const UBUNTU_CALVER_RE = /^\d{2}\.0\d(?:\.|$)/;
+export function isCalVerDrift(current: ParsedTag, candidate: ParsedTag): boolean {
+	const curMajor = current.parts[0] ?? 0;
+	if (curMajor >= 100) return false; // current is itself CalVer-ish
+	if ((candidate.parts[0] ?? 0) >= 2000) return true;
+	return UBUNTU_CALVER_RE.test(candidate.version);
+}
+
+/**
+ * Order two suffixes of the SAME upstream version as build/revision strings.
+ * Numeric-aware string comparison, so a number anywhere in the suffix orders
+ * numerically, not lexically: `-ls10` > `-ls9`, `-1.10` > `-1.9`, `-r3-ls370` >
+ * `-r2-ls366`. A numeric-aware string comparison (`localeCompare(..., {numeric:true})`).
+ * Only reached for two tags that already share a flavor, so
+ * it never has to rank a build suffix against a bare tag.
+ */
+export function compareSuffix(a: string, b: string): number {
+	return Math.sign(a.localeCompare(b, undefined, { numeric: true, sensitivity: 'variant' }));
+}
+
+/**
+ * Compare two version tuples pairwise (missing segments count as 0). When the
+ * numeric versions tie, the build/revision suffix breaks the tie, so
+ * `4.2.8-1.1` < `4.2.8-1.2` and `2.5.1-ls121` < `2.5.1-ls122`. <0, 0, or >0.
+ *
+ * The suffix also orders a prerelease counter (`1.0-rc1` < `1.0-rc2`); whether such a
+ * candidate is offered at all is the separate `includePrerelease` policy, decided in
+ * the find-newer filter, not here.
+ */
 export function compareParts(a: ParsedTag, b: ParsedTag): number {
 	const length = Math.max(a.parts.length, b.parts.length);
 	for (let i = 0; i < length; i++) {
 		const diff = (a.parts[i] ?? 0) - (b.parts[i] ?? 0);
 		if (diff !== 0) return diff;
 	}
-	return 0;
+	return compareSuffix(a.suffix, b.suffix);
 }
 
 // The `dockhand.version.pattern` label value must start with this scheme, leaving

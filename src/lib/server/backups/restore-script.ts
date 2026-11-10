@@ -196,3 +196,49 @@ export function buildNewLocationRestore(
 	args.push(...flags);
 	return args;
 }
+
+/** Where the helper mounts the host directory of a single-file bind, one per volume key. */
+export const FILE_MOUNT_ROOT = '/restore-files';
+
+/** A single-file volume: restic restores `include` (a FILE in the snapshot) and it is written
+ *  as `name` into `mountDir`, the helper mount of the file's host directory. */
+export interface FileRestoreTarget {
+	include: string;
+	mountDir: string;
+	name: string;
+}
+
+/**
+ * Restore single-file volumes by writing each file into its host DIRECTORY, mounted in the
+ * helper. Mounting the file itself does not work: a missing bind source is created by Docker
+ * as a directory, and an existing one is a mount point that cannot be replaced. Each file is
+ * extracted to the helper's own /tmp, copied next to its destination and renamed over it, so
+ * the destination is either the old file or the whole new one. An empty directory in its place
+ * (left by Docker for a missing source) is replaced; a non-empty one is refused untouched. A
+ * destination that is a link is written through instead, so the file it points at is restored.
+ * Returns statements to run under `set -e`.
+ */
+export function buildFileRestores(snapshotId: string, files: FileRestoreTarget[], flags: string[]): string {
+	const say = (m: string) => `echo ${shellQuote(`[dockhand] ${m}`)} >&2`;
+	return files.map(({ include, mountDir, name }) => {
+		const key = include.replace(/^\/+volumes\//, '');
+		const stage = `/tmp/dockhand-file-${key}`;
+		const extracted = shellQuote(`${stage}${include}`);
+		const dst = shellQuote(`${mountDir}/${name}`);
+		const tmp = shellQuote(`${mountDir}/.${name}.dockhand-restore-new`);
+		const restic = `restic ${['restore', '--json', snapshotId, '--target', stage, '--include', include, ...flags].map(shellQuote).join(' ')}`;
+		return [
+			say(`Restoring file ${name} from ${include}`),
+			`rm -rf ${shellQuote(stage)}`,
+			restic,
+			`if [ ! -f ${extracted} ]; then echo ${shellQuote(`restore: ${include} is not a file in the snapshot`)} >&2; exit 1; fi`,
+			// A link is written through, so its target (a shared config) gets the content; a link
+			// to a directory makes the write fail rather than land inside it.
+			`if [ -L ${dst} ]; then cat ${extracted} > ${dst}; ` +
+				`else if [ -d ${dst} ]; then rmdir ${dst} 2>/dev/null || { echo ${shellQuote(`restore: ${name} is a non-empty directory on the target; refusing to replace it`)} >&2; exit 1; }; fi; ` +
+				`cp -p ${extracted} ${tmp} || { rm -f ${tmp}; exit 1; }; ` +
+				`mv -f ${tmp} ${dst} || { rm -f ${tmp}; exit 1; }; fi`,
+			`rm -rf ${shellQuote(stage)}`,
+		].join('; ');
+	}).join('; ');
+}

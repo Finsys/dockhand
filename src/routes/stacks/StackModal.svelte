@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -9,9 +10,10 @@
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import SecretProviderPicker from '$lib/components/SecretProviderPicker.svelte';
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
+	import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 	import { classifyMarker, isInlineProviderRef, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown, EllipsisVertical } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import DeploysPanel from './DeploysPanel.svelte';
@@ -19,7 +21,7 @@
 	import { deployTallyFromRuns } from '$lib/utils/deploy-run-view';
 	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import FilesystemBrowser from './FilesystemBrowser.svelte';
 	import DetectedComposeFile from './DetectedComposeFile.svelte';
 	import { canAccess } from '$lib/stores/auth';
@@ -65,7 +67,7 @@
 	// Options picked in the RedeployPopover next to "Save & redeploy" / "Create & Start"
 	// (see the pull/build/forceRecreate contract RedeployPopover.svelte already uses for
 	// the stack-grid redeploy actions).
-	type DeployOptions = { pull: boolean; build: boolean; forceRecreate: boolean };
+	type DeployOptions = { pull: boolean; respectPullPolicy?: boolean; build: boolean; pullBase?: boolean; forceRecreate: boolean };
 
 	interface Props {
 		open: boolean;
@@ -76,10 +78,11 @@
 		readonly?: boolean; // View compose content without allowing local changes
 		gitInfo?: { commit?: string; url?: string; branch?: string } | null; // Git provenance for read-only git stacks
 		onClose: () => void;
+		onConvertToGit?: (() => void) | null;
 		onSuccess: () => void; // Called after create or save
 	}
 
-	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onConvertToGit = null, onSuccess }: Props = $props();
 
 	let gitCommitCopied = $state<'ok' | 'error' | null>(null);
 	let gitUrlCopied = $state<'ok' | 'error' | null>(null);
@@ -586,7 +589,7 @@
 	let showFileBrowser = $state(false);
 	let fileBrowserConfig = $state<{
 		title: string;
-		icon?: Component<{ class?: string }>;
+		icon?: IconComponent;
 		selectFilter?: RegExp;
 		selectMode: 'file' | 'directory' | 'file_or_directory';
 		onSelect: (path: string, name: string) => void;
@@ -854,19 +857,7 @@
 
 	// Parse env vars from raw content
 	function parseEnvVarsFromRaw(content: string) {
-		const vars: EnvVar[] = [];
-		const lines = content.split('\n');
-		for (const line of lines) {
-			const trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith('#')) continue;
-			const eqIndex = trimmed.indexOf('=');
-			if (eqIndex > 0) {
-				const key = trimmed.substring(0, eqIndex);
-				const value = trimmed.substring(eqIndex + 1);
-				vars.push({ key, value, isSecret: false });
-			}
-		}
-		envVars = vars;
+		envVars = parseEnvFileForForm(content).map((row) => ({ ...row, isSecret: false }));
 	}
 
 	// Handle compose file selection from browser
@@ -1467,17 +1458,17 @@
 						console.error('Failed to fetch stack containers:', e);
 					}
 
-					// Load the stack's icon even when the compose isn't local (read-only git
-					// stack): the icon is Dockhand metadata, not repo content, so the header
-					// must still show a custom icon the user set.
+					// Load the stack's icon and secret provider even when the compose isn't local
+					// (read-only git stack): both are Dockhand metadata, not repo content.
 					try {
 						const sourcesRes = await fetch(appendEnvParam('/api/stacks/sources', envId));
 						if (sourcesRes.ok) {
 							const sourceMap = await sourcesRes.json();
 							formIcon = sourceMap?.[stackName]?.icon ?? null;
+							formSecretProviderId = sourceMap?.[stackName]?.secretProviderId ?? null;
 						}
 					} catch (e) {
-						console.warn('Failed to load stack icon:', e);
+						console.warn('Failed to load stack source (icon / secret provider):', e);
 					}
 					return;
 				}
@@ -1560,12 +1551,19 @@
 			const envId = $currentEnvironment?.id ?? null;
 			// Use 'new' as placeholder stack name for new stacks
 			const stackNameForValidation = mode === 'edit' ? stackName : (newStackName.trim() || 'new');
-			// Pass current UI env vars for validation
+			// Pass current UI env vars and non-secret values for validation
 			const currentVars = envVars.filter(v => v.key.trim()).map(v => v.key.trim());
+			const currentEnvValues: Record<string, string> = {};
+			for (const v of envVars) {
+				const k = v.key.trim();
+				if (k && !v.isSecret && v.value) {
+					currentEnvValues[k] = v.value;
+				}
+			}
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackNameForValidation)}/env/validate`, envId), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ compose: content, variables: currentVars })
+				body: JSON.stringify({ compose: content, variables: currentVars, envValues: currentEnvValues })
 			});
 
 			if (response.ok) {
@@ -1675,7 +1673,9 @@
 			// plain "Create" button, which never reaches deployStack server-side anyway.
 			if (start && deployOptions) {
 				requestBody.pull = deployOptions.pull;
+				requestBody.respectPullPolicy = deployOptions.respectPullPolicy;
 				requestBody.build = deployOptions.build;
+				requestBody.pullBase = deployOptions.pullBase;
 				requestBody.forceRecreate = deployOptions.forceRecreate;
 			}
 
@@ -1855,7 +1855,9 @@
 			// plain "Save" button, which never reaches deployStack server-side anyway.
 			if (restart && deployOptions) {
 				requestBody.pull = deployOptions.pull;
+				requestBody.respectPullPolicy = deployOptions.respectPullPolicy;
 				requestBody.build = deployOptions.build;
+				requestBody.pullBase = deployOptions.pullBase;
 				requestBody.forceRecreate = deployOptions.forceRecreate;
 			}
 
@@ -2267,15 +2269,34 @@
 					</div>
 				</div>
 
-				<!-- Close button -->
-				<button
-					onclick={tryClose}
-					class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-				>
-					<X class="w-4 h-4" />
-				</button>
-			</div>
-		</Dialog.Header>
+				<div class="flex items-center gap-1">
+					{#if !readonly && mode === 'edit' && onConvertToGit}
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger>
+								<button
+									class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+									aria-label={m.stacks_modal_more_actions()}
+								>
+									<EllipsisVertical class="w-4 h-4" />
+								</button>
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Content align="end" class="w-44 border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+								<DropdownMenu.Item class="flex items-center gap-2 cursor-pointer text-sm" onSelect={onConvertToGit} disabled={saving || loading}>
+									<GitGraph class="w-4 h-4 shrink-0" />
+									{m.stacks_git_convert_to_git()}
+								</DropdownMenu.Item>
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					{/if}
+					<!-- Close button -->
+					<button
+						onclick={tryClose}
+						class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+					>
+						<X class="w-4 h-4" />
+					</button>
+				</div>
+			</Dialog.Header>
 
 		<!-- View tabs — left-aligned underline bar under the header, matched to
 		     GitStackModal for a consistent look across the stack modals. -->
@@ -2473,19 +2494,12 @@
 								<PathBarItem
 									label={m.stacks_modal_env_file()}
 									path={displayEnvPath || null}
-									selectedPath={workingEnvPath || suggestedEnvPath || ''}
 									placeholder={m.stacks_modal_env_path_placeholder()}
 									copied={envPathCopied}
 									onCopy={() => copyText(displayEnvPath, (v) => envPathCopied = v)}
 									onBrowse={readonly ? undefined : openEnvBrowser}
-									isEditable={!readonly}
-									isCustom={!!workingEnvPath}
 									defaultText={mode === 'create' ? m.stacks_modal_path_enter_name_above() : m.stacks_modal_path_not_specified()}
 									isSuggested={isEnvPathSuggested}
-									onPathChange={(value) => {
-										workingEnvPath = value;
-										isDirty = true;
-									}}
 								/>
 							</div>
 							<!-- Theme toggle -->
@@ -2650,6 +2664,7 @@
 									bind:secretProviderId={formSecretProviderId}
 									bind:envVars
 									providers={secretProviders}
+									{readonly}
 									onchange={() => { secretProviderTouched = true; markDirty(); debouncedValidate(); }}
 								/>
 								<StackEnvVarsPanel

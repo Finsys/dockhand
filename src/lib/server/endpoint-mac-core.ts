@@ -12,10 +12,12 @@
  * endpoint's IP alone, and it is also the only kind that can collide, since newer
  * daemons assign random addresses instead. So a MAC is dropped exactly when it spells
  * out the IP it was generated from; anything the user pinned is carried through.
+ * A recreate keeps a derived MAC only when the endpoint pins the IP it derives from:
+ * the replacement gets that same IP back.
  *
- * `Config.MacAddress` is not usable for this: daemons below API 1.44 omit the field
- * when the MAC was generated, and API 1.44+ omits it for every container, so its
- * absence carries no signal either way.
+ * `Config.MacAddress` is not usable for this: below API 1.44 it is absent for a
+ * generated MAC, API 1.44-1.51 report it for any configured endpoint MAC (including one
+ * a previous recreate carried), and 29+ never report it.
  */
 
 /** The bits of a container inspect this decision needs. */
@@ -27,6 +29,7 @@ export interface MacInspectLike {
 export interface EndpointLike {
 	MacAddress?: string | null;
 	IPAddress?: string | null;
+	IPAMConfig?: { IPv4Address?: string | null; IPv6Address?: string | null } | null;
 	[key: string]: unknown;
 }
 
@@ -83,5 +86,16 @@ export function configuredMacAddress(
 export function endpointWithoutGeneratedMac<T extends EndpointLike>(endpoint: T): T {
 	const out = { ...endpoint };
 	if (isGeneratedEndpointMac(endpoint)) delete out.MacAddress;
+	return out;
+}
+
+/**
+ * endpointWithoutGeneratedMac for a recreate, except that a MAC derived from the IP the
+ * endpoint pins stays. Without a pinned IP the result is the same.
+ */
+export function endpointForRecreate<T extends EndpointLike>(endpoint: T): T {
+	const out = { ...endpoint };
+	const pinnedDerived = normalizeMac(endpoint.MacAddress) === macDerivedFromIp(endpoint.IPAMConfig?.IPv4Address);
+	if (isGeneratedEndpointMac(endpoint) && !pinnedDerived) delete out.MacAddress;
 	return out;
 }

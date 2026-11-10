@@ -3,7 +3,7 @@
  * bound helper-image resolution so a stalled pull can never hang a backup.
  */
 import { describe, it, expect } from 'bun:test';
-import { withTimeout, resolveEnabledOnScheduleChange } from '../../src/lib/server/backups/helpers';
+import { withTimeout, withAbortTimeout, resolveEnabledOnScheduleChange } from '../../src/lib/server/backups/helpers';
 import {
 	buildRestRepository,
 	parseRestRepository,
@@ -218,5 +218,22 @@ describe('redactUrlCredentials', () => {
 
 	it('is safe on empty input', () => {
 		expect(redactUrlCredentials('')).toBe('');
+	});
+});
+
+describe('withAbortTimeout', () => {
+	it('aborts the work and rejects with the message on expiry', async () => {
+		let seen: AbortSignal | undefined;
+		const work = (signal: AbortSignal) => { seen = signal; return new Promise((r) => setTimeout(r, 200)); };
+		await expect(withAbortTimeout(work, 20, 'timed out after 20ms')).rejects.toThrow('timed out after 20ms');
+		expect(seen?.aborted).toBe(true);
+	});
+
+	it('leaves the signal alone when the work finishes first', async () => {
+		let seen: AbortSignal | undefined;
+		const v = await withAbortTimeout(async (signal) => { seen = signal; return 7; }, 20, 'nope');
+		expect(v).toBe(7);
+		await new Promise((r) => setTimeout(r, 40));
+		expect(seen?.aborted).toBe(false);
 	});
 });

@@ -4,6 +4,8 @@ import { xsalsa20poly1305 } from '@noble/ciphers/salsa.js';
 import {
 	decryptSecret,
 	secretToEnvVar,
+	envVarsSecretToEntries,
+	safeKeyForLog,
 	toEnvVarName,
 	isPsonoReference,
 	parsePsonoReference,
@@ -259,5 +261,125 @@ describe('inspectedSecretIds', () => {
 	test('an absent or empty list is empty, not an error', () => {
 		expect(inspectedSecretIds({})).toEqual([]);
 		expect(inspectedSecretIds({ api_key_secrets: [] })).toEqual([]);
+	});
+});
+
+describe('envVarsSecretToEntries (Environment Variables secret)', () => {
+	const secret = {
+		type: 'environment_variables',
+		title: 'myapp',
+		environment_variables_variables: [
+			{ key: 'SECRET_KEY', value: 's3cr3t' },
+			{ key: 'API_KEY', value: 'ak-123' }
+		]
+	};
+
+	test('expands every key/value pair, name taken verbatim', () => {
+		expect(envVarsSecretToEntries(secret)).toEqual({
+			entries: [
+				{ name: 'SECRET_KEY', value: 's3cr3t' },
+				{ name: 'API_KEY', value: 'ak-123' }
+			],
+			skipped: []
+		});
+	});
+
+	test('a key that is not a valid variable name is skipped, not rewritten', () => {
+		const r = envVarsSecretToEntries({
+			environment_variables_variables: [
+				{ key: 'DB-PASS', value: 'x' },
+				{ key: 'OK_ONE', value: 'y' },
+				{ key: '2FA', value: 'z' }
+			]
+		});
+		expect(r).toEqual({ entries: [{ name: 'OK_ONE', value: 'y' }], skipped: ['DB-PASS', '2FA'] });
+	});
+
+	test('duplicate keys within one secret keep the first', () => {
+		const r = envVarsSecretToEntries({
+			environment_variables_variables: [
+				{ key: 'TOKEN', value: 'first' },
+				{ key: 'TOKEN', value: 'second' }
+			]
+		});
+		expect(r).toEqual({ entries: [{ name: 'TOKEN', value: 'first' }], skipped: [] });
+	});
+
+	test('items missing key or value, or non-string, are ignored', () => {
+		const r = envVarsSecretToEntries({
+			environment_variables_variables: [
+				{ key: 'A', value: 'a' },
+				{ key: '', value: 'noname' },
+				{ key: 'B' },
+				{ value: 'nokey' },
+				{ key: 'C', value: 5 }
+			]
+		});
+		expect(r).toEqual({ entries: [{ name: 'A', value: 'a' }], skipped: [] });
+	});
+
+	test('a non-env_vars secret returns null so the caller falls back to scalar', () => {
+		expect(envVarsSecretToEntries({ website_password_password: 'pw' })).toBe(null);
+		expect(envVarsSecretToEntries({ note_notes: 'n' })).toBe(null);
+		expect(envVarsSecretToEntries(null)).toBe(null);
+		expect(envVarsSecretToEntries([{ key: 'A', value: 'a' }])).toBe(null);
+	});
+
+	test('the normalised env_vars field name is accepted as a fallback', () => {
+		// Some Psono tooling (e.g. psonoci json) emits the normalised `env_vars` shape;
+		// the real server hands back `environment_variables_variables`. Both resolve.
+		expect(envVarsSecretToEntries({ env_vars: [{ key: 'ONLY', value: 'v' }] })).toEqual({
+			entries: [{ name: 'ONLY', value: 'v' }],
+			skipped: []
+		});
+	});
+});
+
+describe('referenceValue addresses an env_vars key by name', () => {
+	const secret = {
+		type: 'environment_variables',
+		environment_variables_variables: [
+			{ key: 'SECRET_KEY', value: 's3cr3t' },
+			{ key: 'API_KEY', value: 'ak-123' }
+		]
+	};
+
+	test('psono://<id>/<KEY> resolves the matching item', () => {
+		expect(referenceValue(secret, 'SECRET_KEY')).toBe('s3cr3t');
+		expect(referenceValue(secret, 'API_KEY')).toBe('ak-123');
+	});
+
+	test('a key the secret does not have is null (left as a literal)', () => {
+		expect(referenceValue(secret, 'MISSING')).toBe(null);
+	});
+
+	test('an env_vars secret with no field yields null (no scalar value to pick)', () => {
+		expect(referenceValue(secret, null)).toBe(null);
+	});
+
+	test('REGRESSION: a scalar secret is unaffected by the env_vars branch', () => {
+		// The pre-env_vars behaviour must be byte-identical for the existing types.
+		expect(referenceValue({ website_password_password: 'pw' }, null)).toBe('pw');
+		expect(referenceValue({ note_notes: 'n', other: 'o' }, 'other')).toBe('o');
+		expect(referenceValue({ a: 'b' }, 'zzz')).toBe(null);
+	});
+});
+
+describe('safeKeyForLog (a skipped key is arbitrary decrypted text)', () => {
+	test('escapes newlines and control chars so a key cannot forge a log line', () => {
+		const forged = 'OK\n[Psono] bulk: ADMIN_TOKEN=granted';
+		const out = safeKeyForLog(forged);
+		expect(out).not.toContain('\n');
+		expect(out.startsWith('"')).toBe(true);
+	});
+
+	test('bounds the length so one key cannot flood the log', () => {
+		const out = safeKeyForLog('A'.repeat(500));
+		expect(out.length).toBeLessThan(80);
+		expect(out).toContain('...');
+	});
+
+	test('a normal key is quoted but otherwise intact', () => {
+		expect(safeKeyForLog('db-pass')).toBe('"db-pass"');
 	});
 });

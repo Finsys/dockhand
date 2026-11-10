@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveChangelogUrl, interpolateChangelogUrl } from '../src/lib/utils/changelog-url';
+import { resolveChangelogUrl, interpolateChangelogUrl, interpolateLinkTemplate } from '../src/lib/utils/changelog-url';
 
 describe('resolveChangelogUrl', () => {
 	test('dockhand.changelog.url override wins over everything', () => {
@@ -109,5 +109,57 @@ describe('interpolateChangelogUrl', () => {
 	});
 	test('replaces every {{version}} and {{tag}}, case/space tolerant', () => {
 		expect(interpolateChangelogUrl('https://a/{{version}}/{{ TAG }}/{{version}}', 'v9')).toBe('https://a/v9/v9/v9');
+	});
+});
+
+describe('interpolateLinkTemplate (link-template fallback)', () => {
+	test('resolves original/version/major/minor/patch against the target tag', () => {
+		const t = 'https://example.com/${original}/v${major}.${minor}.${patch}';
+		expect(interpolateLinkTemplate(t, '2.5.1-alpine')).toBe('https://example.com/2.5.1-alpine/v2.5.1');
+	});
+
+	test('treats ${raw} and ${transformed} as the original tag', () => {
+		expect(interpolateLinkTemplate('x/${raw}/${transformed}', '1.2.3')).toBe('x/1.2.3/1.2.3');
+	});
+
+	test('resolves ${prerelease} from the tag channel marker', () => {
+		expect(interpolateLinkTemplate('x/${prerelease}', '1.2.3-rc2')).toBe('x/rc2');
+		expect(interpolateLinkTemplate('x/${prerelease}', '1.2.3')).toBe('x/');
+	});
+
+	test('leaves an underivable part empty rather than printing undefined', () => {
+		// A single-segment tag is not a version, so every semver part resolves empty.
+		expect(interpolateLinkTemplate('x/${major}.${minor}.${patch}', '7')).toBe('x/..');
+		// A two-segment tag has no patch.
+		expect(interpolateLinkTemplate('x/${major}.${minor}.${patch}', '7.2')).toBe('x/7.2.');
+	});
+
+	test('is null with no tag', () => {
+		expect(interpolateLinkTemplate('x/${original}', null)).toBeNull();
+		expect(interpolateLinkTemplate('x/${original}', undefined)).toBeNull();
+	});
+});
+
+describe('resolveChangelogUrl - link-template label fallback', () => {
+	const template = 'https://hub.example.com/changelog/${major}.${minor}';
+	test('uses wud.link.template for a Docker Hub image with no derivable source', () => {
+		expect(resolveChangelogUrl('redis:7.2', { 'wud.link.template': template }, '7.2.1')).toBe(
+			'https://hub.example.com/changelog/7.2'
+		);
+	});
+
+	test('a derivable source (GHCR / OCI) still wins over the template', () => {
+		expect(
+			resolveChangelogUrl('ghcr.io/owner/repo:1.0', { 'wud.link.template': template }, '1.0.0')
+		).toBe('https://github.com/owner/repo/releases');
+	});
+
+	test('the native dockhand.link.template wins over the wud spelling', () => {
+		expect(
+			resolveChangelogUrl('mongo:7', {
+				'dockhand.link.template': 'https://native/${major}',
+				'wud.link.template': template
+			}, '7.0.1')
+		).toBe('https://native/7');
 	});
 });

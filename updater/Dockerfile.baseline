@@ -14,7 +14,7 @@
 #
 # Rebuild trigger: the pipeline is change-gated on updater/, so touching this file
 # forces a rebuild of the -baseline tag. (rebuild nonce: 2)
-FROM alpine:3.21
+FROM alpine:3.24
 
 # docker-cli (the stop/rm/rename/network/start the sidecar does) + busybox is the base
 # Alpine shell, tar and date. That covers everything /update.sh needs.

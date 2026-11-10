@@ -79,6 +79,23 @@ describe('resolveStackDirForLayout', () => {
 		expect(resolveStackDirForLayout('/data/stacks', '/srv/stacks', 'app', 'local', true)).toBe('/srv/stacks/app');
 		expect(resolveStackDirForLayout('/data/stacks', '/srv/stacks', 'app', 'production', false)).toBe('/data/stacks/production/app');
 	});
+
+	it('refuses a name with a separator before it can escape the root', () => {
+		// Defence in depth behind the route guard: a name that is not a plain stack name
+		// can only ever address a child of the root, so building a path from it throws
+		// rather than returning one that points outside.
+		for (const bad of ['..', '../db', 'a/../b', 'a/b', '/etc', 'foo/bar']) {
+			expect(() => resolveStackDirForLayout('/data/stacks', '/srv/stacks', bad, 'production', false)).toThrow();
+			expect(() => resolveStackDirForLayout('/data/stacks', '/srv/stacks', bad, undefined, true)).toThrow();
+		}
+	});
+
+	it('keeps a legitimate name working under both layouts', () => {
+		expect(resolveStackDirForLayout('/data/stacks', '/srv/stacks', 'my-stack_1', 'prod', false))
+			.toBe('/data/stacks/prod/my-stack_1');
+		expect(resolveStackDirForLayout('/data/stacks', '/srv/stacks', 'my-stack_1', undefined, true))
+			.toBe('/srv/stacks/my-stack_1');
+	});
 });
 
 describe('findStackNameCollision', () => {

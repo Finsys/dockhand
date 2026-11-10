@@ -4,7 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Loader2, FolderOpen, File, FileText, ChevronRight, ArrowUp, AlertCircle, FolderPlus, Search, Import, Check, X } from 'lucide-svelte';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import RecentLocationsPanel from './RecentLocationsPanel.svelte';
 	import { m } from '$lib/paraglide/messages.js';
 
@@ -21,7 +21,7 @@
 		open: boolean;
 		title?: string;
 		/** Optional icon component to display before the title */
-		icon?: Component<{ class?: string }>;
+		icon?: IconComponent;
 		description?: string;
 		initialPath?: string;
 		selectFilter?: RegExp;

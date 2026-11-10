@@ -42,7 +42,11 @@ import {
 	getBackupConfig,
 	getEnabledBackupConfigs,
 	getBackupDestinations,
-	getBackupDestination
+	getBackupDestination,
+	getScheduledContainerActions,
+	getScheduledContainerActionById,
+	getScheduledContainerAction,
+	deleteScheduledContainerActionById
 } from '../db';
 import { db, gitStacks, eq } from '../db/drizzle.js';
 import {
@@ -52,6 +56,8 @@ import {
 
 // Import task execution functions
 import { runContainerUpdate } from './tasks/container-update';
+import { runScheduledContainerAction, syncScheduledActionLabels } from './tasks/container-action';
+import { actionTimeToCron } from '../scheduled-actions-core';
 import { runGitStackSync } from './tasks/git-stack-sync';
 import { runEnvUpdateCheckJob } from './tasks/env-update-check';
 import { runEnvReport } from './tasks/env-report';
@@ -83,6 +89,22 @@ let scanRetentionJob: Cron | null = null;
 let volumeHelperCleanupJob: Cron | null = null;
 let scannerCacheCleanupJob: Cron | null = null;
 let deployLogReconcileJob: Cron | null = null;
+// Re-reads dockhand.start.at / dockhand.stop.at labels; a timer, as it has no time of day.
+let labelSyncTimer: ReturnType<typeof setInterval> | null = null;
+const LABEL_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+
+export type DynamicScheduleType =
+	| 'container_update'
+	| 'container_start'
+	| 'container_stop'
+	| 'git_stack_sync'
+	| 'env_update_check'
+	| 'image_prune'
+	| 'backup'
+	| 'repo_prune'
+	| 'repo_check'
+	| 'repo_verify'
+	| 'env_report';
 
 // Scheduler state
 let isRunning = false;
@@ -241,6 +263,10 @@ export async function startScheduler(): Promise<void> {
 	// Register all dynamic schedules from database
 	await refreshAllSchedules();
 
+	// Not awaited: it reaches every environment, and startup must not wait on a slow one.
+	void runScheduledActionLabelSync();
+	labelSyncTimer = setInterval(() => void runScheduledActionLabelSync(), LABEL_SYNC_INTERVAL_MS);
+
 	console.log('[Scheduler] Service started');
 }
 
@@ -282,6 +308,10 @@ export function stopScheduler(): void {
 	if (deployLogReconcileJob) {
 		deployLogReconcileJob.stop();
 		deployLogReconcileJob = null;
+	}
+	if (labelSyncTimer) {
+		clearInterval(labelSyncTimer);
+		labelSyncTimer = null;
 	}
 
 	// Stop all dynamic jobs
@@ -325,6 +355,16 @@ export async function refreshAllSchedules(): Promise<void> {
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		console.error('[Scheduler] Error loading container schedules:', errorMsg);
+	}
+
+	let containerActionCount = 0;
+	try {
+		for (const row of await getScheduledContainerActions()) {
+			containerActionCount += await registerContainerActionSchedules(row.id, row.environmentId);
+		}
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading scheduled container actions:', errorMsg);
 	}
 
 	// Register git stack auto-sync schedules
@@ -441,7 +481,7 @@ export async function refreshAllSchedules(): Promise<void> {
 		}
 	}
 
-	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules, ${imagePruneCount} image prune schedules, ${backupCount} backup schedules, ${repoPruneCount} repo prune schedules, ${repoCheckCount} repo check schedules, ${repoVerifyCount} repo verify schedules, ${envReportCount} env report schedules`);
+	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${containerActionCount} scheduled container actions, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules, ${imagePruneCount} image prune schedules, ${backupCount} backup schedules, ${repoPruneCount} repo prune schedules, ${repoCheckCount} repo check schedules, ${repoVerifyCount} repo verify schedules, ${envReportCount} env report schedules`);
 }
 
 /**
@@ -450,7 +490,7 @@ export async function refreshAllSchedules(): Promise<void> {
  */
 export async function registerSchedule(
 	scheduleId: number,
-	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'env_report',
+	type: DynamicScheduleType,
 	environmentId: number | null
 ): Promise<boolean> {
 	const key = `${type}-${scheduleId}`;
@@ -470,6 +510,14 @@ export async function registerSchedule(
 			cronExpression = setting.cronExpression;
 			entityName = setting.containerName;
 			enabled = setting.enabled;
+		} else if (type === 'container_start' || type === 'container_stop') {
+			const row = await getScheduledContainerActionById(scheduleId);
+			if (!row) return false;
+			const at = type === 'container_start' ? row.startAt : row.stopAt;
+			const parsed = at ? actionTimeToCron(at) : null;
+			cronExpression = parsed && 'cron' in parsed ? parsed.cron : null;
+			entityName = row.containerName;
+			enabled = row.enabled;
 		} else if (type === 'git_stack_sync') {
 			const stack = await getGitStack(scheduleId);
 			if (!stack) return false;
@@ -545,6 +593,10 @@ export async function registerSchedule(
 				const setting = await getAutoUpdateSettingById(scheduleId);
 				if (!setting || !setting.enabled) return;
 				await runContainerUpdate(scheduleId, setting.containerName, environmentId, 'cron');
+			} else if (type === 'container_start' || type === 'container_stop') {
+				const row = await getScheduledContainerActionById(scheduleId);
+				if (!row || !row.enabled) return;
+				await runScheduledContainerAction(scheduleId, type === 'container_start' ? 'start' : 'stop', 'cron');
 			} else if (type === 'git_stack_sync') {
 				const stack = await getGitStack(scheduleId);
 				if (!stack || !stack.autoUpdate) return;
@@ -602,7 +654,7 @@ export async function registerSchedule(
  */
 export function unregisterSchedule(
 	scheduleId: number,
-	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'env_report'
+	type: DynamicScheduleType
 ): void {
 	const key = `${type}-${scheduleId}`;
 	const job = activeJobs.get(key);
@@ -639,6 +691,15 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		console.error('[Scheduler] Error refreshing container schedules:', errorMsg);
+	}
+
+	try {
+		for (const row of await getScheduledContainerActions(environmentId)) {
+			refreshedCount += await registerContainerActionSchedules(row.id, row.environmentId);
+		}
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing scheduled container actions:', errorMsg);
 	}
 
 	// Re-register git stack auto-sync schedules for this environment
@@ -814,6 +875,63 @@ export async function refreshSystemJobs(): Promise<void> {
 // =============================================================================
 // MANUAL TRIGGER FUNCTIONS (for API endpoints)
 // =============================================================================
+
+/** Register a schedule row's start and stop jobs; returns how many were registered. */
+export async function registerContainerActionSchedules(rowId: number, environmentId: number): Promise<number> {
+	let count = 0;
+	for (const type of ['container_start', 'container_stop'] as const) {
+		if (await registerSchedule(rowId, type, environmentId)) count++;
+	}
+	return count;
+}
+
+export function unregisterContainerActionSchedules(rowId: number): void {
+	unregisterSchedule(rowId, 'container_start');
+	unregisterSchedule(rowId, 'container_stop');
+}
+
+/** Drop a removed container's start/stop schedule and its jobs. */
+export async function forgetScheduledContainerAction(containerName: string, environmentId: number | null | undefined): Promise<void> {
+	if (!environmentId) return;
+	const row = await getScheduledContainerAction(containerName, environmentId);
+	if (!row) return;
+	unregisterContainerActionSchedules(row.id);
+	await deleteScheduledContainerActionById(row.id);
+}
+
+let labelSyncRunning = false;
+
+/** Apply container labels to the schedule rows and re-register what changed. */
+export async function runScheduledActionLabelSync(): Promise<void> {
+	if (labelSyncRunning) return;
+	labelSyncRunning = true;
+	try {
+		const { changed, removed } = await syncScheduledActionLabels();
+		for (const id of removed) unregisterContainerActionSchedules(id);
+		for (const id of changed) {
+			const row = await getScheduledContainerActionById(id);
+			if (row) await registerContainerActionSchedules(row.id, row.environmentId);
+		}
+		if (changed.length || removed.length) {
+			console.log(`[Scheduler] Container labels: ${changed.length} schedule(s) set, ${removed.length} removed`);
+		}
+	} catch (error) {
+		console.error('[Scheduler] Label sync failed:', error instanceof Error ? error.message : String(error));
+	} finally {
+		labelSyncRunning = false;
+	}
+}
+
+/** Manually run a scheduled start or stop now. */
+export async function triggerScheduledContainerAction(
+	rowId: number,
+	action: 'start' | 'stop'
+): Promise<{ success: boolean; error?: string }> {
+	const row = await getScheduledContainerActionById(rowId);
+	if (!row) return { success: false, error: 'Scheduled action not found' };
+	runScheduledContainerAction(rowId, action, 'manual');
+	return { success: true };
+}
 
 /**
  * Manually trigger a container update.

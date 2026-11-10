@@ -3,7 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, CheckCircle, XCircle, Archive, Copy, Check, Square } from 'lucide-svelte';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import LogConsole from '$lib/components/LogConsole.svelte';
 	import { m } from '$lib/paraglide/messages.js';
 
@@ -19,7 +19,7 @@
 		onStop?: () => void;
 		// Optional title icon (e.g. the repo-type icon for a destination action).
 		// Defaults to the generic Archive icon when omitted.
-		icon?: Component;
+		icon?: IconComponent;
 	}
 
 	let { open = $bindable(), title, status, progress = 0, logs, error, onStop, icon }: Props = $props();

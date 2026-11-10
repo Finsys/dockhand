@@ -1,5 +1,16 @@
 // Shared types that can be used in both client and server code
 
+import type { Component, ComponentType } from 'svelte';
+
+/**
+ * An icon passed as a component. Covers both lucide-svelte icons, which are still
+ * class components (ComponentType), and the project's own `.svelte` icon components,
+ * which are Svelte 5 function components (Component). A plain `Component` rejects the
+ * lucide classes and a plain `ComponentType` rejects the function components, so icon
+ * props and icon-returning helpers take the union.
+ */
+export type IconComponent = ComponentType | Component<Record<string, unknown>>;
+
 /**
  * System container type - containers that cannot be updated from within Dockhand.
  */
@@ -153,6 +164,11 @@ export interface StackContainer {
 	created: number;
 	labels: Record<string, string>;
 	updateAvailable?: boolean;
+	/** The tag's digest moved but this container pins the old one (reported, not applied). */
+	pinnedToDigest?: boolean;
+	/** An update exists but the image is too young to apply (waiting out the minimum age). */
+	coolingDown?: boolean;
+	coolingDownHours?: number;
 	/** A newer VERSION tag (semver) for this pinned image, or null. Advisory. */
 	newerVersion?: NewerVersion | null;
 }
@@ -170,6 +186,8 @@ export interface ComposeStackInfo {
 	coolingDownCount?: number;
 	/** How many containers in this stack have a newer version tag (semver). */
 	newerVersionCount?: number;
+	/** How many containers in this stack have a pinned digest that moved (reported, not applied). */
+	pinnedDigestCount?: number;
 	sourceType?: 'external' | 'internal' | 'git';
 	repository?: {
 		id: number;

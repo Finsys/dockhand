@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { authorize } from '$lib/server/authorize';
 import { runValidateWithConfig } from '$lib/server/compose-validate';
 import { buildValidateContext } from '$lib/server/compose-validate/context';
@@ -84,7 +85,11 @@ export const POST: RequestHandler = async ({ cookies, url, params, request }) =>
 	// needed, so none is requested or transmitted (#1621).
 	const envVars = withProviderKeysAsSet(editorEnvVars, sanitizeProviderKeys(body.providerKeys));
 
-	const stackName = decodeURIComponent(params.name);
+	// Validate the name shape before it is used in a filesystem path.
+	const stackName = params.name;
+	if (!isValidStackName(stackName)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 	// Self-exclusion (don't flag the stack's own running containers/ports as collisions)
 	// applies ONLY when editing an existing stack. A brand-new stack has no own containers,
 	// so a name/port clash with a running stack of the same name must still be reported.

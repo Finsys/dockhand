@@ -1,4 +1,4 @@
-import { describe, expect, test, afterAll } from 'bun:test';
+import { describe, expect, test, beforeAll, afterAll } from 'bun:test';
 import { chmodSync, mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,7 +29,6 @@ exit 0
 chmodSync(cli, 0o755);
 
 process.env.DOCKHAND_PASS_CLI_PATH = cli;
-process.env.PROTON_LOGIN_TIMEOUT_MS = '300';
 const { protonProvider } = await import('../src/lib/server/secretproviders/proton');
 
 // Shape-valid so the provider's own format check passes; the stub CLI never
@@ -42,6 +41,15 @@ afterAll(() => {
 });
 
 describe('a pass-cli timeout', () => {
+	// Only the hung login needs a short limit. Elsewhere it would turn a slow start of
+	// the fake CLI under load into a timeout, in place of the failure under test.
+	beforeAll(() => {
+		process.env.PROTON_LOGIN_TIMEOUT_MS = '300';
+	});
+	afterAll(() => {
+		delete process.env.PROTON_LOGIN_TIMEOUT_MS;
+	});
+
 	test('is attributed to the login, not to "a command"', async () => {
 		const result = await protonProvider.testConnection({ token: TOKEN } as never);
 
@@ -59,7 +67,7 @@ describe('a pass-cli timeout', () => {
 	}, 20_000);
 
 	test('honours the configured limit instead of the built-in default', async () => {
-		// 300ms is set above; the 30s default would make this take far longer.
+		// 300ms is set in beforeAll; the 30s default would make this take far longer.
 		const started = Date.now();
 		await protonProvider.testConnection({ token: TOKEN } as never);
 		expect(Date.now() - started).toBeLessThan(10_000);

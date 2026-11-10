@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { computeStackDeletionPaths } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 
 // GET /api/stacks/[name]/delete-preview?env=N
 // Returns the on-disk directories a delete-with-files would remove, so the confirm modal
@@ -13,6 +14,7 @@ import { authorize } from '$lib/server/authorize';
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * resp-200: {stackName:string!, sourceType:string, stackDir:string, gitDir:string, namedVolumes:array<string>!, canDeleteFiles:boolean!}
  * resp-200-example: {"stackName":"web","sourceType":"internal","stackDir":"/opt/stacks/web","gitDir":null,"namedVolumes":["web_data"],"canDeleteFiles":true}
+ * resp-400: Invalid stack name
  * resp-403: Permission denied (requires stacks:remove)
  * resp-500: Failed to compute the deletion preview
  */
@@ -27,6 +29,11 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	if (envAccessDenied) return envAccessDenied;
 
 	const { name } = params;
+	// The name reaches findStackDir and a filesystem path, so reject a traversal before it
+	// can disclose the layout outside the managed stacks root.
+	if (!isValidStackName(name)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 	try {
 		const { stackDir, gitDir, sourceType, namedVolumes } = await computeStackDeletionPaths(name, envIdNum);
 		return json({

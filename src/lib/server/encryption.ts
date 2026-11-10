@@ -436,8 +436,8 @@ export async function migrateCredentials(): Promise<void> {
 			if (notif.config) {
 				try {
 					const config = JSON.parse(notif.config);
-					if (config.smtpPassword && isEncrypted(config.smtpPassword)) {
-						allEncrypted.push({ table: 'notificationSettings', id: notif.id, field: 'config.smtpPassword', value: config.smtpPassword });
+					if (notif.type === 'smtp' && config.password && isEncrypted(config.password)) {
+						allEncrypted.push({ table: 'notificationSettings', id: notif.id, field: 'config.password', value: config.password });
 					}
 				} catch {
 					// Invalid JSON, skip
@@ -465,6 +465,12 @@ export async function migrateCredentials(): Promise<void> {
 			}
 			if (dest.sshKnownHosts && isEncrypted(dest.sshKnownHosts)) {
 				allEncrypted.push({ table: 'backupDestinations', id: dest.id, field: 'sshKnownHosts', value: dest.sshKnownHosts });
+			}
+			if (dest.cacert && isEncrypted(dest.cacert)) {
+				allEncrypted.push({ table: 'backupDestinations', id: dest.id, field: 'cacert', value: dest.cacert });
+			}
+			if (dest.tlsClientCert && isEncrypted(dest.tlsClientCert)) {
+				allEncrypted.push({ table: 'backupDestinations', id: dest.id, field: 'tlsClientCert', value: dest.tlsClientCert });
 			}
 		}
 
@@ -511,18 +517,18 @@ export async function migrateCredentials(): Promise<void> {
 						await tx.update(oidcConfig).set({ [item.field]: reEncrypted }).where(eq(oidcConfig.id, item.id));
 					} else if (item.table === 'ldapConfig') {
 						await tx.update(ldapConfig).set({ [item.field]: reEncrypted }).where(eq(ldapConfig.id, item.id));
-					} else if (item.table === 'notificationSettings' && item.field === 'config.smtpPassword') {
+					} else if (item.table === 'notificationSettings' && item.field === 'config.password') {
 						// Need to update the JSON field
 						const notif = notifSettings.find((n: typeof notifSettings[number]) => n.id === item.id);
 						if (notif) {
 							const config = JSON.parse(notif.config);
-							config.smtpPassword = reEncrypted;
+							config.password = reEncrypted;
 							await tx.update(notificationSettings).set({ config: JSON.stringify(config) }).where(eq(notificationSettings.id, item.id));
 						}
 					} else if (item.table === 'stackEnvironmentVariables') {
 						await tx.update(stackEnvironmentVariables).set({ value: reEncrypted }).where(eq(stackEnvironmentVariables.id, item.id));
 					} else if (item.table === 'backupDestinations') {
-						// Both password and envVars are plain encrypted columns.
+						// Every backupDestinations secret is a plain encrypted column.
 						await tx.update(backupDestinations).set({ [item.field]: reEncrypted }).where(eq(backupDestinations.id, item.id));
 					} else if (item.table === 'secretProviders') {
 						await tx.update(secretProviders).set({ config: reEncrypted }).where(eq(secretProviders.id, item.id));
@@ -633,8 +639,8 @@ export async function migrateCredentials(): Promise<void> {
 		if (notif.config) {
 			try {
 				const config = JSON.parse(notif.config);
-				if (config.smtpPassword && !isEncrypted(config.smtpPassword)) {
-					config.smtpPassword = encrypt(config.smtpPassword);
+				if (notif.type === 'smtp' && config.password && !isEncrypted(config.password)) {
+					config.password = encrypt(config.password);
 					await db.update(notificationSettings)
 						.set({ config: JSON.stringify(config) })
 						.where(eq(notificationSettings.id, notif.id));

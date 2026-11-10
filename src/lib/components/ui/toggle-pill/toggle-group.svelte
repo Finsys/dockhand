@@ -9,12 +9,12 @@
 	 * - Arrow Left/Right: Navigate between options
 	 * - Space/Enter: Select the focused option
 	 */
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 
 	interface Option {
 		value: string;
 		label?: string;
-		icon?: Component;
+		icon?: IconComponent;
 	}
 
 	interface Props {

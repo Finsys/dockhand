@@ -20,7 +20,7 @@ import {
 	removeStack
 } from '$lib/server/stacks';
 import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate } from '$lib/server/db';
-import { unregisterSchedule } from '$lib/server/scheduler';
+import { unregisterSchedule, forgetScheduledContainerAction } from '$lib/server/scheduler';
 import { prefersJSON } from '$lib/server/sse';
 import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
 
@@ -350,6 +350,7 @@ async function executeContainerOperation(
 			} catch {
 				// Ignore cleanup errors
 			}
+			await forgetScheduledContainerAction(name, envIdNum).catch(() => {});
 
 			// Clean up pending container update if exists
 			try {

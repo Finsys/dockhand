@@ -109,4 +109,10 @@ describe('describeRegistryFailure - Node fetch error shapes', () => {
 			'DNS resolution failed for ghcr.io'
 		);
 	});
+
+	test('cut short by AbortSignal.timeout (no errno, numeric code)', () => {
+		const e = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+		expect(err(e)).toBe('Registry did not answer in time: ghcr.io');
+		expect(err(new DOMException('This operation was aborted', 'AbortError'))).toBe('Could not query registry');
+	});
 });

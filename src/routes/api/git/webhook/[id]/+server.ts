@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { getGitRepository } from '$lib/server/db';
 import { deployFromRepository } from '$lib/server/git';
 import { auditGitRepository } from '$lib/server/audit';
-import { verifyWebhookSignature } from '$lib/server/webhook-signature';
+import { verifyWebhookSignature, timingSafeStringEqual } from '$lib/server/webhook-signature';
 import { decideWebhookSecretPolicy, allowSecretlessWebhook } from '$lib/server/webhook-secret-policy';
 
 function detectSource(request: Request): string {
@@ -141,9 +141,9 @@ export const GET: RequestHandler = async (event) => {
 			return json(result);
 		}
 
-		// Verify secret via query parameter for GET requests
+		// Verify secret via query parameter for GET requests (constant-time).
 		const secret = url.searchParams.get('secret');
-		if (secret !== repository.webhookSecret) {
+		if (!secret || !repository.webhookSecret || !timingSafeStringEqual(secret, repository.webhookSecret)) {
 			await auditGitRepository(event, 'webhook', id, repository.name, {
 				method: 'GET', source: 'get', error: 'invalid_secret'
 			});

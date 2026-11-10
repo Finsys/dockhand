@@ -102,3 +102,26 @@ describe('a near miss does not slip through', () => {
 		expect(isPublicPath('/api/git/webhook/12/extra')).toBe(false);
 	});
 });
+
+describe('EXPORT_METRICS_PUBLIC opens only /metrics (#1698)', () => {
+	test('without the flag, /metrics is NOT public (default fail-closed)', () => {
+		expect(isPublicPath('/metrics')).toBe(false);
+		expect(isPublicPath('/metrics', false)).toBe(false);
+	});
+
+	test('with the flag, exactly /metrics becomes public', () => {
+		expect(isPublicPath('/metrics', true)).toBe(true);
+	});
+
+	test('the flag opens ONLY /metrics, nothing else', () => {
+		// The escape hatch must not widen to any other route.
+		for (const p of ['/api/containers', '/api/settings/general', '/api/users', '/metricsx', '/metrics/sub', '/']) {
+			expect(isPublicPath(p, true)).toBe(false);
+		}
+	});
+
+	test('the flag does not re-gate the normally-public paths', () => {
+		expect(isPublicPath('/login', true)).toBe(true);
+		expect(isPublicPath('/api/health/database', true)).toBe(true);
+	});
+});

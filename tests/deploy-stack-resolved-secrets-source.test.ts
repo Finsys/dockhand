@@ -105,11 +105,41 @@ describe('deployStack records the secret set it redacts against (F4 source guard
 			`must be the SAME set the compose lines were redacted against.`).toBe(true);
 	});
 
-	test('result.resolvedSecrets is assigned Object.values(secretVars) (the F4 line)', () => {
-		const ok = /result\.resolvedSecrets\s*=\s*Object\.values\(\s*secretVars\s*\)/.test(body);
-		expect(ok, `${stacksPath}: the F4 line \`result.resolvedSecrets = Object.values(secretVars)\` ` +
+	test('the recorded set is attached from Object.values(secretVars) (the F4 line)', () => {
+		// Attached non-enumerable, so the plaintext cannot ride a webhook reply or an SSE
+		// result event to the client - see resolved-secrets.ts. What this guards is the
+		// SET: the recorder must redact against the same values the compose lines were.
+		const ok = /attachResolvedSecrets\(\s*result\s*,\s*Object\.values\(\s*secretVars\s*\)\s*\)/.test(body);
+		expect(ok, `${stacksPath}: the F4 wiring \`attachResolvedSecrets(result, Object.values(secretVars))\` ` +
 			`is gone from deployStack. Without it the stack_deploy recorder redacts against nothing ` +
 			`and a provider-resolved secret can be stored in a deploy error in cleartext. If you ` +
 			`intentionally moved this wiring, update this guard to match the new location.`).toBe(true);
+	});
+
+	test('nothing in deployStack can make the field enumerable again', () => {
+		// Measured: an assignment that lands on the non-enumerable descriptor attachResolved-
+		// Secrets already created is harmless, because it only replaces the value. What puts
+		// the plaintext back on the wire is creating the property WITHOUT that descriptor -
+		// an assignment reached before the attach, or one after a delete. So what this guards
+		// is the attach being the only thing that creates the property.
+		const attaches = body.match(/attachResolvedSecrets\s*\(/g) ?? [];
+		expect(attaches.length, `${stacksPath}: deployStack must attach the secret set exactly ` +
+			`once, through attachResolvedSecrets.`).toBe(1);
+
+		// A delete drops the descriptor, so a later assignment creates an enumerable field.
+		expect(/delete\s+[\w.]*\bresolvedSecrets\b/.test(body),
+			`${stacksPath}: deleting resolvedSecrets drops the non-enumerable descriptor, so ` +
+			`any later assignment would serialize the plaintext to webhook callers.`).toBe(false);
+
+		// An assignment BEFORE the attach creates the property enumerably; the attach then
+		// only changes the descriptor of a field that already serialized once. Checking the
+		// order is what makes this a guard rather than a spell-check.
+		const attachAt = body.indexOf('attachResolvedSecrets(result,');
+		expect(attachAt, `${stacksPath}: the attach call is gone.`).toBeGreaterThan(-1);
+		const assignments = [...body.matchAll(/\bresolvedSecrets\b\s*(=|\]\s*=)/g)]
+			.filter((hit) => hit.index! < attachAt)
+			.map((hit) => body.slice(body.lastIndexOf('\n', hit.index!) + 1, body.indexOf('\n', hit.index!)).trim());
+		expect(assignments, `${stacksPath}: resolvedSecrets is written before it is attached, ` +
+			`so it exists as an ordinary enumerable property and serializes to the client.`).toEqual([]);
 	});
 });

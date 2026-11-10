@@ -137,6 +137,24 @@ export const autoUpdateSettings = sqliteTable('auto_update_settings', {
 	envContainerUnique: unique().on(table.environmentId, table.containerName)
 }));
 
+// Scheduled start and stop of one container. A time is HH:MM or a cron
+// expression; source 'label' rows mirror dockhand.start.at / dockhand.stop.at.
+export const scheduledContainerActions = sqliteTable('scheduled_container_actions', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	environmentId: integer('environment_id').notNull().references(() => environments.id, { onDelete: 'cascade' }),
+	containerName: text('container_name').notNull(),
+	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+	startAt: text('start_at'),
+	stopAt: text('stop_at'),
+	source: text('source').notNull().default('ui'),
+	lastStarted: text('last_started'),
+	lastStopped: text('last_stopped'),
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
+}, (table) => ({
+	envContainerUnique: unique().on(table.environmentId, table.containerName)
+}));
+
 export const notificationSettings = sqliteTable('notification_settings', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	type: text('type').notNull(),
@@ -194,10 +212,17 @@ export const sessions = sqliteTable('sessions', {
 	userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 	provider: text('provider').notNull(),
 	expiresAt: text('expires_at').notNull(),
-	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`)
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	// OIDC subject / session id, captured at login so an IdP back-channel logout token
+	// can correlate to the session(s) it ends. Null for local/LDAP/passkey and for IdPs
+	// that send no sid.
+	oidcSub: text('oidc_sub'),
+	oidcSid: text('oidc_sid')
 }, (table) => ({
 	userIdIdx: index('sessions_user_id_idx').on(table.userId),
-	expiresAtIdx: index('sessions_expires_at_idx').on(table.expiresAt)
+	expiresAtIdx: index('sessions_expires_at_idx').on(table.expiresAt),
+	oidcSubIdx: index('sessions_oidc_sub_idx').on(table.oidcSub),
+	oidcSidIdx: index('sessions_oidc_sid_idx').on(table.oidcSid)
 }));
 
 export const ldapConfig = sqliteTable('ldap_config', {
@@ -545,6 +570,10 @@ export const pendingContainerUpdates = sqliteTable('pending_container_updates', 
 	// True when a digest image update is pending (the classic amber icon). Defaults
 	// true so pre-existing rows keep behaving exactly as before.
 	hasImageUpdate: integer('has_image_update', { mode: 'boolean' }).notNull().default(true),
+	// True when the image is `repo:tag@sha256:...` and the digest behind its tag has
+	// moved. Reported, never applied: the pull returns the pinned manifest, so the
+	// compose file is what has to change. Defaults false so existing rows are unchanged.
+	pinnedToDigest: integer('pinned_to_digest', { mode: 'boolean' }).notNull().default(false),
 	// A newer VERSION tag (semver) for a pinned image, as JSON {tag,bump,skipped}.
 	// Null when there's no semver suggestion. Advisory - never auto-applied.
 	newerVersion: text('newer_version'),
@@ -731,6 +760,9 @@ export type NewStackEvent = typeof stackEvents.$inferInsert;
 
 export type AutoUpdateSetting = typeof autoUpdateSettings.$inferSelect;
 export type NewAutoUpdateSetting = typeof autoUpdateSettings.$inferInsert;
+
+export type ScheduledContainerAction = typeof scheduledContainerActions.$inferSelect;
+export type NewScheduledContainerAction = typeof scheduledContainerActions.$inferInsert;
 
 export type UserPreference = typeof userPreferences.$inferSelect;
 export type NewUserPreference = typeof userPreferences.$inferInsert;

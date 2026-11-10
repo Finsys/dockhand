@@ -67,3 +67,21 @@ const KNOWN_CAUSES = [
 export function passCliFailureReason(stderr: string): string | null {
 	return KNOWN_CAUSES.find((cause) => stderr.includes(cause)) ?? null;
 }
+
+/** The longest stderr tail a failed login writes to the server log. */
+const LOGGED_LOGIN_STDERR_CHARS = 1000;
+
+/**
+ * pass-cli's stderr from a failed login, for the server log only: the user-facing
+ * message keeps to the allow-list above. A login runs before any vault is read, so its
+ * stderr holds no item names or secret values; the access token and each of its two
+ * halves are cut out in case the CLI echoes them.
+ */
+export function loginStderrForLog(stderr: string, accessToken?: string): string {
+	let text = stderr.trim();
+	const pieces = accessToken ? [accessToken, ...accessToken.split(TOKEN_SEPARATOR)] : [];
+	for (const piece of pieces.filter((p) => p.length >= 4).sort((a, b) => b.length - a.length)) {
+		text = text.split(piece).join('[REDACTED]');
+	}
+	return text.length > LOGGED_LOGIN_STDERR_CHARS ? `...${text.slice(-LOGGED_LOGIN_STDERR_CHARS)}` : text;
+}

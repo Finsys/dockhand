@@ -90,7 +90,7 @@
 	import { getLabelColor, getLabelBgColor, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
 	import { MEMORY_SUPPORT_DOC_URL } from '$lib/utils/memory-support';
 	import { labelColorOverrides } from '$lib/stores/label-colors';
-	import EventTypesEditor from './EventTypesEditor.svelte';
+	import EventTypesEditor, { ENVIRONMENT_EVENT_IDS, shownEventCount } from './EventTypesEditor.svelte';
 	import UpdatesTab from './tabs/UpdatesTab.svelte';
 	import ActivityTab from './tabs/ActivityTab.svelte';
 	import ReportsTab from './tabs/ReportsTab.svelte';
@@ -172,86 +172,6 @@
 
 	type ScannerType = 'none' | 'grype' | 'trivy' | 'both';
 
-	// Notification event types - grouped by category
-	const NOTIFICATION_EVENT_GROUPS = [
-		{
-			id: 'container',
-			label: 'Container events',
-			events: [
-				{ id: 'container_started', label: 'Container started', description: 'When a container starts running' },
-				{ id: 'container_stopped', label: 'Container stopped', description: 'When a container is stopped' },
-				{ id: 'container_restarted', label: 'Container restarted', description: 'When a container restarts' },
-				{ id: 'container_exited', label: 'Container exited', description: 'When a container exits unexpectedly' },
-				{ id: 'container_unhealthy', label: 'Container unhealthy', description: 'When a container health check fails' },
-				{ id: 'container_oom', label: 'Container OOM killed', description: 'When a container is killed due to out of memory' },
-				{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated' }
-			]
-		},
-		{
-			id: 'auto_update',
-			label: 'Auto-update events',
-			events: [
-				{ id: 'auto_update_success', label: 'Update succeeded', description: 'Container successfully updated to new image' },
-				{ id: 'auto_update_failed', label: 'Update failed', description: 'Container auto-update failed' },
-				{ id: 'auto_update_blocked', label: 'Update blocked by vulns', description: 'Update blocked due to vulnerability criteria' },
-				{ id: 'updates_detected', label: 'Updates detected', description: 'Container image updates are available (scheduled check)' },
-				{ id: 'newer_version_available', label: 'Newer version tag', description: 'A newer version tag is published for a pinned image (semver, advisory)' },
-				{ id: 'batch_update_success', label: 'Batch update completed', description: 'Scheduled container updates completed successfully' }
-			]
-		},
-		{
-			id: 'git_stack',
-			label: 'Git stack events',
-			events: [
-				{ id: 'git_sync_success', label: 'Git sync succeeded', description: 'Git stack synced and deployed successfully' },
-				{ id: 'git_sync_failed', label: 'Git sync failed', description: 'Git stack sync or deploy failed' },
-				{ id: 'git_sync_skipped', label: 'Git sync skipped', description: 'Git stack sync skipped (no changes)' }
-			]
-		},
-		{
-			id: 'stack',
-			label: 'Stack events',
-			events: [
-				{ id: 'stack_started', label: 'Stack started', description: 'When a compose stack starts' },
-				{ id: 'stack_stopped', label: 'Stack stopped', description: 'When a compose stack stops' },
-				{ id: 'stack_deployed', label: 'Stack deployed', description: 'Stack deployed (new or update)' },
-				{ id: 'stack_deploy_failed', label: 'Stack deploy failed', description: 'Stack deployment failed' }
-			]
-		},
-		{
-			id: 'security',
-			label: 'Security events',
-			events: [
-				{ id: 'vulnerability_critical', label: 'Critical vulns found', description: 'Critical vulnerabilities found in image scan' },
-				{ id: 'vulnerability_high', label: 'High vulns found', description: 'High severity vulnerabilities found' },
-				{ id: 'vulnerability_any', label: 'Any vulns found', description: 'Any vulnerabilities found (medium/low)' }
-			]
-		},
-		{
-			id: 'backup',
-			label: 'Backup events',
-			events: [
-				{ id: 'backup_success', label: 'Backup succeeded', description: 'Backup completed successfully' },
-				{ id: 'backup_failed', label: 'Backup failed', description: 'Backup failed' },
-				{ id: 'restore_success', label: 'Restore succeeded', description: 'Restore completed successfully' },
-				{ id: 'restore_failed', label: 'Restore failed', description: 'Restore failed' }
-			]
-		},
-		{
-			id: 'system',
-			label: 'System events',
-			events: [
-				{ id: 'image_pulled', label: 'Image pulled', description: 'When a new image is pulled' },
-				{ id: 'environment_offline', label: 'Environment offline', description: 'Environment became unreachable' },
-				{ id: 'environment_online', label: 'Environment online', description: 'Environment came back online' },
-				{ id: 'disk_space_warning', label: 'Disk space warning', description: 'Docker disk usage exceeds threshold' }
-				// Note: license_expiring is a global event configured at the notification channel level
-			]
-		}
-	];
-
-	// Flat list of all event types (for backwards compatibility)
-	const NOTIFICATION_EVENT_TYPES = NOTIFICATION_EVENT_GROUPS.flatMap(g => g.events);
 
 	// Props
 	interface Props {
@@ -559,7 +479,6 @@
 	// Only an administrator configures the scheduled report: the mail leaves the
 	// installation unattended, carrying the full inventory and its vulnerabilities.
 	const isAdmin = $derived($authStore.user?.isAdmin === true || $authStore.authEnabled === false);
-	const tabCount = $derived(($page.data.backupsEnabled ? 6 : 5) + (isAdmin ? 1 : 0));
 
 	// Scheduled state report (admin only; the mail leaves the installation unattended)
 	let reportLoading = $state(false);
@@ -583,7 +502,7 @@
 	let imagePruneCron = $state('0 3 * * 0'); // Default: 3 AM Sunday
 	let imagePruneMode = $state<'dangling' | 'all'>('dangling');
 	let imagePruneLastPruned = $state<string | undefined>(undefined);
-	let imagePruneLastResult = $state<{ spaceReclaimed: number; imagesRemoved: number } | undefined>(undefined);
+	let imagePruneLastResult = $state<{ spaceReclaimed?: number; imagesRemoved: number } | undefined>(undefined);
 	let imagePruneLoading = $state(false);
 
 	// === Validation Functions ===
@@ -1856,36 +1775,36 @@
 		{/if}
 
 		<Tabs.Root bind:value={modalTab} class="flex-1 flex flex-col overflow-hidden mt-4">
-			<Tabs.List class="flex-shrink-0 mb-0 w-full grid" style="grid-template-columns: repeat({tabCount}, minmax(0, 1fr));">
-				<Tabs.Trigger value="general" class="flex items-center justify-center gap-1.5">
+			<Tabs.List class="flex-shrink-0 mb-0 w-full flex flex-wrap h-auto gap-1 p-1">
+				<Tabs.Trigger value="general" class="flex-1 flex items-center justify-center gap-1.5">
 					<Globe class="w-3.5 h-3.5" />
 					{m.envmodal_tab_general()}
 				</Tabs.Trigger>
-				<Tabs.Trigger value="updates" class="flex items-center justify-center gap-1.5">
+				<Tabs.Trigger value="updates" class="flex-1 flex items-center justify-center gap-1.5">
 					<CircleFadingArrowUp class="w-3.5 h-3.5" />
 					{m.envmodal_tab_updates()}
 				</Tabs.Trigger>
-				<Tabs.Trigger value="activity" class="flex items-center justify-center gap-1.5">
+				<Tabs.Trigger value="activity" class="flex-1 flex items-center justify-center gap-1.5">
 					<Activity class="w-3.5 h-3.5" />
 					{m.nav_activity()}
 				</Tabs.Trigger>
-				<Tabs.Trigger value="security" class="flex items-center justify-center gap-1.5">
+				<Tabs.Trigger value="security" class="flex-1 flex items-center justify-center gap-1.5">
 					<ShieldCheck class="w-3.5 h-3.5" />
 					{m.containers_settings_security()}
 				</Tabs.Trigger>
 				<!-- BETA GATE: Backups tab hidden unless FEAT_BACKUPS_ENABLED (see features.ts) -->
 				{#if $page.data.backupsEnabled}
-					<Tabs.Trigger value="backup" class="flex items-center justify-center gap-1.5">
+					<Tabs.Trigger value="backup" class="flex-1 flex items-center justify-center gap-1.5">
 						<Archive class="w-3.5 h-3.5" />
 						{m.nav_backups()}
 					</Tabs.Trigger>
 				{/if}
-				<Tabs.Trigger value="notifications" class="flex items-center justify-center gap-1.5">
+				<Tabs.Trigger value="notifications" class="flex-1 flex items-center justify-center gap-1.5">
 					<Bell class="w-3.5 h-3.5" />
 					{m.envmodal_tab_notifications()}
 				</Tabs.Trigger>
 				{#if isAdmin}
-					<Tabs.Trigger value="reports" class="flex items-center justify-center gap-1.5">
+					<Tabs.Trigger value="reports" class="flex-1 flex items-center justify-center gap-1.5">
 						<FileText class="w-3.5 h-3.5" />
 						{m.envmodal_tab_reports()}
 					</Tabs.Trigger>
@@ -3136,7 +3055,7 @@
 														if (isSelected) {
 															formSelectedNotifications = formSelectedNotifications.filter(n => n.id !== channel.id);
 														} else {
-															formSelectedNotifications = [...formSelectedNotifications, { id: channel.id, eventTypes: NOTIFICATION_EVENT_TYPES.map(e => e.id) }];
+															formSelectedNotifications = [...formSelectedNotifications, { id: channel.id, eventTypes: [...ENVIRONMENT_EVENT_IDS] }];
 														}
 													}}
 												/>
@@ -3164,7 +3083,7 @@
 													{:else}
 														<ChevronDown class="w-3 h-3 text-muted-foreground" />
 													{/if}
-													<span class="text-xs text-muted-foreground">{m.envmodal_event_types_count({ count: selectedNotif.eventTypes.length })}</span>
+													<span class="text-xs text-muted-foreground">{m.envmodal_event_types_count({ count: shownEventCount(selectedNotif.eventTypes, !!$page.data.backupsEnabled) })}</span>
 												</div>
 												{#if !isCollapsed}
 													<EventTypesEditor
@@ -3220,7 +3139,7 @@
 														<Send class="w-4 h-4 shrink-0 text-purple-500" />
 													{/if}
 													<span class="text-sm font-medium truncate">{notif.channelName}</span>
-													<span class="text-xs text-muted-foreground">{m.envmodal_events_count({ count: notif.eventTypes.length })}</span>
+													<span class="text-xs text-muted-foreground">{m.envmodal_events_count({ count: shownEventCount(notif.eventTypes, !!$page.data.backupsEnabled) })}</span>
 												</div>
 												<div class="flex items-center gap-1 shrink-0" role="group" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 													<TogglePill

@@ -4,18 +4,20 @@
 
 <script lang="ts">
 	import { matchesStackFilter } from '$lib/utils/grid-filters';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { goto, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { SearchInput } from '$lib/components/ui/search-input';
+	import { initialWildcard, stackMatchesSearch } from '$lib/utils/wildcard-match';
+	import { loadLocalFlag, saveLocalFlag } from '$lib/utils/local-flag';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText, Tag, Copy, Check } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText, Tag, Copy, Check, Pin } from 'lucide-svelte';
 	import { formatPorts } from '$lib/utils/port-format';
 	import { formatUptime } from '$lib/i18n/time';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
@@ -114,7 +116,21 @@
 	let stackModalReadonly = $state(false);
 	let stackModalGitInfo = $state<{ commit?: string; url?: string; branch?: string } | null>(null);
 	let editingGitStack = $state<any>(null);
+	let convertingStackName = $state<string | null>(null);
+	let untrackedStackName = $state<string | null>(null);
 	let envId = $state<number | null>(null);
+
+	// Whether the open edit modal may offer "Convert to Git". Kept as a stable $derived so
+	// the modal's button does not flicker out during a render pass where the inline guard
+	// transiently reads an empty editingStackName.
+	let editStackConvertHandler = $derived.by<(() => void) | null>(() => {
+		if (!editingStackName) return null;
+		const sourceType = getStackSource(editingStackName).sourceType;
+		const allowed =
+			(sourceType === 'internal' && $canAccess('stacks', 'edit')) ||
+			(sourceType === 'external' && $canAccess('stacks', 'create'));
+		return allowed ? () => convertLocalStackToGit(editingStackName) : null;
+	});
 
 	// User-defined tags: assignments (name -> tagId[]) + catalog + filter.
 	let tagsMap = $state<Record<string, number[]>>({});
@@ -473,12 +489,17 @@
 	const initialSearch = $page.url.searchParams.get('search') ?? '';
 	let searchInput = $state(initialSearch);
 	let searchQuery = $state(initialSearch);
+	// Wildcard mode for the search box: the user's choice is kept per browser, and a
+	// search arriving in the URL brings its own mode (a link from another page is plain).
+	const SEARCH_WILDCARD_KEY = 'dockhand-stacks-search-wildcard';
+	let searchWildcard = $state(initialWildcard($page.url.searchParams, !!initialSearch, loadLocalFlag(SEARCH_WILDCARD_KEY)));
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
 	// Status filter state
 	const STATUS_FILTER_STORAGE_KEY = 'dockhand-stacks-status-filter';
-	let statusFilter = $state<string[]>([]);
+	const COOLING_DOWN_FILTER_VALUE = 'cooling-down';
+	let statusFilter = $state<string[]>(loadStatusFilter());
 
 	// Stack status types with icons and colors
 	const stackStatusTypes = [
@@ -493,30 +514,46 @@
 	// Health rides the status filter as synthetic 'health:*' entries rather than a
 	// second dropdown. Always offered, unlike update-available: the question "is
 	// anything unhealthy" is asked precisely when the answer is no.
-	const filterOptions = [
+	const filterOptions = $derived([
 		...stackStatusTypes,
+		...(stackCoolingDownCount > 0
+			? [{
+					value: COOLING_DOWN_FILTER_VALUE,
+					label: m.containers_list_filter_cooling_down(),
+					icon: Clock,
+					color: 'text-muted-foreground'
+				}]
+			: []),
 		{ value: 'health:unhealthy', label: m.containers_list_filter_unhealthy(), icon: HeartOff, color: 'text-red-500', colorLabel: true },
 		{ value: 'health:starting', label: m.containers_list_filter_starting_up(), icon: Heart, color: 'text-amber-500' },
 		{ value: 'health:healthy', label: m.containers_list_filter_healthy(), icon: HeartPulse, color: 'text-emerald-500' }
-	];
+	]);
+
+	// Drop the cooling-down filter once nothing is waiting, or the dropdown hides the
+	// entry and the user cannot deselect it while the list stays empty.
+	$effect(() => {
+		if (statusFilter.includes(COOLING_DOWN_FILTER_VALUE) && stackCoolingDownCount === 0) {
+			statusFilter = statusFilter.filter((v) => v !== COOLING_DOWN_FILTER_VALUE);
+		}
+	});
 
 	function getStackStatusIcon(status: string) {
 		const s = stackStatusTypes.find(t => t.value === status.toLowerCase());
 		return s?.icon || Layers;
 	}
 
-	function loadStatusFilter() {
+	function loadStatusFilter(): string[] {
+		if (typeof window === 'undefined') return [];
 		try {
 			const stored = localStorage.getItem(STATUS_FILTER_STORAGE_KEY);
 			if (stored) {
 				const parsed = JSON.parse(stored);
-				if (Array.isArray(parsed)) {
-					statusFilter = parsed;
-				}
+				if (Array.isArray(parsed)) return parsed;
 			}
 		} catch {
 			// Ignore localStorage errors
 		}
+		return [];
 	}
 
 	function saveStatusFilter() {
@@ -752,16 +789,19 @@
 
 		// Filter by search query
 		if (searchQuery.trim()) {
-			const query = searchQuery.toLowerCase();
-			result = result.filter(stack =>
-				stack.name.toLowerCase().includes(query) ||
-				getDisplayStatus(stack).toLowerCase().includes(query)
-			);
+			result = result.filter(stack => stackMatchesSearch(stack.name, getDisplayStatus(stack), searchQuery, searchWildcard));
 		}
 
+		// The cooling-down filter is synthetic (not a stack status), so apply it
+		// separately and keep it out of the status match below.
+		if (statusFilter.includes(COOLING_DOWN_FILTER_VALUE)) {
+			result = result.filter(stack => (stack.coolingDownCount ?? 0) > 0);
+		}
+		const statusOnly = statusFilter.filter(v => v !== COOLING_DOWN_FILTER_VALUE);
+
 		// Filter by status (uses display status so git "created" matches "not deployed")
-		if (statusFilter.length > 0) {
-			result = result.filter(stack => matchesStackFilter(stack, statusFilter, getDisplayStatus(stack)));
+		if (statusOnly.length > 0) {
+			result = result.filter(stack => matchesStackFilter(stack, statusOnly, getDisplayStatus(stack)));
 		}
 
 		// Filter by user-defined tags.
@@ -961,6 +1001,8 @@
 		const url = new URL($page.url);
 		if (q) url.searchParams.set('search', q);
 		else url.searchParams.delete('search');
+		if (q && searchWildcard) url.searchParams.set('wildcard', '1');
+		else url.searchParams.delete('wildcard');
 		if (url.toString() !== $page.url.toString()) {
 			goto(url.toString(), { replaceState: true, noScroll: true, keepFocus: true });
 		}
@@ -999,18 +1041,23 @@
 	// True when any stack container shows an update-available (amber) or
 	// check-failed (red) indicator — gates the "dismiss indicators" button.
 	const hasUpdateIndicators = $derived(
-		stacks.some((s) => s.updatesAvailable || (s.newerVersionCount ?? 0) > 0 || (s.coolingDownCount ?? 0) > 0) ||
+		stacks.some((s) => s.updatesAvailable || (s.newerVersionCount ?? 0) > 0 || (s.coolingDownCount ?? 0) > 0 || (s.pinnedDigestCount ?? 0) > 0) ||
 			failedUpdateCheckIds.size > 0
 	);
 	// Counts for the compact dismiss: stacks with a digest update, and total containers
 	// with a newer version tag - each shown with its icon, mirroring the containers page.
 	const stackDigestCount = $derived(stacks.filter((s) => s.updatesAvailable).length);
+	const stackContainerIds = $derived(new Set(stacks.flatMap((s) => (s.containerDetails ?? []).map((c) => c.id))));
 	// Containers waiting out the minimum image age, across every stack.
 	const stackCoolingDownCount = $derived(
 		stacks.reduce((sum, s) => sum + (s.coolingDownCount ?? 0), 0)
 	);
 	const stackNewerVersionCount = $derived(
 		stacks.reduce((sum, s) => sum + (s.newerVersionCount ?? 0), 0)
+	);
+	// Containers whose pinned digest moved, across every stack - reported, not applied.
+	const stackPinnedCount = $derived(
+		stacks.reduce((sum, s) => sum + (s.pinnedDigestCount ?? 0), 0)
 	);
 
 	// Dismiss both the amber "update available" and red "check failed" indicators.
@@ -1134,8 +1181,10 @@
 		return stack.status;
 	}
 
-	async function openGitModal(gitStack: any = undefined) {
+	async function openGitModal(gitStack?: any, stackName?: string | null, isUntracked = false) {
 		editingGitStack = gitStack || null;
+		convertingStackName = isUntracked ? null : stackName || null;
+		untrackedStackName = isUntracked ? stackName || null : null;
 		// Fetch repositories and credentials before opening modal
 		try {
 			const [reposRes, credsRes] = await Promise.all([
@@ -1150,6 +1199,47 @@
 			gitCredentials = [];
 		}
 		showGitModal = true;
+	}
+
+	async function convertGitStackToLocal(stackName: string, gitStackId: number) {
+		operationError = null;
+		try {
+			const response = await fetch(appendEnvParam(`/api/git/stacks/${gitStackId}/detach`, envId), {
+				method: 'POST'
+			});
+
+			if (!response.ok) {
+				let errorMsg = m.stacks_git_error_convert_local_failed();
+				try {
+					const data = await response.json();
+					errorMsg = data.error || errorMsg;
+				} catch {
+					// ignore parse errors
+				}
+				showErrorDialog(m.stacks_git_error_convert_title({ name: stackName }), errorMsg);
+				return;
+			}
+
+			toast.success(m.stacks_git_toast_convert_local_success({ name: stackName }));
+			showGitModal = false;
+			editingGitStack = null;
+			await fetchStacks();
+		} catch (error) {
+			console.error('Failed to convert stack to local source:', error);
+			const errorMsg = error instanceof Error ? error.message : m.stacks_git_error_convert_local_failed();
+			showErrorDialog(m.stacks_git_error_convert_title({ name: stackName }), errorMsg);
+		}
+	}
+
+	async function convertLocalStackToGit(stackName: string) {
+		const isUntracked = getStackSource(stackName).sourceType === 'external';
+		operationError = null;
+		showEditModal = false;
+		editingStackName = '';
+		// Let the edit dialog finish closing (its focus/escape layer) before opening the
+		// git dialog, so a dropdown-item selection inside it does not dismiss the new one.
+		await tick();
+		await openGitModal(null, stackName, isUntracked);
 	}
 
 	async function startStack(name: string) {
@@ -1245,7 +1335,7 @@
 		}
 	}
 
-	async function redeployStack(name: string, options: { pull: boolean; build: boolean; forceRecreate: boolean }) {
+	async function redeployStack(name: string, options: { pull: boolean; respectPullPolicy?: boolean; build: boolean; pullBase?: boolean; forceRecreate: boolean }) {
 		operationError = null;
 		stackActionLoading = name;
 		startComposeOutput(m.stacks_list_output_redeploying({ name }), name, 'deploy');
@@ -1253,7 +1343,9 @@
 		// otherwise visible once the popover closes).
 		const chosen = [
 			options.pull && m.stacks_list_output_option_pull(),
+			options.respectPullPolicy && m.stacks_redeploy_respect_pull_policy(),
 			options.build && m.stacks_list_output_option_build(),
+			options.pullBase && m.stacks_redeploy_pull_base_images(),
 			options.forceRecreate && m.stacks_list_output_option_force_recreate()
 		].filter(Boolean);
 		appendComposeOutputLine(m.stacks_list_output_options({ options: chosen.length ? chosen.join(', ') : m.stacks_list_output_option_none() }));
@@ -1685,7 +1777,6 @@
 
 	onMount(() => {
 		loadExpandedState();
-		loadStatusFilter();
 		loadLayoutMode();
 
 		// Initial fetch is handled by $effect - no need to duplicate here
@@ -1768,7 +1859,7 @@
 			{/if}
 		</PageHeader>
 		<div class="flex flex-wrap items-center gap-2">
-			<SearchInput bind:value={searchInput} placeholder={m.stacks_list_search_placeholder()} class="h-8 w-48 text-sm" />
+			<SearchInput bind:value={searchInput} bind:wildcard={searchWildcard} onwildcardchange={(on) => saveLocalFlag(SEARCH_WILDCARD_KEY, on)} wildcardHint={m.ui_search_wildcard_stacks()} placeholder={m.stacks_list_search_placeholder()} class="h-8 w-48 text-sm" />
 			<MultiSelectFilter
 				bind:value={statusFilter}
 				options={filterOptions}
@@ -1785,6 +1876,7 @@
 			<CheckUpdatesButton
 				{envId}
 				hasPendingUpdates={stacks.some((s) => s.updatesAvailable)}
+				containerIds={loading ? undefined : stackContainerIds}
 				onComplete={(result) => {
 					// Record failed checks so stack containers show a "check failed" state
 					// instead of masquerading as up to date (#1255). Session-only.
@@ -1799,6 +1891,7 @@
 				digestCount={stackDigestCount}
 				newerVersionCount={stackNewerVersionCount}
 				coolingDownCount={stackCoolingDownCount}
+				pinnedCount={stackPinnedCount}
 				onDismiss={dismissStackUpdates}
 			/>
 			<Button
@@ -2116,12 +2209,25 @@
 					{/if}
 					{#if (stack.coolingDownCount ?? 0) > 0}
 						<Tooltip.Root>
-							<Tooltip.Trigger class="inline-flex items-center gap-0.5 self-center shrink-0 text-muted-foreground">
+							<Tooltip.Trigger class="inline-flex items-center gap-0.5 self-center shrink-0 text-amber-500">
 								<Clock class="w-3.5 h-3.5" />
 								<span class="text-2xs font-medium leading-none">{stack.coolingDownCount}</span>
 							</Tooltip.Trigger>
 							<Tooltip.Content>
 								{m.stacks_list_cooling_down_tooltip({ count: stack.coolingDownCount ?? 0 })}
+							</Tooltip.Content>
+						</Tooltip.Root>
+					{/if}
+					{#if (stack.pinnedDigestCount ?? 0) > 0 && $appSettings.highlightUpdates}
+						<!-- Passive: a pinned digest moved, but applying it is an edit to the
+						     compose file, so there is no stack-level action here. -->
+						<Tooltip.Root>
+							<Tooltip.Trigger class="inline-flex items-center gap-0.5 self-center shrink-0 text-amber-500">
+								<Pin class="w-3.5 h-3.5" />
+								<span class="text-2xs font-medium leading-none">{stack.pinnedDigestCount}</span>
+							</Tooltip.Trigger>
+							<Tooltip.Content>
+								{m.containers_list_pinned_digest_title()}
 							</Tooltip.Content>
 						</Tooltip.Root>
 					{/if}
@@ -2624,6 +2730,44 @@
 													{/if}
 												{/if}
 											</span>
+										{:else if container.pinnedToDigest && $appSettings.highlightUpdates}
+											<!-- The tag moved to a new digest while this container pins the old
+											     one. Amber: a newer image exists, but applying it is an edit to
+											     the compose file, so there is no update button. -->
+											<Tooltip.Root>
+												<Tooltip.Trigger>
+													<Pin class="w-3.5 h-3.5 shrink-0 text-amber-500" />
+												</Tooltip.Trigger>
+												<Tooltip.Content side="right" class="w-72 p-3">
+													<div class="space-y-1.5">
+														<p class="font-medium text-sm flex items-center gap-1.5 whitespace-nowrap">
+															<Pin class="w-4 h-4 text-amber-500 shrink-0" />
+															{m.containers_list_pinned_digest_heading()}
+														</p>
+														<p class="text-muted-foreground text-xs break-words">{m.containers_list_pinned_digest_title()}</p>
+													</div>
+												</Tooltip.Content>
+											</Tooltip.Root>
+										{:else if container.coolingDown && $appSettings.highlightUpdates}
+											<!-- An update exists but the image is too young to apply. Amber,
+											     like the other update markers, so a held update is as visible as
+											     an available one; the hours left are shown inline beside the clock. -->
+											<Tooltip.Root>
+												<Tooltip.Trigger
+													class="inline-flex items-center gap-1 text-amber-500 text-xs tabular-nums"
+												>
+													<Clock class="w-3.5 h-3.5 shrink-0" />
+													{#if container.coolingDownHours}{m.containers_list_cooldown_hours({ count: container.coolingDownHours })}{/if}
+												</Tooltip.Trigger>
+												<Tooltip.Content side="right" class="w-72 p-3">
+													<div class="space-y-1.5">
+														<p class="font-medium text-sm flex items-start gap-1.5">
+															<Clock class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+															<span>{m.containers_list_update_held_title({ count: container.coolingDownHours ?? 0 })}</span>
+														</p>
+													</div>
+												</Tooltip.Content>
+											</Tooltip.Root>
 										{:else if failedUpdateCheckIds.has(container.id)}
 											<Tooltip.Root>
 												<Tooltip.Trigger>
@@ -3098,12 +3242,15 @@
 		stackModalGitInfo = null;
 		loadTags(envId);
 	}}
+	onConvertToGit={editStackConvertHandler}
 	onSuccess={fetchStacks}
 />
 
 <GitStackModal
 	bind:open={showGitModal}
 	gitStack={editingGitStack}
+	convertStackName={convertingStackName}
+	{untrackedStackName}
 	environmentId={envId}
 	icon={editingGitStack ? (stackSources[editingGitStack.stackName]?.icon ?? null) : null}
 	repositories={gitRepositories}
@@ -3112,7 +3259,10 @@
 		showGitModal = false;
 		editingGitStack = null;
 		loadTags(envId);
+		convertingStackName = null;
+		untrackedStackName = null;
 	}}
+	onConvertToLocal={editingGitStack ? () => convertGitStackToLocal(editingGitStack.stackName, editingGitStack.id) : null}
 	onSaved={fetchStacks}
 />
 

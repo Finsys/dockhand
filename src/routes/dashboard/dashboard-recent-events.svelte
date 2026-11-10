@@ -14,7 +14,7 @@
 		AlertTriangle,
 		Heart
 	} from 'lucide-svelte';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import { formatDateTime } from '$lib/stores/settings';
 	import { m } from '$lib/paraglide/messages.js';
 
@@ -32,7 +32,7 @@
 
 	let { events, limit = 8, onclick }: Props = $props();
 
-	function getActionIcon(action: string): Component {
+	function getActionIcon(action: string): IconComponent {
 		switch (action) {
 			case 'create': return Plus;
 			case 'start': return Play;

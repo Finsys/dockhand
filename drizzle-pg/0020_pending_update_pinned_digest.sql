@@ -1,0 +1,1 @@
+ALTER TABLE "pending_container_updates" ADD COLUMN "pinned_to_digest" boolean DEFAULT false NOT NULL;

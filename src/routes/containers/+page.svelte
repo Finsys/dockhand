@@ -8,6 +8,8 @@
 	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import { containerMatchesSearch } from '$lib/utils/container-search-core';
+	import { loadLocalFlag, saveLocalFlag } from '$lib/utils/local-flag';
+	import { initialWildcard } from '$lib/utils/wildcard-match';
 	import { containerDisplayName } from '$lib/utils/container-display-name';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
@@ -34,6 +36,7 @@
 		FileText,
 		Pencil,
 		NotepadText,
+		Pin,
 		RefreshCw,
 		CircleArrowUp,
 		Clock,
@@ -84,10 +87,11 @@
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import VersionUpdateBadge from '$lib/components/VersionUpdateBadge.svelte';
 	import VersionUpdateModal from '$lib/components/VersionUpdateModal.svelte';
+	import CooldownNotesModal from '$lib/components/CooldownNotesModal.svelte';
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { matchesContainerHealthFilter, stateFilterValues } from '$lib/utils/grid-filters';
 	import { nextLogsSessions, panelsAfterRowClick, showsLogsIndicator } from '$lib/utils/active-logs-core';
-	import { matchesTagFilter, tagGroupDescriptor, mergeLabelTags, type Tag as UserTag, type TagColor, filterTagList, prunedTagFilter, withStackTags, withStackNameTag } from '$lib/utils/tags-core';
+	import { matchesTagFilter, tagGroupDescriptor, type Tag as UserTag, type TagColor, filterTagList, prunedTagFilter, containerTags } from '$lib/utils/tags-core';
 	import { isKnownIconName } from '$lib/utils/icons';
 	import { tagOrder } from '$lib/stores/tag-order';
 	import { applyOrder } from '$lib/utils/apply-order';
@@ -216,19 +220,15 @@
 	// Tags assigned in Dockhand, plus the ones the container names in its
 	// dockhand.tags label - so a container Dockhand never deployed is tagged too.
 	function tagsFor(container: { name: string; labels?: Record<string, string> }): UserTag[] {
-		const assigned = (tagsMap[container.name] ?? [])
-			.map((id) => tagById.get(id))
-			.filter((t): t is UserTag => !!t);
-		const own = mergeLabelTags(assigned, container.labels, tagCatalog, isKnownIconName);
-		const stack = getComposeProject(container.labels);
-		let tags = own;
-		if (inheritStackTags && stack) {
-			const assignedToStack = (stackTagsMap[stack] ?? [])
-				.map((id) => tagById.get(id))
-				.filter((t): t is UserTag => !!t);
-			tags = withStackTags(tags, assignedToStack);
-		}
-		return useStackAsTag ? withStackNameTag(tags, stack, tagCatalog) : tags;
+		return containerTags(container, {
+			assignedTagIds: tagsMap,
+			stackTagIds: stackTagsMap,
+			tagById,
+			catalog: tagCatalog,
+			inheritStackTags,
+			useStackAsTag,
+			iconKnown: isKnownIconName
+		});
 	}
 
 	// The filter lists the catalogue plus any tag only a label names, so a tag that
@@ -332,6 +332,10 @@
 	const initialSearch = $page.url.searchParams.get('search')
 		?? $page.url.searchParams.get('image') ?? '';
 	let searchQuery = $state(initialSearch);
+	// Wildcard mode for the search box: the user's choice is kept per browser, and a
+	// search arriving in the URL brings its own mode (a link from another page is plain).
+	const SEARCH_WILDCARD_KEY = 'dockhand-containers-search-wildcard';
+	let searchWildcard = $state(initialWildcard($page.url.searchParams, !!initialSearch, loadLocalFlag(SEARCH_WILDCARD_KEY)));
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
@@ -340,7 +344,8 @@
 	const STATUS_FILTER_STORAGE_KEY = 'dockhand-containers-status-filter';
 	const UPDATE_AVAILABLE_FILTER_VALUE = 'update-available';
 	const NEWER_VERSION_FILTER_VALUE = 'newer-version';
-	let statusFilter = $state<string[]>([]);
+	const COOLING_DOWN_FILTER_VALUE = 'cooling-down';
+	let statusFilter = $state<string[]>(loadStatusFilter());
 
 	// Status types with icons for filter and table
 	const statusTypes = [
@@ -396,16 +401,13 @@
 		}
 	}
 
-	function loadStatusFilter() {
-		if (typeof window !== 'undefined') {
+	function loadStatusFilter(): string[] {
+		if (typeof window === 'undefined') return [];
+		try {
 			const saved = localStorage.getItem(STATUS_FILTER_STORAGE_KEY);
-			if (saved) {
-				try {
-					statusFilter = JSON.parse(saved);
-				} catch {
-					statusFilter = [];
-				}
-			}
+			return saved ? JSON.parse(saved) : [];
+		} catch {
+			return [];
 		}
 	}
 
@@ -427,6 +429,8 @@
 		const url = new URL($page.url);
 		if (q) url.searchParams.set('search', q);
 		else url.searchParams.delete('search');
+		if (q && searchWildcard) url.searchParams.set('wildcard', '1');
+		else url.searchParams.delete('wildcard');
 		url.searchParams.delete('image'); // clean up legacy param
 		if (url.toString() !== $page.url.toString()) {
 			goto(url.toString(), { replaceState: true, noScroll: true, keepFocus: true });
@@ -540,6 +544,15 @@
 		versionModalNewer = newer;
 	}
 
+	// Release notes for a held (cooling-down) update, so the user can judge whether to
+	// force it - a security fix should not have to wait out the cooldown.
+	let cooldownModalContainer = $state<ContainerInfo | null>(null);
+	let cooldownModalHours = $state<number | null>(null);
+	function openCooldownModal(container: ContainerInfo) {
+		cooldownModalContainer = container;
+		cooldownModalHours = coolingDownMap.get(container.id) ?? null;
+	}
+
 	// Single container update mode (doesn't overwrite batch list)
 	let singleUpdateContainerId = $state<string | null>(null);
 	let singleUpdateContainerName = $state<string | null>(null);
@@ -584,6 +597,7 @@
 	// containersWithUpdatesSet: the cooldown is what stops the update, so offering it
 	// for a bulk update would promise something it blocks.
 	const coolingDownMap = $derived($containerStore.coolingDown);
+	const pinnedDigestSet = $derived($containerStore.pinnedDigest);
 
 	// Any update indicator on the page - digest updates, newer-version tags, or failed
 	// checks. Drives the compact "dismiss all" (×) button.
@@ -591,6 +605,7 @@
 		$containerStore.pendingUpdateIds.length > 0 ||
 		hasNewerVersions ||
 		coolingDownMap.size > 0 ||
+		pinnedDigestSet.size > 0 ||
 		$containerStore.failedUpdateIds.length > 0
 	);
 
@@ -619,6 +634,14 @@
 					color: 'text-amber-500'
 				}]
 			: []),
+		...(coolingDownMap.size > 0
+			? [{
+					value: COOLING_DOWN_FILTER_VALUE,
+					label: m.containers_list_filter_cooling_down(),
+					icon: Clock,
+					color: 'text-muted-foreground'
+				}]
+			: []),
 		// Always offered, unlike the entries above: the question "is anything
 		// unhealthy" is asked precisely when the answer is no.
 		{ value: 'health:unhealthy', label: m.containers_list_filter_unhealthy(), icon: HeartOff, color: 'text-red-500', colorLabel: true },
@@ -640,6 +663,10 @@
 		// newer version, or the dropdown hides the entry and the list stays empty.
 		if (statusFilter.includes(NEWER_VERSION_FILTER_VALUE) && !hasNewerVersions) {
 			statusFilter = statusFilter.filter((v) => v !== NEWER_VERSION_FILTER_VALUE);
+		}
+		// Same guard for the cooling-down filter.
+		if (statusFilter.includes(COOLING_DOWN_FILTER_VALUE) && coolingDownMap.size === 0) {
+			statusFilter = statusFilter.filter((v) => v !== COOLING_DOWN_FILTER_VALUE);
 		}
 	});
 
@@ -770,6 +797,7 @@
 		withUpdates: Array<{ containerId: string; containerName: string }>;
 		failed?: Array<{ containerId: string; error: string }>;
 		newerVersions?: Array<{ containerId: string; newerVersion: import('$lib/server/semver/find-newer').NewerVersion }>;
+		pinned?: Array<{ containerId: string }>;
 		coolingDown?: Map<string, number>;
 	}) {
 		if (result.withUpdates.length === 0) {
@@ -794,6 +822,10 @@
 		// Held updates, from the same check: without this the Clock indicators would
 		// still show whatever the previous check found.
 		containerStore.setCoolingDown(result.coolingDown ?? new Map());
+		// Images pinned to a digest their tag has moved past: found, reported, not applied.
+		containerStore.setPinnedDigest(new Set((result.pinned ?? []).map((p) => p.containerId)));
+		// The saved rows also hold updates kept for containers whose check failed.
+		loadPendingUpdates();
 	}
 
 	// Load pending updates from database (persisted from check-updates or scheduled jobs)
@@ -837,6 +869,9 @@
 				// The DELETE removed the held rows as well, so their Clock indicators must
 				// go with them - otherwise they render against rows that no longer exist.
 				containerStore.setCoolingDown(new Map());
+				// Same for the pin indicators: they are session-only, so Clear must take
+				// them too rather than leaving them against dismissed rows.
+				containerStore.setPinnedDigest(new Set());
 			}
 		} catch {
 			toast.error(m.containers_list_toast_clear_updates_failed());
@@ -1041,10 +1076,12 @@
 		// being treated like another Docker state.
 		const stateValues = stateFilterValues(statusFilter, [
 			UPDATE_AVAILABLE_FILTER_VALUE,
-			NEWER_VERSION_FILTER_VALUE
+			NEWER_VERSION_FILTER_VALUE,
+			COOLING_DOWN_FILTER_VALUE
 		]);
 		const updatesOnly = statusFilter.includes(UPDATE_AVAILABLE_FILTER_VALUE);
 		const newerVersionOnly = statusFilter.includes(NEWER_VERSION_FILTER_VALUE);
+		const coolingDownOnly = statusFilter.includes(COOLING_DOWN_FILTER_VALUE);
 		if (stateValues.length > 0) {
 			result = result.filter((c) => stateValues.includes(c.state.toLowerCase()));
 		}
@@ -1054,12 +1091,15 @@
 		if (newerVersionOnly) {
 			result = result.filter((c) => newerVersionsMap.has(c.id));
 		}
+		if (coolingDownOnly) {
+			result = result.filter((c) => coolingDownMap.has(c.id));
+		}
 		result = result.filter((c) => matchesContainerHealthFilter(c.health, statusFilter));
 
 		// Filter by search query (name, image, any label key/value, or a
 		// `label:key`/`label:key=value` filter - see containerMatchesSearch).
 		if (searchQuery.trim()) {
-			result = result.filter(c => containerMatchesSearch(c, searchQuery));
+			result = result.filter(c => containerMatchesSearch(c, searchQuery, searchWildcard));
 		}
 
 		// Filter by user-defined tags.
@@ -1589,7 +1629,6 @@
 
 	onMount(async () => {
 		loadLayoutMode();
-		loadStatusFilter();
 		terminalCustomUsers = getCustomUsers();
 
 		// Load persisted pending updates from database
@@ -1645,7 +1684,7 @@
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Box} title={m.nav_containers()} count={containers.length} />
 		<div class="flex flex-wrap items-center gap-2">
-			<SearchInput bind:value={searchQuery} placeholder={m.containers_list_search_placeholder()} class="h-8 w-64 text-sm" />
+			<SearchInput bind:value={searchQuery} bind:wildcard={searchWildcard} onwildcardchange={(on) => saveLocalFlag(SEARCH_WILDCARD_KEY, on)} placeholder={m.containers_list_search_placeholder()} class="h-8 w-64 text-sm" />
 			<!-- Status filter (multi-select). The synthetic 'update-available'
 			     entry appears once at least one container has a pending update,
 			     and ANDs with selected real states (#1063). -->
@@ -1705,6 +1744,7 @@
 					digestCount={updatableContainersCount}
 					newerVersionCount={$containerStore.newerVersions.size}
 					coolingDownCount={coolingDownMap.size}
+					pinnedCount={pinnedDigestSet.size}
 					onDismiss={dismissPendingUpdates}
 				/>
 				{#if $canAccess('containers', 'remove')}
@@ -2070,12 +2110,48 @@
 										</a>
 									{/if}
 								{/if}
+							{:else if pinnedDigestSet.has(container.id)}
+								<!-- The tag moved to a new digest while the reference pins the old one.
+								     Amber: a newer image exists and wants attention, but applying it is
+								     an edit to the compose file, so there is no button here. -->
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<Pin class="w-3 h-3 text-amber-500 shrink-0" />
+									</Tooltip.Trigger>
+									<Tooltip.Content side="right" class="w-72 p-3">
+										<div class="space-y-1.5">
+											<p class="font-medium text-sm flex items-center gap-1.5 whitespace-nowrap">
+												<Pin class="w-4 h-4 text-amber-500 shrink-0" />
+												{m.containers_list_pinned_digest_heading()}
+											</p>
+											<p class="text-muted-foreground text-xs break-words">{m.containers_list_pinned_digest_title()}</p>
+										</div>
+									</Tooltip.Content>
+								</Tooltip.Root>
 							{:else if coolingDownMap.has(container.id)}
-								<!-- An update exists but the image is too young to apply. Muted, not
-								     amber: there is nothing for the user to act on. -->
-								<span title={m.containers_list_update_held_title({ count: coolingDownMap.get(container.id)! })}>
-									<Clock class="w-3 h-3 text-muted-foreground shrink-0" />
-								</span>
+								<!-- An update is held by the minimum image age. Clicking opens its
+								     release notes so the user can decide whether to force it. -->
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<button
+											type="button"
+											onclick={(e) => { e.stopPropagation(); openCooldownModal(container); }}
+											class="shrink-0 text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+											aria-label={m.containers_list_cooldown_notes_title()}
+										>
+											<Clock class="w-3 h-3" />
+										</button>
+									</Tooltip.Trigger>
+									<Tooltip.Content side="right" class="w-72 p-3">
+										<div class="space-y-1.5">
+											<p class="font-medium text-sm flex items-start gap-1.5">
+												<Clock class="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+												<span>{m.containers_list_update_held_title({ count: coolingDownMap.get(container.id)! })}</span>
+											</p>
+											<p class="text-xs text-muted-foreground">{m.containers_list_cooldown_notes_title()}</p>
+										</div>
+									</Tooltip.Content>
+								</Tooltip.Root>
 							{:else if containersWithFailedCheckSet.has(container.id)}
 								<Tooltip.Root>
 									<Tooltip.Trigger>
@@ -2331,6 +2407,19 @@
 								title={m.containers_list_no_schedules_permission()}>?</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs text-center block">-</span>
+						{/if}
+					{:else if column.id === 'cooldown'}
+						{#if coolingDownMap.has(container.id)}
+							{@const hours = coolingDownMap.get(container.id)!}
+							<button
+								type="button"
+								onclick={() => openCooldownModal(container)}
+								class="text-xs text-muted-foreground tabular-nums whitespace-nowrap flex items-center justify-end gap-1 ml-auto hover:text-foreground transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+								title={m.containers_list_cooldown_notes_title()}>
+								<Clock class="w-3 h-3 shrink-0" />{m.containers_list_cooldown_hours({ count: hours })}
+							</button>
+						{:else}
+							<span class="text-gray-400 dark:text-gray-600 text-xs text-right block">-</span>
 						{/if}
 					{:else if column.id === 'stack'}
 						{#if stack}
@@ -2824,6 +2913,15 @@
 	bind:container={versionModalContainer}
 	newerVersion={versionModalNewer}
 	{envId}
+/>
+
+<CooldownNotesModal
+	bind:container={cooldownModalContainer}
+	cooldownHours={cooldownModalHours}
+	{envId}
+	onUpdateNow={$canAccess('containers', 'create')
+		? (id, name) => updateSingleContainer(id, name)
+		: undefined}
 />
 
 <BatchOperationModal

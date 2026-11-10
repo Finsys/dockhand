@@ -23,7 +23,8 @@ export const PUBLIC_EXACT = [
 	'/api/auth/passkeys/login/verify',
 	'/api/license',
 	'/api/changelog',
-	'/api/settings/theme'
+	'/api/settings/theme',
+	'/api/exposure-status'
 ];
 
 /**
@@ -42,8 +43,15 @@ export const PUBLIC_PATH_PATTERNS = [
 	/^\/api\/git\/webhook\/\d+$/
 ];
 
-/** Whether this path is reachable without a session. */
-export function isPublicPath(pathname: string): boolean {
+/**
+ * Whether this path is reachable without a session.
+ *
+ * `metricsPublic` opens ONLY `/metrics`, and only when the operator set
+ * EXPORT_METRICS_PUBLIC (#1698). It is a parameter rather than a static entry so the
+ * exposure is off by default and cannot widen to any other path.
+ */
+export function isPublicPath(pathname: string, metricsPublic = false): boolean {
+	if (metricsPublic && pathname === '/metrics') return true;
 	if (PUBLIC_PATH_PATTERNS.some((re) => re.test(pathname))) return true;
 	if (PUBLIC_EXACT.includes(pathname)) return true;
 	return PUBLIC_PREFIXES.some((path) => pathname === path || pathname.startsWith(path + '/'));

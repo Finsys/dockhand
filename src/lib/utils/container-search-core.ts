@@ -6,7 +6,11 @@
  * filter: `label:heal` matches a container that HAS a `heal` label (any value);
  * `label:heal=true` matches only when the value is `true` too. Mirrors
  * `docker ps --filter "label=heal"` / `label=heal=true` (#1372).
+ *
+ * In wildcard mode the free-text query is a pattern (`*`, `?`) that has to cover a
+ * whole name, image, label key or value; a `label:` query stays the label filter.
  */
+import { searchTextMatcher } from './wildcard-match';
 
 export interface SearchableContainer {
 	name: string;
@@ -48,19 +52,19 @@ function matchesLabelFilter(
  * A `label:` query is a targeted label filter; any other query is a free-text
  * substring match over name, image, every label key/value, and the compose project.
  */
-export function containerMatchesSearch(c: SearchableContainer, rawQuery: string): boolean {
+export function containerMatchesSearch(c: SearchableContainer, rawQuery: string, wildcard = false): boolean {
 	const q = rawQuery.trim();
 	if (!q) return true;
 
 	const labelToken = parseLabelToken(q);
 	if (labelToken) return matchesLabelFilter(c.labels, labelToken.key, labelToken.value);
 
-	const query = q.toLowerCase();
-	if (c.name.toLowerCase().includes(query)) return true;
-	if (c.image.toLowerCase().includes(query)) return true;
+	const matches = searchTextMatcher(q, wildcard);
+	if (matches(c.name)) return true;
+	if (matches(c.image)) return true;
 	if (c.labels) {
 		for (const [k, v] of Object.entries(c.labels)) {
-			if (k.toLowerCase().includes(query) || (v ?? '').toLowerCase().includes(query)) return true;
+			if (matches(k) || matches(v)) return true;
 		}
 	}
 	return false;

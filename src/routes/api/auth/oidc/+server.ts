@@ -14,21 +14,16 @@ import { auditOidcProvider } from '$lib/server/audit';
  * summary: List all configured OIDC providers (client secrets are masked)
  * resp-200: array<{id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}>
  * resp-200-example: [{"id":1,"name":"Authentik","enabled":true,"issuerUrl":"https://auth.example.com/application/o/dockhand/","clientId":"dockhand"}]
- * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
- * resp-403: Permission denied (missing settings:view)
+ * resp-401: Not authorized (auth is enabled and the caller is not an admin)
  * resp-500: Failed to read the OIDC configurations
  */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
-	// When auth is enabled, require authentication and settings:view permission
-	if (auth.authEnabled) {
-		if (!auth.isAuthenticated) {
-			return json({ error: 'Authentication required' }, { status: 401 });
-		}
-		if (!await auth.can('settings', 'view')) {
-			return json({ error: 'Permission denied' }, { status: 403 });
-		}
+	// Identity-provider config is admin-only (it carries adminClaim, which decides who
+	// becomes admin on login) - same gate as the LDAP provider endpoints.
+	if (auth.authEnabled && (!auth.isAuthenticated || !auth.isAdmin)) {
+		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
 	try {
@@ -54,22 +49,17 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * resp-201: {id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}
  * resp-201-desc: OIDC configuration created (clientSecret is masked in the response)
  * resp-400: A required field is missing (name, issuerUrl, clientId, clientSecret, redirectUri)
- * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
- * resp-403: Permission denied (missing settings:edit)
+ * resp-401: Not authorized (auth is enabled and the caller is not an admin)
  * resp-500: Failed to create the OIDC configuration
  */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 
-	// When auth is enabled, require authentication and settings:edit permission
-	if (auth.authEnabled) {
-		if (!auth.isAuthenticated) {
-			return json({ error: 'Authentication required' }, { status: 401 });
-		}
-		if (!await auth.can('settings', 'edit')) {
-			return json({ error: 'Permission denied' }, { status: 403 });
-		}
+	// adminClaim decides who becomes admin on OIDC login, so creating a provider is
+	// admin-only (a settings:edit user must not be able to grant themselves admin).
+	if (auth.authEnabled && (!auth.isAuthenticated || !auth.isAdmin)) {
+		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
 	try {

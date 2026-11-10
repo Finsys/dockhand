@@ -1,8 +1,78 @@
 [
   {
+    "version": "1.0.57",
+    "date": "2026-11-04",
+    "changes": [
+      { "type": "feature", "text": "OIDC back-channel logout ends a Dockhand session when the identity provider signals logout (#1835)" },
+      { "type": "feature", "text": "Ukrainian interface translation (#1839, PR#1839, @TripShuti)" },
+      { "type": "feature", "text": "Brazilian Portuguese interface translation (PR#1851, @lucasskluser)" },
+      { "type": "feature", "text": "Turkish interface translation (PR#1853, @Gorke07)" },
+      { "type": "feature", "text": "Infisical bulk pull now includes secrets from folder imports (#1829, PR#1844, @gorillka)" },
+      { "type": "feature", "text": "convert a stack between local and git management without recreating it (#636, PR#795, @barrelltitor)" },
+      { "type": "fix", "text": "git stack files keep their executable bit when deployed to a Hawser remote host" },
+      { "type": "fix", "text": "a git stack webhook skips a push whose branch is not the one the stack tracks (#1790, PR#1796, @Totopo27)" },
+      { "type": "fix", "text": "the containers and stacks status filter survives a page refresh (#1842)" },
+      { "type": "fix", "text": "git stack files over 10 MB reach a Hawser agent instead of being dropped (#1845)" },
+      { "type": "fix", "text": "env vars used only as placeholders in other env values are no longer flagged unused (#1766, PR#1804, @Totopo27)" },
+      { "type": "fix", "text": "update bundled dependencies (nodemailer, undici)" },
+      { "type": "fix", "text": "detect a same-version rebuild of a floating multi-arch tag by the image the container actually runs (#1848)" },
+      { "type": "fix", "text": "stop sending a container exit notification for a non-terminating signal like a terminal resize (#1849)" },
+      { "type": "fix", "text": "view and download container files whose names contain characters like { } or =" },
+      { "type": "fix", "text": "always show the file action buttons on touch devices (#1776, PR#1854, @Totopo27)" },
+      { "type": "fix", "text": "widen the edit-backup dialog so bind-mount paths are not cut off, with the full path on hover (#1857)" },
+      { "type": "fix", "text": "security hardening: path-write guards, deploy-env filtering, origin checks and framing headers" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.57"
+  },
+  {
+    "version": "1.0.56",
+    "date": "2026-10-30",
+    "changes": [
+      { "type": "fix", "text": "bitwarden bulk pull skips a key that is not a valid environment variable name (#1831)" },
+      { "type": "feature", "text": "Spanish interface translation (PR#1811, @hugomon)" },
+      { "type": "feature", "text": "Russian interface translation (PR#1809, @Kirill901)" },
+      { "type": "feature", "text": "stack redeploy can respect each service's pull_policy and pull newer base images (#1800)" },
+      { "type": "fix", "text": "backups list shows a schedule's snapshots from every destination it has used (#1783)" },
+      { "type": "fix", "text": "scheduled updates retry a rate-limited pull (toomanyrequests) and honour the registry's retry-after (#1268)" },
+      { "type": "fix", "text": "pruning unused images works on older Docker engines (#1490)" },
+      { "type": "fix", "text": "the stacks page update check counts only containers that belong to a stack (#1803)" },
+      { "type": "fix", "text": "git stack deploys notify channels subscribed to stack events, once per deploy (#1295)" },
+      { "type": "fix", "text": "the git stack editor no longer lists a SOPS env file's metadata as variables (#1815)" },
+      { "type": "feature", "text": "wildcard search (* and ?) in the containers and stacks search boxes (#1814)" },
+      { "type": "fix", "text": "self-update keeps a pinned IP and the MAC derived from it (#1816)" },
+      { "type": "fix", "text": "editing a container's env var no longer corrupts a command with embedded quotes (#1821)" },
+      { "type": "feature", "text": "release notes for a held update are available during the cooldown (#1824)" },
+      { "type": "fix", "text": "git stacks over ssh keep the username from the repo url so they log in as the right user (#1828)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.56"
+  },
+  {
+    "version": "1.0.55",
+    "date": "2026-10-23",
+    "changes": [
+      { "type": "feature", "text": "start and stop a container on a schedule (#1178)" },
+      { "type": "feature", "text": "the interface language is kept on the server, so it survives a browser that clears its data (#1795)" },
+      { "type": "fix", "text": "the actions column can be resized in every data grid (#1777, PR#1787, @Totopo27)" },
+      { "type": "fix", "text": "newer version tags are found on GHCR repositories with tens of thousands of tags (#1792)" },
+      { "type": "fix", "text": "a stack that bind-mounts a single file restores, also onto a host where the file is missing (#1793)" },
+      { "type": "fix", "text": "the log view's live streaming toggle shows its state like the other toggles (#1654)" },
+      { "type": "fix", "text": "backup history shows the destination each run used, not the schedule's current one (#1783)" },
+      { "type": "feature", "text": "moved-digest reports on pinned images are now configurable, globally or per container (#1780)" },
+      { "type": "feature", "text": "terminal button in the container details view (#1754, PR#1768, @Totopo27)" },
+      { "type": "fix", "text": "mobile layouts for the containers list and environment tabs (PR#1758, @ddeitterick)" },
+      { "type": "feature", "text": "Psono bulk pull and inline references now read Environment Variables secrets (#1784)" },
+      { "type": "feature", "text": "decrypt a git stack's SOPS-encrypted env file with a new SOPS (age) secret provider (#386, PR#1781, @oha-4)" },
+      { "type": "fix", "text": "update docker-compose to 5.6.0-r2 to pick up its CVE fixes" },
+      { "type": "fix", "text": "update Node.js to 24.22.1 to pick up its October 21, 2026 security fixes" },
+      { "type": "feature", "text": "EXPORT_METRICS_PUBLIC makes /metrics endpoint public, off by default (#1698)" },
+      { "type": "feature", "text": "-lsNNN and -rN tag bumps count as newer versions, with tag.transform and link.template labels (#1703)" },
+      { "type": "feature", "text": "minimum image age visual improvements and dockhand.skip.cooldown label (#1725)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.55"
+  },
+  {
     "version": "1.0.54",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-10-17",
     "changes": [
       { "type": "fix", "text": "a version pattern with four or five parts is no longer refused, and an ignored pattern says why (#1702)" },
       { "type": "fix", "text": "reading pages no longer fails behind an nginx reverse proxy that uses an upstream block (#1707)" },
@@ -15,8 +85,15 @@
       { "type": "fix", "text": "a wider sidebar so translated labels fit (PR#1731, @MagnanGG)" },
       { "type": "fix", "text": "a scheduled update is no longer blocked by a failed scan of an image the registry cannot name (#1737)" },
       { "type": "feature", "text": "Psono as a secret provider, with bulk pull and inline psono:// references" },
+      { "type": "feature", "text": "the secret-provider banner collapses its key list when a stack loads many secrets (#1771)" },
+      { "type": "feature", "text": "filter containers and stacks by \"Untagged\" (#1704, PR#1763, @Totopo27)" },
       { "type": "fix", "text": "bulk operations on stacks over the API no longer fail every item (#1745)" },
-      { "type": "fix", "text": "the update check now reports a newer release on Kubernetes instead of giving up (#1710)" }
+      { "type": "fix", "text": "a quoted value from a .env file no longer keeps its quotes in the form (#1750)" },
+      { "type": "fix", "text": "a dockhand.tags label stays on the container that carries it (#1740, PR#1743, @Totopo27)" },
+      { "type": "fix", "text": "the update check now reports a newer release on Kubernetes instead of giving up (#1710)" },
+      { "type": "fix", "text": "a moved digest on a pinned tag is now reported instead of silently ignored (#1755)" },
+      { "type": "fix", "text": "an unreachable environment no longer fills the log with errors for its own health checks (#1739, PR#1752, @Totopo27)" },
+      { "type": "fix", "text": "a git stack no longer recreates every container when a commit only touched files that do not affect them (#1761, #419, #364)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.54"
   },
