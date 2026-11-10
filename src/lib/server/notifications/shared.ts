@@ -15,12 +15,17 @@ export interface NotificationPayload {
 	environmentId?: number;
 	environmentName?: string;
 	eventType?: string;
+	/** Stable across queued destinations and retries; ordinary providers ignore these. */
+	eventId?: string;
+	timestamp?: string;
 	/**
 	 * Files to attach. Only SMTP can carry these - a webhook channel has nowhere to put
 	 * them, so a payload that NEEDS an attachment must be sent to an SMTP channel.
 	 */
 	attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
 }
+
+export class NotificationEndpointError extends Error {}
 
 export interface NotificationResult {
 	success: boolean;
@@ -36,6 +41,11 @@ const NOTIFICATION_TIMEOUT_MS = (() => {
 	const parsed = Number(process.env.NOTIFICATION_TIMEOUT_MS);
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 10_000;
 })();
+
+/** Retain the configured request timeout when an outbox lease adds an outer deadline. */
+export function notificationTimeoutSignal(outer: AbortSignal): AbortSignal {
+	return AbortSignal.any([outer, AbortSignal.timeout(NOTIFICATION_TIMEOUT_MS)]);
+}
 
 /**
  * fetch() for notification destinations, hardened against SSRF.
@@ -55,7 +65,7 @@ export async function notificationFetch(input: string | URL, init: RequestInit =
 	const target = typeof input === 'string' ? input : input.toString();
 	const safe = isSafeNotificationUrl(target);
 	if (!safe.ok) {
-		throw new Error(`Notification endpoint rejected: ${safe.reason ?? 'unsafe URL'}`);
+		throw new NotificationEndpointError(`Notification endpoint rejected: ${safe.reason ?? 'unsafe URL'}`);
 	}
 	const response = await fetch(input, {
 		...init,
@@ -67,7 +77,7 @@ export async function notificationFetch(input: string | URL, init: RequestInit =
 	// a private host), so treat it as a blocked/failed send.
 	if (response.status >= 300 && response.status < 400) {
 		await drainResponse(response);
-		throw new Error(`Notification endpoint rejected: refusing to follow redirect (status ${response.status})`);
+		throw new NotificationEndpointError(`Notification endpoint rejected: refusing to follow redirect (status ${response.status})`);
 	}
 	return response;
 }

@@ -191,6 +191,33 @@ export const authSettings = sqliteTable('auth_settings', {
 	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 });
 
+// Payload snapshots and destination fingerprints only; credentials stay in notification_settings.
+export const notificationDeliveries = sqliteTable('notification_deliveries', {
+	id: text('id').primaryKey(),
+	eventId: text('event_id').notNull(),
+	notificationId: integer('notification_id').notNull().references(() => notificationSettings.id, { onDelete: 'cascade' }),
+	environmentId: integer('environment_id').references(() => environments.id, { onDelete: 'cascade' }),
+	eventType: text('event_type'),
+	scope: text('scope').notNull(),
+	destinationHash: text('destination_hash').notNull(),
+	body: text('body').notNull(),
+	status: text('status').notNull(),
+	attempts: integer('attempts').notNull().default(0),
+	maxAttempts: integer('max_attempts').notNull(),
+	createdAt: integer('created_at').notNull(),
+	dueAt: integer('due_at').notNull(),
+	expiresAt: integer('expires_at').notNull(),
+	retentionDays: integer('retention_days').notNull(),
+	finishedAt: integer('finished_at'),
+	leaseUntil: integer('lease_until'),
+	leaseToken: text('lease_token'),
+	lastError: text('last_error'),
+	httpStatus: integer('http_status')
+}, (table) => ({
+	dueIdx: index('notification_deliveries_due_idx').on(table.status, table.dueAt),
+	channelIdx: index('notification_deliveries_channel_idx').on(table.notificationId, table.createdAt)
+}));
+
 export const users = sqliteTable('users', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	username: text('username').notNull().unique(),

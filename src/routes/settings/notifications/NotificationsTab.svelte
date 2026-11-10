@@ -10,6 +10,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import NotificationModal from './NotificationModal.svelte';
+	import NotificationDeliveries from './NotificationDeliveries.svelte';
 	import { EmptyState } from '$lib/components/ui/empty-state';
 	import { m } from '$lib/paraglide/messages.js';
 
@@ -270,6 +271,7 @@
 			{/each}
 		</div>
 	{/if}
+	<NotificationDeliveries channels={notifications.filter(n => n.type === 'apprise').map(({ id, name }) => ({ id, name }))} />
 </div>
 
 <NotificationModal

@@ -914,6 +914,7 @@ export const configSets = schemaProxy.configSets;
 export const autoUpdateSettings = schemaProxy.autoUpdateSettings;
 export const scheduledContainerActions = schemaProxy.scheduledContainerActions;
 export const notificationSettings = schemaProxy.notificationSettings;
+export const notificationDeliveries = schemaProxy.notificationDeliveries;
 export const environmentNotifications = schemaProxy.environmentNotifications;
 export const authSettings = schemaProxy.authSettings;
 export const users = schemaProxy.users;

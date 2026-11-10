@@ -162,6 +162,13 @@
       "when": 1793387373201,
       "tag": "0022_add_session_oidc_sub_sid",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1794312000000,
+      "tag": "0023_notification_deliveries",
+      "breakpoints": true
     }
   ]
 }

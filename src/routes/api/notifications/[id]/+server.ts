@@ -11,6 +11,7 @@ import { authorize } from '$lib/server/authorize';
 import { auditNotification } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 import { maskAppriseUrl } from '$lib/server/notifications/events-core';
+import { notificationRetryPolicy } from '$lib/utils/notification-retries';
 import type { RequestHandler } from './$types';
 
 /**
@@ -103,6 +104,9 @@ export const PUT: RequestHandler = async (event) => {
 				}
 			} else if (existing.type === 'apprise') {
 				const appriseConfig = config as AppriseConfig;
+				if (!Array.isArray(appriseConfig.urls) || appriseConfig.urls.some(u => typeof u !== 'string')) {
+					return json({ error: 'Webhook config requires an array of URLs' }, { status: 400 });
+				}
 				// The GET masks each URL to "scheme://********". On save, restore the stored
 				// value for a masked entry (the user did not change it) while keeping edited
 				// and newly added URLs - per entry, so a partial edit or a deletion is not
@@ -124,6 +128,11 @@ export const PUT: RequestHandler = async (event) => {
 					.filter((u): u is string => u !== null);
 				if (!appriseConfig.urls.length) {
 					return json({ error: 'Webhook config requires at least one URL' }, { status: 400 });
+				}
+				try { appriseConfig.retry = notificationRetryPolicy(appriseConfig.retry); }
+				catch (error) { return json({ error: (error as Error).message }, { status: 400 }); }
+				if (appriseConfig.retry.enabled && !appriseConfig.urls.some(u => /^jsons?:\/\//i.test(u))) {
+					return json({ error: 'Persistent webhook retries require a json:// or jsons:// URL' }, { status: 400 });
 				}
 			}
 		}

@@ -19933,6 +19933,195 @@
         ]
       }
     },
+    "/api/notifications/{id}/deliveries": {
+      "get": {
+        "operationId": "get_api_notifications_id_deliveries",
+        "tags": [
+          "notifications"
+        ],
+        "summary": "List JSON webhook delivery metadata (no payloads or destination credentials)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Notification channel ID"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Page number, 25 results per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {}
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "pages": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "page",
+                    "pages"
+                  ]
+                },
+                "example": {
+                  "items": [
+                    {}
+                  ],
+                  "total": 0,
+                  "page": 0,
+                  "pages": 0
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid channel ID or page"
+          },
+          "403": {
+            "description": "Requires notifications:view and access to the delivery environment"
+          },
+          "404": {
+            "description": "Notification channel not found"
+          },
+          "500": {
+            "description": "Could not load notification deliveries"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/notifications/{id}/deliveries/{deliveryId}": {
+      "post": {
+        "operationId": "post_api_notifications_id_deliveries_deliveryId",
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Retry a failed JSON webhook delivery, or discard queued work",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Notification channel ID"
+          },
+          {
+            "name": "deliveryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Delivery ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid action or channel ID"
+          },
+          "403": {
+            "description": "Requires notifications:edit and access to the delivery environment"
+          },
+          "404": {
+            "description": "Delivery not found"
+          },
+          "409": {
+            "description": "Delivery is in flight, already changed, or its destination is no longer enabled"
+          },
+          "500": {
+            "description": "Could not update notification delivery"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              },
+              "example": {
+                "action": "string"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/notifications/{id}/test": {
       "post": {
         "operationId": "post_api_notifications_id_test",
