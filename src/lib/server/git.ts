@@ -2192,9 +2192,9 @@ export function parseEnvFileContent(
 	console.log(`${logPrefix} ----------------------------------------`);
 	console.log(`${logPrefix} PARSE ENV FILE CONTENT`);
 	console.log(`${logPrefix} ----------------------------------------`);
+	// Never log the file itself or any part of a line: .env files hold secrets.
+	// Only lengths, line numbers, keys and the masked values below go to the log.
 	console.log(`${logPrefix} Raw content length:`, content.length, 'chars');
-	console.log(`${logPrefix} Raw content:`);
-	console.log(content);
 
 	const lines = content.split('\n');
 	console.log(`${logPrefix} Total lines:`, lines.length);
@@ -2204,14 +2204,14 @@ export function parseEnvFileContent(
 		const trimmed = line.trim();
 		// Skip empty lines and comments
 		if (!trimmed || trimmed.startsWith('#')) {
-			if (trimmed) skippedLines.push(`Line ${i + 1}: ${trimmed.substring(0, 50)}...`);
+			if (trimmed) skippedLines.push(`Line ${i + 1} (comment)`);
 			continue;
 		}
 
 		// Find the first = sign
 		const eqIndex = trimmed.indexOf('=');
 		if (eqIndex === -1) {
-			skippedLines.push(`Line ${i + 1} (no =): ${trimmed.substring(0, 50)}`);
+			skippedLines.push(`Line ${i + 1} (no =)`);
 			continue;
 		}
 
