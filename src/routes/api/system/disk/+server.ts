@@ -1,12 +1,9 @@
 import { json } from '@sveltejs/kit';
-import { getDiskUsage } from '$lib/server/docker';
+import { getCachedDiskUsage, SKIP_DF_COLLECTION } from '$lib/server/disk-usage-cache';
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
-// Skip disk usage collection (Synology NAS performance fix)
-const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
-
-const DISK_USAGE_TIMEOUT = 15000; // 15 second timeout
+const DISK_USAGE_WAIT_MS = 15000; // how long this request waits for a scan to finish
 
 /**
  * GET /api/system/disk - Docker disk usage for an environment
@@ -43,18 +40,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		return json({ diskUsage: null });
 	}
 
-	try {
-		// Fetch disk usage with timeout
-		const diskUsagePromise = getDiskUsage(envId);
-		const timeoutPromise = new Promise((_, reject) =>
-			setTimeout(() => reject(new Error('Disk usage timeout')), DISK_USAGE_TIMEOUT)
-		);
-
-		const diskUsage = await Promise.race([diskUsagePromise, timeoutPromise]);
-		return json({ diskUsage });
-	} catch (error) {
-		// Return null on timeout or error - UI will show loading/unavailable state
-		console.log(`Disk usage fetch failed for env ${envId}:`, error instanceof Error ? error.message : String(error));
-		return json({ diskUsage: null });
-	}
+	// Shared cache: one /system/df per environment, reused for 5 minutes. If the scan
+	// takes longer than we wait here it keeps running and fills the cache, so the next
+	// request gets the result instead of starting another scan.
+	const diskUsage = await getCachedDiskUsage(envId, DISK_USAGE_WAIT_MS);
+	return json({ diskUsage });
 };
