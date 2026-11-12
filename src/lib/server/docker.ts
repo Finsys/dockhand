@@ -4983,9 +4983,10 @@ globalThis.__terminalResizeContainer = async (containerId, cols, rows, envId) =>
 	await resizeContainer(containerId, cols, rows, envId);
 };
 
-// System disk usage
-export async function getDiskUsage(envId?: number | null) {
-	return dockerJsonRequest('/system/df', {}, envId);
+// System disk usage. Prefer getCachedDiskUsage() from '$lib/server/disk-usage-cache':
+// /system/df can take tens of seconds on NAS storage, so callers should share one scan.
+export async function getDiskUsage(envId?: number | null, signal?: AbortSignal) {
+	return dockerJsonRequest('/system/df', signal ? { signal } : {}, envId);
 }
 
 // Prune operations
