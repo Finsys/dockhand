@@ -99,6 +99,12 @@ describe('notification sends are wired to the log lines', () => {
 		expect(src).toContain('logCovered(eventType, coveredBy, subscribed.filter(s => !kept.includes(s)).map(s => s.name));');
 		expect(src).toMatch(/\.filter\(s => s\.eventTypes\?\.includes\(eventType\)\);\s*const kept = withoutSubscribersOf\(subscribed, coveredBy\);/);
 	});
+
+	test('recreateContainer logs an "update" activity event and emits it to SSE listeners (#1864)', () => {
+		const updaterSrc = readFileSync(new URL('../src/lib/server/scheduler/tasks/container-update.ts', import.meta.url), 'utf8');
+		expect(updaterSrc).toMatch(/logContainerEvent\(\{[\s\S]*?action:\s*'update'[\s\S]*?\}\)/);
+		expect(updaterSrc).toContain("containerEventEmitter.emit('event', savedEvent);");
+	});
 });
 
 describe('maskAppriseUrl', () => {
