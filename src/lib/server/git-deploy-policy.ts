@@ -57,6 +57,17 @@ export function isDeployFailure(syncStatus: string | null | undefined, syncError
 	return syncStatus === 'error' && typeof syncError === 'string' && syncError.startsWith(DEPLOY_FAILURE_PREFIX);
 }
 
+/** Error syncGitStack returns when another sync of the same stack is still running. */
+export const SYNC_IN_PROGRESS_ERROR = 'Sync already in progress';
+
+/**
+ * Whether a failed sync was only skipped because another sync of the stack is still
+ * running. That run records and notifies for itself, so this one is not a failure.
+ */
+export function isConcurrentSyncSkip(error: string | null | undefined): boolean {
+	return typeof error === 'string' && error.includes(SYNC_IN_PROGRESS_ERROR);
+}
+
 /**
  * The deploy + force-recreate decision for one git sync, from the full context, so the
  * rule "a git change deploys but does not force-recreate" is a behavioural unit test

@@ -26,7 +26,7 @@ import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
-import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX } from './git-deploy-policy';
+import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX, isConcurrentSyncSkip } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
 import { expandValue } from '$lib/utils/env-file-values';
 import { envFileFormVars } from './secretproviders/sops-core';
@@ -1424,7 +1424,8 @@ export async function deployGitStack(
 		// a recorder error must never change the notify/return workflow below. Skip the
 		// benign "Sync already in progress" overlap -- it's a concurrency skip, not a
 		// deploy failure, and recording it would clutter history with false failures.
-		if (!(syncResult.error ?? '').includes('Sync already in progress')) {
+		const concurrentSync = isConcurrentSyncSkip(syncResult.error);
+		if (!concurrentSync) {
 			try {
 				const failRecorder = await createRunRecorder({
 					stackName: gitStack.stackName,
@@ -1442,11 +1443,12 @@ export async function deployGitStack(
 				console.error(`${logPrefix} Failed to record git sync failure:`, e);
 			}
 		}
-		// A sync running elsewhere is not a failed deploy; that deploy notifies for itself.
-		if (!(syncResult.error ?? '').includes('Sync already in progress')) {
+		// A sync running elsewhere is neither a failed deploy nor a failed sync; that run
+		// notifies for itself, so a git_sync_failed here would be a false alarm.
+		if (!concurrentSync) {
 			await notifyStackDeploy(gitStack.stackName, gitStack.environmentId, failResult, true);
+			await notifyGitSync(gitStack.stackName, gitStack.environmentId, failResult);
 		}
-		await notifyGitSync(gitStack.stackName, gitStack.environmentId, failResult);
 		return failResult;
 	}
 

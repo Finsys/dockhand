@@ -7,7 +7,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { shouldDeployGitStack, shouldForceRecreateGitStack, gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX } from '../src/lib/server/git-deploy-policy';
+import { shouldDeployGitStack, shouldForceRecreateGitStack, gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX, isConcurrentSyncSkip } from '../src/lib/server/git-deploy-policy';
 
 describe('shouldDeployGitStack', () => {
 	test('deploys on a real git change', () => {
@@ -129,5 +129,24 @@ describe('isDeployFailure', () => {
 
 	test('the prefix must lead, not merely appear', () => {
 		expect(isDeployFailure('error', `clone said: ${DEPLOY_FAILURE_PREFIX}x`)).toBe(false);
+	});
+});
+
+describe('isConcurrentSyncSkip', () => {
+	// A sync already running elsewhere is not a failure: that run records and notifies
+	// for itself, so this one must not send stack_deploy_failed or git_sync_failed.
+	test('the overlap returned by syncGitStack is a concurrent skip', () => {
+		expect(isConcurrentSyncSkip('Sync already in progress')).toBe(true);
+	});
+
+	test('a real sync failure is not a concurrent skip', () => {
+		expect(isConcurrentSyncSkip('Git clone failed: Permission denied (publickey)')).toBe(false);
+		expect(isConcurrentSyncSkip('Repository not found')).toBe(false);
+	});
+
+	test('a missing error is not a concurrent skip', () => {
+		expect(isConcurrentSyncSkip(undefined)).toBe(false);
+		expect(isConcurrentSyncSkip(null)).toBe(false);
+		expect(isConcurrentSyncSkip('')).toBe(false);
 	});
 });
