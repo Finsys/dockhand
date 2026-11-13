@@ -97,9 +97,36 @@
 		}
 	});
 
+	function isSshUrl(url: string) {
+		const u = (url || '').trim();
+		if (!u) return false;
+		if (u.startsWith('git@') || u.startsWith('ssh://')) return true;
+		const schemeMatch = u.match(/^[a-z][a-z0-9+.-]*:/i);
+		if (schemeMatch) {
+			return schemeMatch[0].slice(0, -1).toLowerCase() === 'ssh';
+		}
+		const colonIdx = u.indexOf(':');
+		return colonIdx > 0;
+	}
+
+	function validateAuthCompatibility(): string | null {
+		const cred = credentials.find(c => c.id === formCredentialId);
+		if (cred?.authType === 'password' && isSshUrl(formUrl)) {
+			return 'Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.';
+		}
+		return null;
+	}
+
 	async function testRepository() {
 		if (!formUrl.trim()) {
 			formErrors.url = m.settings_git_error_url_required_to_test();
+			return;
+		}
+
+		const authError = validateAuthCompatibility();
+		if (authError) {
+			testResult = { success: false, error: authError };
+			toast.error(authError);
 			return;
 		}
 
@@ -145,6 +172,13 @@
 		}
 
 		if (formErrors.name || formErrors.url) {
+			return;
+		}
+
+		const authError = validateAuthCompatibility();
+		if (authError) {
+			formError = authError;
+			toast.error(authError);
 			return;
 		}
 
@@ -232,7 +266,16 @@
 					bind:value={formUrl}
 					placeholder={m.settings_git_repo_url_placeholder()}
 					class={formErrors.url ? 'border-destructive focus-visible:ring-destructive' : ''}
-					oninput={() => { formErrors.url = undefined; testResult = null; }}
+					oninput={() => {
+						formErrors.url = undefined;
+						testResult = null;
+						if (isSshUrl(formUrl)) {
+							const cred = credentials.find(c => c.id === formCredentialId);
+							if (cred?.authType === 'password') {
+								formCredentialId = null;
+							}
+						}
+					}}
 				/>
 				{#if formErrors.url}
 					<p class="text-xs text-destructive">{formErrors.url}</p>
@@ -274,7 +317,8 @@
 							</span>
 						</Select.Item>
 						{#each credentials as cred}
-							<Select.Item value={cred.id.toString()}>
+							{@const disabled = cred.authType === 'password' && isSshUrl(formUrl)}
+							<Select.Item value={cred.id.toString()} {disabled}>
 								<span class="flex items-center gap-2">
 									{#if cred.authType === 'ssh'}
 										<KeyRound class="w-4 h-4 text-muted-foreground" />
@@ -283,7 +327,7 @@
 									{:else}
 										<Key class="w-4 h-4 text-muted-foreground" />
 									{/if}
-									{cred.name} ({getAuthLabel(cred.authType)})
+									{cred.name} ({getAuthLabel(cred.authType)}){#if disabled} (unsupported with SSH){/if}
 								</span>
 							</Select.Item>
 						{/each}

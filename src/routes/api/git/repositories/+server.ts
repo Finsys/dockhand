@@ -7,6 +7,7 @@ import {
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditGitRepository } from '$lib/server/audit';
+import { isSshRepoUrl } from '$lib/server/git-error';
 
 /**
  * @openapi
@@ -74,6 +75,11 @@ export const POST: RequestHandler = async (event) => {
 			const credential = credentials.find(c => c.id === data.credentialId);
 			if (!credential) {
 				return json({ error: 'Invalid credential ID' }, { status: 400 });
+			}
+			if (credential.authType === 'password' && isSshRepoUrl(data.url)) {
+				return json({
+					error: 'Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.'
+				}, { status: 400 });
 			}
 		}
 

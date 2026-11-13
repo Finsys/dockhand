@@ -12,6 +12,7 @@ import { deleteRepositoryFiles, deleteGitStackFiles } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 import { auditGitRepository } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
+import { isSshRepoUrl } from '$lib/server/git-error';
 
 /**
  * @openapi
@@ -88,11 +89,26 @@ export const PUT: RequestHandler = async (event) => {
 		const data = await request.json();
 
 		// Validate credential if provided
+		const targetUrl = data.url ?? existing.url;
 		if (data.credentialId) {
 			const credentials = await getGitCredentials();
 			const credential = credentials.find(c => c.id === data.credentialId);
 			if (!credential) {
 				return json({ error: 'Invalid credential ID' }, { status: 400 });
+			}
+			if (credential.authType === 'password' && isSshRepoUrl(targetUrl)) {
+				return json({
+					error: 'Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.'
+				}, { status: 400 });
+			}
+		} else if (data.credentialId === undefined && existing.credentialId && data.url) {
+			// Credential unchanged, but URL changed
+			const credentials = await getGitCredentials();
+			const credential = credentials.find(c => c.id === existing.credentialId);
+			if (credential?.authType === 'password' && isSshRepoUrl(data.url)) {
+				return json({
+					error: 'Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.'
+				}, { status: 400 });
 			}
 		}
 

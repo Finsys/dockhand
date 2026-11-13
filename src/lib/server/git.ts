@@ -3,7 +3,7 @@ import { join, resolve, dirname, basename, relative } from 'node:path';
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { GIT_SSH_KEY_PATH_ENV, makeSshKeyPath, removeSshKey } from './git-ssh-key';
-import { permissionDeniedMessage } from './git-error';
+import { permissionDeniedMessage, isSshRepoUrl } from './git-error';
 import {
 	getGitRepository,
 	getGitCredential,
@@ -633,6 +633,13 @@ async function testRepositoryConnection(options: {
 }): Promise<TestResult> {
 	const { url, branch, credential } = options;
 
+	if (credential?.authType === 'password' && isSshRepoUrl(url)) {
+		return {
+			success: false,
+			error: 'Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.'
+		};
+	}
+
 	const env = await buildGitEnv(credential);
 	assertSafeGitRef(branch);
 	const repoUrl = buildRepoUrl(url, credential);
@@ -787,6 +794,13 @@ export async function listRemoteBranches(options: {
 
 	// Fetch credential from database if credentialId is provided
 	const credential = credentialId ? await getGitCredential(credentialId) : null;
+
+	if (credential?.authType === 'password' && isSshRepoUrl(url)) {
+		return {
+			branches: [],
+			error: 'Password/token authentication is not supported with SSH repository URLs (ssh:// or git@...). Use an SSH key credential or switch the repository URL to https://.'
+		};
+	}
 
 	const env = await buildGitEnv(credential);
 	const repoUrl = buildRepoUrl(url, credential);
