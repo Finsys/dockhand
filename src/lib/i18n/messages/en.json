@@ -6917,5 +6917,12 @@
 	"settings_general_stack_log_op_stop": "Stop",
 	"settings_general_stack_log_op_restart": "Restart / recreate",
 	"settings_general_stack_log_op_deploy": "Deploy / redeploy",
-	"settings_general_stack_log_op_down": "Down"
+	"settings_general_stack_log_op_down": "Down",
+	"security_exposure_title": "Unsecured exposure",
+	"security_exposure_risk": "This Dockhand is listening beyond localhost, authentication is disabled, and the Docker socket is mounted read-write. In this state anyone who can reach it can create containers on the host - which means full control of this machine.",
+	"security_exposure_enable_auth_before": "If this instance is reachable from the internet, enable authentication in",
+	"security_exposure_enable_auth_path": "Settings > Authentication",
+	"security_exposure_enable_auth_after": "and create an admin user. Even with authentication on, keep Dockhand behind a firewall or VPN - it is an admin interface for Docker and should never be exposed directly.",
+	"security_exposure_dont_show_again": "I am aware, do not show this again",
+	"security_exposure_dismiss": "Got it"
 }

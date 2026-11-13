@@ -7255,5 +7255,12 @@
 	"settings_general_stack_log_op_stop": "Stoppen",
 	"settings_general_stack_log_op_restart": "Neu starten / neu erstellen",
 	"settings_general_stack_log_op_deploy": "Bereitstellen / neu bereitstellen",
-	"settings_general_stack_log_op_down": "Herunterfahren"
+	"settings_general_stack_log_op_down": "Herunterfahren",
+	"security_exposure_title": "Ungeschützt erreichbar",
+	"security_exposure_risk": "Dieses Dockhand lauscht über localhost hinaus, die Authentifizierung ist deaktiviert und der Docker-Socket ist mit Schreibzugriff eingebunden. In diesem Zustand kann jeder, der es erreicht, Container auf dem Host erstellen - und damit diese Maschine vollständig kontrollieren.",
+	"security_exposure_enable_auth_before": "Wenn diese Instanz aus dem Internet erreichbar ist, aktiviere die Authentifizierung unter",
+	"security_exposure_enable_auth_path": "Einstellungen > Authentifizierung",
+	"security_exposure_enable_auth_after": "und lege einen Admin-Benutzer an. Auch mit Authentifizierung sollte Dockhand hinter einer Firewall oder einem VPN bleiben - es ist eine Admin-Oberfläche für Docker und darf nie direkt erreichbar sein.",
+	"security_exposure_dont_show_again": "Ich bin mir dessen bewusst, nicht mehr anzeigen",
+	"security_exposure_dismiss": "Verstanden"
 }
