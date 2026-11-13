@@ -54,7 +54,7 @@ let pendingStore: any[] = phase.includes('keep-on-error')
 		: [];
 const environment = { id: 1, name: 'test', connectionType: 'direct', protocol: 'http', host: 'daemon.test', port: 2375 };
 const db = {
-	setEnvSetting: noop, deleteSetting: noop,
+	getEnvSetting: async () => null, setEnvSetting: noop, deleteSetting: noop,
 	getSetting: async () => phase === 'metadata-info-failure' ? 72 : null, setSetting: noop, getEnvironment: async (id: number) => id === 2 && phase !== 'metadata-info-failure' ? { ...environment, id: 2, host: 'destination.test' } : environment,
 	getSecretKeysToMask: async () => new Set(),
 	getRegistries: async () => [], getAutoUpdateSettingById: async () => ({ vulnerabilityCriteria: 'never' }),

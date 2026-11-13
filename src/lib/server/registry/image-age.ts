@@ -57,6 +57,22 @@ type FetchMetadata = (url: string, init: RequestInit) => Promise<Response>;
  * hash-verified, including the selected platform manifest and its config blob.
  * Unknown/ambiguous metadata returns null so callers use first observation. */
 export async function fetchImageCreatedAt(request: ImageAgeRequest, fetchMetadata: FetchMetadata = fetch): Promise<string | null> {
+	return (await fetchImageConfigMetadata(request, fetchMetadata))?.createdAt ?? null;
+}
+
+export interface ImageConfigMetadata {
+	/** The platform image's config digest: what Docker reports as the image ID. */
+	configDigest: string;
+	createdAt: string | null;
+}
+
+/**
+ * The same walk as fetchImageCreatedAt, also returning the config digest it ends on.
+ * Two tags whose indexes differ (another arch rebuilt, attestations re-pushed, a
+ * re-tag through `imagetools create`) still carry the SAME image for one platform
+ * when this digest matches, which no manifest digest can tell.
+ */
+export async function fetchImageConfigMetadata(request: ImageAgeRequest, fetchMetadata: FetchMetadata = fetch): Promise<ImageConfigMetadata | null> {
 	try {
 		const { registry, repo, platform } = request;
 		if (!validDigest(request.digest) || !repo.split('/').every(part => /^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$/.test(part))) return null;
@@ -87,7 +103,7 @@ export async function fetchImageCreatedAt(request: ImageAgeRequest, fetchMetadat
 			};
 			if (body?.os !== platform.os || body.architecture !== platform.architecture) return null;
 			if (platform.variant && body.variant && body.variant !== platform.variant) return null;
-			return validImageCreatedAt(body.created);
+			return { configDigest: config.digest, createdAt: validImageCreatedAt(body.created) };
 		}
 		return null;
 
