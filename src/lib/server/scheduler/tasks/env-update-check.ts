@@ -46,7 +46,7 @@ import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '../../container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, shouldEnforceReleaseAgeOnScheduledPull, isDigestWatchDisabledByLabel } from '../../container-labels';
 import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
 import { tagTransformFromLabels } from '$lib/server/semver/tag-transform';
 import { recreateContainer } from './container-update';
@@ -61,6 +61,7 @@ interface UpdateInfo {
 	newDigest?: string;
 	// OLD image Env/Labels captured before any pull — for the rebase (#1226, #1256).
 	oldImageConfig?: ImageEnvLabels | null;
+	skipCooldown?: boolean;
 }
 
 // Track running update checks to prevent concurrent execution
@@ -205,10 +206,11 @@ export async function runEnvUpdateCheckJob(
 				if (throttle.isThrottled(imageName)) {
 					await log(`    Registry kept rate limiting earlier in this run - checking once, without retries`);
 				}
+				const skipCooldown = isCooldownSkippedByLabel(inspectData.Config?.Labels);
 				const result = await withCheckRetry(() => checkImageUpdateAvailable(
 					imageName, currentImageId, environmentId,
 					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels),
-					isCooldownSkippedByLabel(inspectData.Config?.Labels),
+					skipCooldown,
 					!isDigestWatchDisabledByLabel(inspectData.Config?.Labels)
 				), { log: (m) => log(`    ${m}`), label: `${container.name} (${imageName}), env ${env.name}`, delays: throttle.delays(imageName) });
 				throttle.noteCheck(imageName, result.error);
@@ -261,7 +263,8 @@ export async function runEnvUpdateCheckJob(
 						currentImageId,
 						currentDigest: result.currentDigest,
 						newDigest: result.registryDigest,
-						oldImageConfig
+						oldImageConfig,
+						skipCooldown
 					});
 					await log(`    UPDATE AVAILABLE`);
 					await log(`      Current: ${result.currentDigest?.substring(0, 24) || 'unknown'}...`);
@@ -450,7 +453,7 @@ export async function runEnvUpdateCheckJob(
 
 						// Step 1: Pull new image
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`), label: `${update.containerName} (${update.imageName}), env ${env.name}`, delays: throttle.delays(update.imageName) });
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, shouldEnforceReleaseAgeOnScheduledPull(update.skipCooldown)), { log: (m) => log(`  ${m}`), label: `${update.containerName} (${update.imageName}), env ${env.name}`, delays: throttle.delays(update.imageName) });
 						throttle.notePull(update.imageName, null);
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
@@ -572,7 +575,7 @@ export async function runEnvUpdateCheckJob(
 					} else {
 						// Simple pull (no scanning or digest-based image)
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`), label: `${update.containerName} (${update.imageName}), env ${env.name}`, delays: throttle.delays(update.imageName) });
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, shouldEnforceReleaseAgeOnScheduledPull(update.skipCooldown)), { log: (m) => log(`  ${m}`), label: `${update.containerName} (${update.imageName}), env ${env.name}`, delays: throttle.delays(update.imageName) });
 						throttle.notePull(update.imageName, null);
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;

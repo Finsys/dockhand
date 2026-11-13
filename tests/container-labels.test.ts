@@ -23,6 +23,7 @@ import {
 	DOCKHAND_LABELS,
 	isDigestWatchDisabledByLabel,
 	isCooldownSkippedByLabel,
+	shouldEnforceReleaseAgeOnScheduledPull,
 	digestUpdateVisible,
 	pinnedDigestReportVisible
 } from '../src/lib/server/container-labels';
@@ -588,5 +589,25 @@ describe('isCooldownSkippedByLabel (dockhand.skip.cooldown=true exempts from the
 	test('an unparseable value keeps the cooldown', () => {
 		expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': 'maybe' })).toBe(false);
 		expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': '' })).toBe(false);
+	});
+});
+
+describe('shouldEnforceReleaseAgeOnScheduledPull', () => {
+	test('enforces cooldown by default (safe default for scheduled updates)', () => {
+		expect(shouldEnforceReleaseAgeOnScheduledPull(undefined)).toBe(true);
+		expect(shouldEnforceReleaseAgeOnScheduledPull(null)).toBe(true);
+		expect(shouldEnforceReleaseAgeOnScheduledPull({})).toBe(true);
+		expect(shouldEnforceReleaseAgeOnScheduledPull(false)).toBe(true);
+	});
+
+	test('skips cooldown when skipCooldown is true or label is dockhand.skip.cooldown=true', () => {
+		expect(shouldEnforceReleaseAgeOnScheduledPull(true)).toBe(false);
+		expect(shouldEnforceReleaseAgeOnScheduledPull({ 'dockhand.skip.cooldown': 'true' })).toBe(false);
+		expect(shouldEnforceReleaseAgeOnScheduledPull({ 'dockhand.skip.cooldown': '1' })).toBe(false);
+	});
+
+	test('enforces cooldown when label is false or unrecognized', () => {
+		expect(shouldEnforceReleaseAgeOnScheduledPull({ 'dockhand.skip.cooldown': 'false' })).toBe(true);
+		expect(shouldEnforceReleaseAgeOnScheduledPull({ 'dockhand.skip.cooldown': 'maybe' })).toBe(true);
 	});
 });
