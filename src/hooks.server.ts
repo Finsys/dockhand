@@ -4,6 +4,7 @@ import '$lib/server/dns-dispatcher.js';
 import { initDatabase, hasAnyUser } from '$lib/server/db';
 import { startSubprocesses, stopSubprocesses } from '$lib/server/subprocess-manager';
 import { startScheduler } from '$lib/server/scheduler';
+import { startNotificationOutbox, stopNotificationOutbox } from '$lib/server/notifications/outbox';
 import { isAuthEnabled, validateSession, SESSION_COOKIE } from '$lib/server/auth';
 import { validateApiToken } from '$lib/server/api-tokens';
 import { requestContext } from '$lib/server/request-context';
@@ -194,6 +195,7 @@ if (!initialized) {
 		// migration/rotation has settled, so a scheduled backup can't decrypt a
 		// destination password mid-rotation (new key against old-key ciphertext).
 		credentialsReady.then(() => {
+			startNotificationOutbox();
 			startSubprocesses().catch(err => {
 				console.error('Failed to start background subprocesses:', err);
 			});
@@ -217,6 +219,7 @@ if (!initialized) {
 		const shutdown = async () => {
 			console.log('[Server] Shutting down...');
 			stopRssTracker();
+			await stopNotificationOutbox();
 			await stopSubprocesses();
 			process.exit(0);
 		};

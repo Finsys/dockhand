@@ -9,6 +9,7 @@ import {
 import { authorize } from '$lib/server/authorize';
 import { auditNotification } from '$lib/server/audit';
 import { maskAppriseUrl } from '$lib/server/notifications/events-core';
+import { notificationRetryPolicy } from '$lib/utils/notification-retries';
 import type { RequestHandler } from './$types';
 
 /**
@@ -80,8 +81,13 @@ export const POST: RequestHandler = async (event) => {
 			}
 		} else if (type === 'apprise') {
 			const appriseConfig = config as AppriseConfig;
-			if (!appriseConfig.urls?.length) {
+			if (!Array.isArray(appriseConfig.urls) || !appriseConfig.urls.length || appriseConfig.urls.some(u => typeof u !== 'string')) {
 				return json({ error: 'Webhook config requires at least one URL' }, { status: 400 });
+			}
+			try { appriseConfig.retry = notificationRetryPolicy(appriseConfig.retry); }
+			catch (error) { return json({ error: (error as Error).message }, { status: 400 }); }
+			if (appriseConfig.retry.enabled && !appriseConfig.urls.some(u => /^jsons?:\/\//i.test(u))) {
+				return json({ error: 'Persistent webhook retries require a json:// or jsons:// URL' }, { status: 400 });
 			}
 		}
 

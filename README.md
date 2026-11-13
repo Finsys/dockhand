@@ -27,6 +27,7 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 - **Terminal & Logs**: Interactive shell access and real-time log streaming
 - **File Browser**: Browse, upload, and download files from containers
 - **Backups**: Restic destinations with scheduled backup, restore, check, and prune operations
+- **Webhook Reliability**: Opt-in [persistent JSON webhook retries and delivery history](docs/notification-retries.md)
 - **Authentication**: SSO via OIDC, local users, and optional RBAC (Enterprise)
 
 ## Tech Stack

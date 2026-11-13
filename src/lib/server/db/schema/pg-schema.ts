@@ -192,6 +192,32 @@ export const authSettings = pgTable('auth_settings', {
 	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
 });
 
+export const notificationDeliveries = pgTable('notification_deliveries', {
+	id: text('id').primaryKey(),
+	eventId: text('event_id').notNull(),
+	notificationId: integer('notification_id').notNull().references(() => notificationSettings.id, { onDelete: 'cascade' }),
+	environmentId: integer('environment_id').references(() => environments.id, { onDelete: 'cascade' }),
+	eventType: text('event_type'),
+	scope: text('scope').notNull(),
+	destinationHash: text('destination_hash').notNull(),
+	body: text('body').notNull(),
+	status: text('status').notNull(),
+	attempts: integer('attempts').notNull().default(0),
+	maxAttempts: integer('max_attempts').notNull(),
+	createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+	dueAt: bigint('due_at', { mode: 'number' }).notNull(),
+	expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+	retentionDays: integer('retention_days').notNull(),
+	finishedAt: bigint('finished_at', { mode: 'number' }),
+	leaseUntil: bigint('lease_until', { mode: 'number' }),
+	leaseToken: text('lease_token'),
+	lastError: text('last_error'),
+	httpStatus: integer('http_status')
+}, (table) => ({
+	dueIdx: index('notification_deliveries_due_idx').on(table.status, table.dueAt),
+	channelIdx: index('notification_deliveries_channel_idx').on(table.notificationId, table.createdAt)
+}));
+
 export const users = pgTable('users', {
 	id: serial('id').primaryKey(),
 	username: text('username').notNull().unique(),

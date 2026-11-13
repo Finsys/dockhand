@@ -12,6 +12,7 @@
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
 	import { m } from '$lib/paraglide/messages.js';
+	import { DEFAULT_NOTIFICATION_RETRY_POLICY } from '$lib/utils/notification-retries';
 
 	// System-only events (configured at channel level, not per-environment)
 	const SYSTEM_EVENTS = [
@@ -61,6 +62,7 @@
 	let formSmtpToEmails = $state('');
 	// Apprise specific
 	let formAppriseUrls = $state('');
+	let formRetry = $state({ ...DEFAULT_NOTIFICATION_RETRY_POLICY });
 	// System events
 	let formSystemEvents = $state<string[]>([]);
 	let activeTab = $state<'channel' | 'events'>('channel');
@@ -84,6 +86,7 @@
 		formSmtpFromName = '';
 		formSmtpToEmails = '';
 		formAppriseUrls = '';
+		formRetry = { ...DEFAULT_NOTIFICATION_RETRY_POLICY };
 		formSystemEvents = [];
 		activeTab = 'channel';
 		formError = '';
@@ -116,6 +119,7 @@
 					formSmtpToEmails = notification.config.to_emails?.join(', ') || '';
 				} else {
 					formAppriseUrls = notification.config.urls?.join('\n') || '';
+					formRetry = { ...DEFAULT_NOTIFICATION_RETRY_POLICY, ...notification.config.retry };
 				}
 
 				// Load system events (filter to only system-scoped events)
@@ -153,7 +157,8 @@
 			};
 		} else {
 			return {
-				urls: formAppriseUrls.split('\n').map(u => u.trim()).filter(Boolean)
+				urls: formAppriseUrls.split('\n').map(u => u.trim()).filter(Boolean),
+				retry: { ...formRetry }
 			};
 		}
 	}
@@ -468,6 +473,20 @@ zabbixs://hostname/api_jsonrpc.php?token=TOKEN&amp;host=HOST&amp;key=ITEM_KEY"
 					<p class="text-xs text-muted-foreground">
 						{m.settings_notifications_builtin_channels()}
 					</p>
+					<div class="space-y-3 rounded-md border p-3">
+						<div class="flex items-center justify-between gap-3">
+							<span class="text-sm font-medium">{m.settings_notifications_retry_title()}</span>
+							<TogglePill checked={formRetry.enabled} onchange={(checked) => formRetry.enabled = checked} />
+						</div>
+						<p class="text-xs text-muted-foreground">{m.settings_notifications_retry_hint()}</p>
+						{#if formRetry.enabled}
+							<div class="grid gap-3 sm:grid-cols-3">
+								<div class="space-y-1"><Label for="webhook-attempts">{m.settings_notifications_retry_attempts()}</Label><Input id="webhook-attempts" type="number" min={1} max={20} bind:value={formRetry.maxAttempts} /></div>
+								<div class="space-y-1"><Label for="webhook-age">{m.settings_notifications_retry_age()}</Label><Input id="webhook-age" type="number" min={1} max={10080} bind:value={formRetry.maxAgeMinutes} /></div>
+								<div class="space-y-1"><Label for="webhook-retention">{m.settings_notifications_retry_retention()}</Label><Input id="webhook-retention" type="number" min={1} max={30} bind:value={formRetry.retentionDays} /></div>
+							</div>
+						{/if}
+					</div>
 					<p class="flex gap-1.5 text-xs text-muted-foreground">
 						<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
 						<span>{m.settings_notifications_apprise_hint_before()} <a href="https://github.com/caronc/apprise-api" target="_blank" rel="noopener">caronc/apprise-api</a> {m.settings_notifications_apprise_hint_server()} <code>apprise://host/key</code> {m.settings_notifications_apprise_hint_or()} <code>apprises://</code> {m.settings_notifications_apprise_hint_tls()} <code>apprise://user:pass@host/key</code> {m.settings_notifications_apprise_hint_after()}</span>

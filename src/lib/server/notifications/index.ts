@@ -45,15 +45,21 @@ import { sendMqtt } from './mqtt';
 import { sendGenericWebhook } from './generic-webhook';
 import { sendWorkflows } from './workflows';
 import { sendZabbix } from './zabbix';
+import { deliverQueuedWebhook, notificationEventSnapshot } from './outbox';
+import { notificationRetryPolicy, type NotificationDeliveryScope } from '$lib/utils/notification-retries';
 
 // Send to every URL in an Apprise channel. Errors are aggregated so a single
 // bad URL doesn't silently mask a healthy one.
-async function sendAppriseNotification(config: AppriseConfig, payload: NotificationPayload): Promise<NotificationResult> {
+async function sendAppriseNotification(config: AppriseConfig, payload: NotificationPayload, notificationId?: number,
+	scope: NotificationDeliveryScope = 'broadcast'): Promise<NotificationResult> {
 	const errors: string[] = [];
+	const retry = notificationRetryPolicy(config.retry);
 
 	for (const url of config.urls) {
 		try {
-			const result = await sendToAppriseUrl(url, payload);
+			const result = retry.enabled && notificationId !== undefined && /^jsons?:\/\//i.test(url)
+				? await deliverQueuedWebhook(notificationId, url, payload, retry, scope)
+				: await sendToAppriseUrl(url, payload);
 			if (!result.success && result.error) {
 				errors.push(result.error);
 			}
@@ -136,6 +142,7 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 // ---------------------------------------------------------------------------
 
 export async function sendNotification(payload: NotificationPayload): Promise<{ success: boolean; results: { name: string; success: boolean }[] }> {
+	payload = notificationEventSnapshot(payload);
 	const settings = await getEnabledNotificationSettings();
 	const results: { name: string; success: boolean }[] = [];
 
@@ -145,7 +152,7 @@ export async function sendNotification(payload: NotificationPayload): Promise<{ 
 		if (setting.type === 'smtp') {
 			result = await sendSmtpNotification(setting.config as SmtpConfig, payload);
 		} else if (setting.type === 'apprise') {
-			result = await sendAppriseNotification(setting.config as AppriseConfig, payload);
+			result = await sendAppriseNotification(setting.config as AppriseConfig, payload, setting.id);
 		}
 
 		results.push({ name: setting.name, success: result.success });
@@ -210,12 +217,12 @@ export async function sendEnvironmentNotification(
 		return { success: true, sent: 0 };
 	}
 
-	const enrichedPayload: NotificationPayload = {
+	const enrichedPayload: NotificationPayload = notificationEventSnapshot({
 		...payload,
 		eventType,
 		environmentId,
 		environmentName: env.name
-	};
+	});
 
 	// Skip all notifications for scanner containers (Trivy, Grype)
 	if (isScannerContainer(image)) {
@@ -231,7 +238,7 @@ export async function sendEnvironmentNotification(
 			if (notif.channelType === 'smtp') {
 				result = await sendSmtpNotification(notif.config as SmtpConfig, enrichedPayload);
 			} else if (notif.channelType === 'apprise') {
-				result = await sendAppriseNotification(notif.config as AppriseConfig, enrichedPayload);
+				result = await sendAppriseNotification(notif.config as AppriseConfig, enrichedPayload, notif.notificationId, 'environment');
 			}
 			logDelivery(eventType, notif.channelName, notif.channelType, result);
 			if (result.success) sent++;
@@ -274,6 +281,7 @@ export async function sendEventNotification(
 	}
 
 	let channels: Array<{
+		id: number;
 		channel_type: 'smtp' | 'apprise';
 		channel_name: string;
 		config: SmtpConfig | AppriseConfig;
@@ -286,6 +294,7 @@ export async function sendEventNotification(
 		channels = kept
 			.filter(n => n.channelType && n.channelName)
 			.map(n => ({
+				id: n.notificationId,
 				channel_type: n.channelType!,
 				channel_name: n.channelName!,
 				config: n.config
@@ -296,6 +305,7 @@ export async function sendEventNotification(
 		logCovered(eventType, coveredBy, subscribed.filter(s => !kept.includes(s)).map(s => s.name));
 		channels = kept
 			.map(s => ({
+				id: s.id,
 				channel_type: s.type,
 				channel_name: s.name,
 				config: s.config
@@ -306,6 +316,7 @@ export async function sendEventNotification(
 		return { success: true, sent: 0 };
 	}
 
+	enrichedPayload = notificationEventSnapshot(enrichedPayload);
 	let sent = 0;
 	let allSuccess = true;
 
@@ -315,7 +326,8 @@ export async function sendEventNotification(
 			if (channel.channel_type === 'smtp') {
 				result = await sendSmtpNotification(channel.config as SmtpConfig, enrichedPayload);
 			} else if (channel.channel_type === 'apprise') {
-				result = await sendAppriseNotification(channel.config as AppriseConfig, enrichedPayload);
+				result = await sendAppriseNotification(channel.config as AppriseConfig, enrichedPayload, channel.id,
+					environmentId ? 'environment' : 'system');
 			}
 			logDelivery(eventType, channel.channel_name, channel.channel_type, result);
 			if (result.success) sent++;

@@ -34,6 +34,7 @@ import {
 	autoUpdateSettings,
 	scheduledContainerActions,
 	notificationSettings,
+	notificationDeliveries,
 	environmentNotifications,
 	authSettings,
 	users,
@@ -1229,6 +1230,7 @@ export interface SmtpConfig {
 
 export interface AppriseConfig {
 	urls: string[];
+	retry?: import('$lib/utils/notification-retries').NotificationRetryPolicy;
 }
 
 // Helper to encrypt sensitive fields in notification config
@@ -1319,6 +1321,11 @@ export async function updateNotificationSetting(id: number, data: {
 	if (data.eventTypes !== undefined) updateData.eventTypes = JSON.stringify(data.eventTypes);
 
 	await db.update(notificationSettings).set(updateData).where(eq(notificationSettings.id, id));
+	if (data.enabled === false || (data.config && existing.type === 'apprise' && !(data.config as AppriseConfig).retry?.enabled)) {
+		await db.update(notificationDeliveries).set({ status: 'cancelled', finishedAt: Date.now(),
+			lastError: 'Destination disabled', leaseToken: null, leaseUntil: null })
+			.where(and(eq(notificationDeliveries.notificationId, id), eq(notificationDeliveries.status, 'pending')));
+	}
 	return getNotificationSetting(id);
 }
 
