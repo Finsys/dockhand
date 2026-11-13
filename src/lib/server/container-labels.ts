@@ -172,6 +172,20 @@ export function isCooldownSkippedByLabel(labels: Record<string, string> | undefi
 }
 
 /**
+ * Whether scheduled pulls should enforce the image release age cooldown.
+ * Scheduled updates enforce the cooldown by default, but exempt containers labeled
+ * with `dockhand.skip.cooldown=true` (#1895).
+ */
+export function shouldEnforceReleaseAgeOnScheduledPull(
+	labelsOrSkip: Record<string, string> | undefined | null | boolean
+): boolean {
+	if (typeof labelsOrSkip === 'boolean') {
+		return !labelsOrSkip;
+	}
+	return !isCooldownSkippedByLabel(labelsOrSkip);
+}
+
+/**
  * Whether a moved digest on a `tag@sha256:` pinned image should be REPORTED for this
  * container (#1780). The per-container `dockhand.pin.report` label wins over the global
  * setting: an explicit value on the container decides, absent falls through to `global`.
