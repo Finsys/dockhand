@@ -154,8 +154,8 @@ describe('scheduled pulls go through withPullRetry', () => {
 		test(file, () => {
 			const src = readFileSync(new URL(`../src/lib/server/scheduler/tasks/${file}`, import.meta.url), 'utf8');
 			const shape = file === 'container-update.ts'
-				? /withPullRetry\(\(\) => pullImage\(imageNameFromConfig, undefined, envId, true\), \{ log, label: `\$\{containerName\} \(\$\{imageNameFromConfig\}\)\$\{envId \? `, env \$\{envId\}` : ''\}` \}\)/g
-				: /withPullRetry\(\(\) => pullImage\(update\.imageName, \(\) => \{\}, environmentId, true\), \{ log: \(m\) => log\(`  \$\{m\}`\), label: `\$\{update\.containerName\} \(\$\{update\.imageName\}\), env \$\{env\.name\}`, delays: throttle\.delays\(update\.imageName\) \}\)/g;
+				? /withPullRetry\(\(\) => pullImage\(imageNameFromConfig, undefined, envId, shouldEnforceReleaseAgeOnScheduledPull\(skipCooldown\)\), \{ log, label: `\$\{containerName\} \(\$\{imageNameFromConfig\}\)\$\{envId \? `, env \$\{envId\}` : ''\}` \}\)/g
+				: /withPullRetry\(\(\) => pullImage\(update\.imageName, \(\) => \{\}, environmentId, shouldEnforceReleaseAgeOnScheduledPull\(update\.skipCooldown\)\), \{ log: \(m\) => log\(`  \$\{m\}`\), label: `\$\{update\.containerName\} \(\$\{update\.imageName\}\), env \$\{env\.name\}`, delays: throttle\.delays\(update\.imageName\) \}\)/g;
 			expect(src.match(shape)?.length).toBe(2);
 			expect(src.match(/withPullRetry\(/g)?.length).toBe(2);
 			expect(src.match(/await pullImage\(/g)).toBeNull();
