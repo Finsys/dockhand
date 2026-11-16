@@ -245,6 +245,11 @@ describe('image version label (#1501)', () => {
 		expect(imageVersionLabel({ 'org.opencontainers.image.version': 'x'.repeat(129) })).toBeNull();
 		expect(imageVersionLabel({ 'org.opencontainers.image.version': '1.0\n2.0' })).toBeNull();
 		expect(imageVersionLabel({ 'org.opencontainers.image.version': 3 })).toBeNull();
+		// A branch build's label is the branch name, not a version.
+		for (const branch of ['master', 'main', 'edge', 'nightly', 'latest']) {
+			expect(imageVersionLabel({ 'org.opencontainers.image.version': branch })).toBeNull();
+		}
+		expect(imageVersionLabel({ 'org.opencontainers.image.version': '7.0.3.10918' })).toBe('7.0.3.10918');
 		expect(imageVersionLabel(null)).toBeNull();
 	});
 });

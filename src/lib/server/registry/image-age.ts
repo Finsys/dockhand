@@ -56,13 +56,18 @@ type FetchMetadata = (url: string, init: RequestInit) => Promise<Response>;
 /** The OCI label most images carry their application version in. */
 export const IMAGE_VERSION_LABEL = 'org.opencontainers.image.version';
 
-/** An image's version label, when it is a plausible version string. */
+/**
+ * An image's version label, when it is a plausible version string. A version has a
+ * digit in it: images built from a branch carry the branch name instead (`master`,
+ * `main`, `edge`, as docker/metadata-action writes for branch builds), which says
+ * nothing about what the update installs.
+ */
 export function imageVersionLabel(labels: unknown): string | null {
 	if (!labels || typeof labels !== 'object') return null;
 	const value = (labels as Record<string, unknown>)[IMAGE_VERSION_LABEL];
 	if (typeof value !== 'string') return null;
 	const version = value.trim();
-	return version && version.length <= 128 && !/[\u0000-\u001f]/.test(version) ? version : null;
+	return version && version.length <= 128 && /\d/.test(version) && !/[\u0000-\u001f]/.test(version) ? version : null;
 }
 
 /** What one image's config blob says about it, for the target platform. */
