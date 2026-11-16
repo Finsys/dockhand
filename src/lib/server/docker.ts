@@ -49,6 +49,7 @@ import { decideRespawnOutcome, isExactNameMatch, isSystemdManagedUnit } from './
 import { parseImageReference } from './registry/image-ref';
 import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
 export { parseImageReference } from './registry/image-ref';
+import { HELPER_CONTAINER_LABELS } from './container-labels';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth, isSafeRegistryHost } from './registry-auth';
 import { registryAuthHeader } from './registry/auth-header';
@@ -5328,6 +5329,8 @@ export async function runContainer(options: {
 		Image: options.image,
 		Cmd: options.cmd,
 		Env: options.env || [],
+		// A helper like runContainerWithStreaming's (scanner version checks): silent, hidden.
+		Labels: { ...HELPER_CONTAINER_LABELS },
 		Tty: false,
 		HostConfig: {
 			Binds: options.binds || [],
@@ -5466,9 +5469,9 @@ export async function runContainerWithStreaming(options: {
 		Env: options.env || [],
 		// Every helper spawned here (backup/restore/probe, image scanner) is ephemeral and exits
 		// on purpose, so it must NOT fire a "Container died/exited" notification like a user's
-		// container would. dockhand.notify=false makes the event handler skip it
-		// (isNotifyDisabledByLabel). Caller labels win if they set notify explicitly.
-		Labels: { 'dockhand.notify': 'false', ...(options.labels || {}) },
+		// container would, and it is hidden from container lists (HELPER_CONTAINER_LABELS).
+		// Caller labels win if they set either explicitly.
+		Labels: { ...HELPER_CONTAINER_LABELS, ...(options.labels || {}) },
 		Tty: false,
 		HostConfig: {
 			Binds: options.binds || [],
