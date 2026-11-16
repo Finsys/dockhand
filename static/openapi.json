@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.57",
+    "version": "1.0.58",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -19478,7 +19478,7 @@
             }
           },
           "400": {
-            "description": "Missing or invalid fields - type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is loopback/localhost/cloud-metadata/reserved"
+            "description": "Missing or invalid fields - type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is cloud-metadata (169.254/16) or reserved"
           },
           "403": {
             "description": "Permission denied (requires the notifications:create permission)"
@@ -19786,7 +19786,7 @@
             }
           },
           "400": {
-            "description": "Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is loopback/localhost/cloud-metadata/reserved)"
+            "description": "Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is cloud-metadata (169.254/16) or reserved)"
           },
           "403": {
             "description": "Permission denied (requires the notifications:edit permission)"

@@ -1,8 +1,7 @@
 [
   {
     "version": "1.0.58",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-11-16",
     "changes": [
       { "type": "feature", "text": "DISABLE_FRAME_PROTECTION allows embedding Dockhand in a trusted iframe (#1867)" },
       { "type": "feature", "text": "Korean interface translation (PR#1910, @hw0603)" },
@@ -20,7 +19,8 @@
       { "type": "fix", "text": "the logs panel shows the container it is switched to while streaming is paused (#1889)" },
       { "type": "fix", "text": "a webhook arriving during a running git sync no longer sends a false git sync failed notification (PR#1899, @Totopo27)" },
       { "type": "fix", "text": "a running backup no longer writes tens of MB/s to the database (#1914)" },
-      { "type": "fix", "text": "the stack editor no longer shows variables from a SOPS-encrypted env file as missing (#1913)" }
+      { "type": "fix", "text": "the stack editor no longer shows variables from a SOPS-encrypted env file as missing (#1913)" },
+      { "type": "fix", "text": "hawser edge compose operations honour COMPOSE_TIMEOUT (#1915)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.58"
   },
