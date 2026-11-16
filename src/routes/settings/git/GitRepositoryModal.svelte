@@ -49,6 +49,27 @@
 
 	const isEditing = $derived(repository !== null);
 
+	// git cannot take a password non-interactively over SSH, so an ssh:// (or scp-like
+	// host:path) repo URL needs an SSH-key credential, not username/password. Flag the
+	// pairing so the user gets a clear message instead of a misleading auth error. Kept in
+	// sync with isSshRepoUrl in git-url-safety.ts (the server guard), which a .svelte client
+	// cannot import.
+	function isSshUrl(url: string): boolean {
+		const u = url.trim();
+		const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(u);
+		if (schemeMatch) return schemeMatch[1].toLowerCase() === 'ssh';
+		const colon = u.indexOf(':');
+		if (colon <= 0) return false;
+		const slash = u.indexOf('/');
+		if (slash !== -1 && slash < colon) return false;
+		if (colon === 1 && /^[a-zA-Z]$/.test(u[0]) && /[\\/]/.test(u[2] ?? '')) return false;
+		return true;
+	}
+	const sshPasswordMismatch = $derived.by(() => {
+		const cred = credentials.find((c) => c.id === formCredentialId);
+		return cred?.authType === 'password' && isSshUrl(formUrl);
+	});
+
 	function getAuthIcon(type: string) {
 		switch (type) {
 			case 'ssh': return KeyRound;
@@ -295,6 +316,9 @@
 						{addCredentialsBefore}<a href="/settings?tab=git&subtab=credentials" class="text-primary hover:underline">{m.settings_git_add_credentials_link()}</a>{addCredentialsAfter}
 					</p>
 				{/if}
+				{#if sshPasswordMismatch}
+					<p class="text-xs text-destructive">{m.settings_git_ssh_needs_key()}</p>
+				{/if}
 			</div>
 
 			{#if formError}
@@ -307,7 +331,7 @@
 					type="button"
 					variant="outline"
 					onclick={testRepository}
-					disabled={testing || !formUrl.trim()}
+					disabled={testing || !formUrl.trim() || sshPasswordMismatch}
 					class={testResult?.success ? 'border-green-500 text-green-600 dark:border-green-500 dark:text-green-400' : ''}
 				>
 					{#if testing}
@@ -319,7 +343,7 @@
 					{/if}
 					{m.settings_git_test()}
 				</Button>
-				<Button type="submit" disabled={formSaving}>
+				<Button type="submit" disabled={formSaving || sshPasswordMismatch}>
 					{#if formSaving}
 						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
 						{m.settings_git_saving()}

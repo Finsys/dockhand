@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials } from '../src/lib/server/git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials, isSshRepoUrl, incompatibleCredentialReason } from '../src/lib/server/git-url-safety';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,6 +40,71 @@ describe('assertSafeRepoUrl — rejects dangerous URLs, allows every legit schem
 			expect(() => assertSafeRepoUrl(url)).toThrow();
 		});
 	}
+});
+
+describe('isSshRepoUrl - detects SSH transport (ssh:// and scp-like)', () => {
+	test('ssh:// URL is SSH', () => {
+		expect(isSshRepoUrl('ssh://user@srvgit.int:5522/path')).toBe(true);
+		expect(isSshRepoUrl('ssh://git@github.com/org/repo.git')).toBe(true);
+	});
+	test('scp-like git@host:path is SSH', () => {
+		expect(isSshRepoUrl('git@github.com:org/repo.git')).toBe(true);
+		expect(isSshRepoUrl('user@host.example:path/to/repo')).toBe(true);
+	});
+	test('scp-like host:path WITHOUT a user is SSH (new URL does not throw on it)', () => {
+		expect(isSshRepoUrl('srvgit.int:org/repo.git')).toBe(true);
+		expect(isSshRepoUrl('gitea.local:org/repo')).toBe(true);
+	});
+	test('uppercase SSH:// scheme is SSH (case-insensitive)', () => {
+		expect(isSshRepoUrl('SSH://git@github.com/org/repo.git')).toBe(true);
+		expect(isSshRepoUrl('Ssh://host/repo')).toBe(true);
+	});
+	test('git@ fast-path (git@host:path is scp-like SSH)', () => {
+		expect(isSshRepoUrl('git@gitlab.com:group/sub/repo.git')).toBe(true);
+	});
+	test('https and http URLs are NOT SSH', () => {
+		expect(isSshRepoUrl('https://github.com/org/repo.git')).toBe(false);
+		expect(isSshRepoUrl('http://gitea.local/org/repo.git')).toBe(false);
+		expect(isSshRepoUrl('HTTPS://github.com/org/repo.git')).toBe(false);
+	});
+	test('https with a port is NOT SSH (colon is after the scheme slashes)', () => {
+		expect(isSshRepoUrl('https://gitea.local:8080/org/repo.git')).toBe(false);
+	});
+	test('git:// (anonymous) is NOT ssh', () => {
+		expect(isSshRepoUrl('git://host/repo.git')).toBe(false);
+	});
+	test('a Windows drive path is NOT ssh (C:\\ or C:/)', () => {
+		expect(isSshRepoUrl('C:\\repos\\thing')).toBe(false);
+		expect(isSshRepoUrl('C:/repos/thing')).toBe(false);
+	});
+	test('a bare relative path is NOT ssh (no colon)', () => {
+		expect(isSshRepoUrl('/srv/git/repo.git')).toBe(false);
+		expect(isSshRepoUrl('./local/repo')).toBe(false);
+	});
+});
+
+describe('incompatibleCredentialReason - rejects ssh:// with password credential', () => {
+	test('ssh:// + password is rejected with a clear reason', () => {
+		const r = incompatibleCredentialReason('ssh://user@srvgit.int:5522/path', 'password');
+		expect(r).toBeTruthy();
+		expect(r).toContain('SSH');
+	});
+	test('scp-like + password is rejected', () => {
+		expect(incompatibleCredentialReason('git@github.com:org/repo.git', 'password')).toBeTruthy();
+	});
+	test('ssh:// + ssh key credential is allowed', () => {
+		expect(incompatibleCredentialReason('ssh://git@github.com/org/repo.git', 'ssh')).toBeNull();
+	});
+	test('ssh:// + no credential is allowed (not a password mismatch)', () => {
+		expect(incompatibleCredentialReason('ssh://git@github.com/org/repo.git', 'none')).toBeNull();
+		expect(incompatibleCredentialReason('ssh://git@github.com/org/repo.git', null)).toBeNull();
+	});
+	test('https + password is allowed (the supported combo)', () => {
+		expect(incompatibleCredentialReason('https://github.com/org/repo.git', 'password')).toBeNull();
+	});
+	test('https + ssh key is allowed (unusual but not this guard concern)', () => {
+		expect(incompatibleCredentialReason('https://github.com/org/repo.git', 'ssh')).toBeNull();
+	});
 });
 
 describe('assertSafeGitRef — rejects option-like refs, allows real branch names', () => {

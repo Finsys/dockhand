@@ -50,6 +50,43 @@ export function stripUrlCredentials(url: string, authType: string | null | undef
 	}
 }
 
+/**
+ * Whether a repo URL uses SSH transport: an `ssh://` URL or a scp-like `host:path`
+ * (`git@host:repo`, `user@host:repo`, or a bare `host:repo`). Case-insensitive scheme.
+ */
+export function isSshRepoUrl(url: string): boolean {
+	const u = url.trim();
+	// A `scheme://` URL: SSH only when the scheme is ssh (new URL() does not throw on a
+	// bare scp-like `host:path`, so that form is handled by the scp heuristic below).
+	const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(u);
+	if (schemeMatch) return schemeMatch[1].toLowerCase() === 'ssh';
+	// scp-like `host:path` (no `://`): a ':' before any '/', and not a Windows drive
+	// (`C:\...` / `C:/...`, a single-letter "host" followed by a backslash or slash).
+	const colon = u.indexOf(':');
+	if (colon <= 0) return false;
+	const slash = u.indexOf('/');
+	if (slash !== -1 && slash < colon) return false;
+	if (colon === 1 && /^[a-zA-Z]$/.test(u[0]) && /[\\/]/.test(u[2] ?? '')) return false;
+	return true;
+}
+
+/**
+ * Reject an unsupported credential/URL pairing before git runs, so the user gets a clear
+ * message instead of a misleading auth error. git cannot take a password non-interactively
+ * over SSH (there is no prompt to answer), so an `ssh://` URL needs an SSH-key credential,
+ * not username/password. Returns a reason string to reject with, or null when the pairing
+ * is fine. authType 'none'/'ssh' and all non-SSH URLs pass.
+ */
+export function incompatibleCredentialReason(
+	url: string,
+	authType: string | null | undefined
+): string | null {
+	if (authType === 'password' && isSshRepoUrl(url)) {
+		return 'SSH repository URLs require an SSH key credential, not username/password. Add an SSH key credential, or use an HTTPS URL for username/password.';
+	}
+	return null;
+}
+
 /** A git ref (branch/tag) must not be parseable as an option. Empty is allowed
  *  (callers fall back to a default like HEAD). */
 export function assertSafeGitRef(ref: string | null | undefined): void {
