@@ -20,7 +20,8 @@
       { "type": "fix", "text": "a webhook arriving during a running git sync no longer sends a false git sync failed notification (PR#1899, @Totopo27)" },
       { "type": "fix", "text": "a running backup no longer writes tens of MB/s to the database (#1914)" },
       { "type": "fix", "text": "the stack editor no longer shows variables from a SOPS-encrypted env file as missing (#1913)" },
-      { "type": "fix", "text": "hawser edge compose operations honour COMPOSE_TIMEOUT (#1915)" }
+      { "type": "fix", "text": "hawser edge compose operations honour COMPOSE_TIMEOUT (#1915)" },
+      { "type": "fix", "text": "stacks under a DATA_DIR inside /root are no longer refused as \"Compose path is not allowed\" (#1912)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.58"
   },
