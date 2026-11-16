@@ -130,6 +130,18 @@ describe('isForbiddenCrossOrigin - without Sec-Fetch-Site (plain HTTP)', () => {
 		expect(req({ host: 'nas.lan:443', origin: 'http://nas.lan' })).toBe(true);
 	});
 
+	test('a Host without a port (nginx $host on a custom port) matches by name alone', () => {
+		for (const hasSessionCookie of [true, false]) {
+			expect(req({ hasSessionCookie, host: 'dh.lan', origin: 'http://dh.lan:8080' })).toBe(false);
+		}
+		expect(req({ host: '[fd00::5]', origin: 'http://[fd00::5]:8080' })).toBe(false);
+		// The name still has to match, and a Host that names a port still must match it.
+		expect(req({ host: 'dh.lan', origin: 'http://evil.lan:8080' })).toBe(true);
+		expect(req({ host: 'dh.lan', origin: 'http://dh.lan.evil.com:8080' })).toBe(true);
+		expect(req({ host: 'dh.lan:3000', origin: 'http://dh.lan:8080' })).toBe(true);
+		expect(req({ host: '[fd00::5]:3000', origin: 'http://[fd00::5]:8080' })).toBe(true);
+	});
+
 	test('IPv6 literals match exactly', () => {
 		expect(req({ host: '[fd00::5]:3000', origin: 'http://[fd00::5]:3000' })).toBe(false);
 		expect(req({ host: '[fd00::5]:3000', origin: 'http://[fd00::6]:3000' })).toBe(true);

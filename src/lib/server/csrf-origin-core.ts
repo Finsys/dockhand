@@ -141,7 +141,12 @@ export function isForbiddenCrossOrigin(req: CsrfRequestInfo): boolean {
 	if (url && host) {
 		// Read the Host header with the Origin's scheme so case and the default port normalize alike.
 		const target = parseOrigin(`${url.protocol}//${host}`);
-		if (target && target.pathname === '/' && !target.search && !target.hash && target.host === url.host) return false;
+		// A proxy that passes Host without a port (nginx `$host` on 8080) cannot say which
+		// port the page was on, so then the name alone has to match. A Host with a port
+		// must match exactly.
+		const hostHasPort = /:\d+$/.test(host);
+		const sameTarget = target !== null && (target.host === url.host || (!hostHasPort && target.hostname === url.hostname));
+		if (target && target.pathname === '/' && !target.search && !target.hash && sameTarget) return false;
 	}
 	return !isExempt();
 }
