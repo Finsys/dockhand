@@ -1,6 +1,8 @@
 // Pure helpers for image pruning. Kept dependency-free (no db / better-sqlite3)
 // so they can be unit-tested directly, mirroring volume-prune-core.ts.
 
+import { containersPerImage, type UsageContainer, type UsageImage } from './image-usage-core';
+
 /**
  * Image label that opts an image out of an "all unused" prune. Tag an image
  * with `dockhand.prune=false` (e.g. `docker build --label dockhand.prune=false`)
@@ -46,7 +48,7 @@ export function labelNegationBroken(allImages: number, withoutKeepLabel: number)
 	return allImages > 0 && withoutKeepLabel === 0;
 }
 
-export interface PruneImageSummary {
+export interface PruneImageSummary extends UsageImage {
 	Id: string;
 	RepoTags?: string[] | null;
 }
@@ -83,7 +85,9 @@ export interface ImagePruneResult {
 
 export interface ImagePrunePorts {
 	listImages(filters?: string): Promise<PruneImageSummary[]>;
-	listContainers(): Promise<{ ImageID: string }[]>;
+	listContainers(): Promise<UsageContainer[]>;
+	/** Only called when a container can be matched to its image by manifest alone. */
+	listImagesWithManifests(): Promise<UsageImage[]>;
 	prune(): Promise<ImagePruneResult>;
 	remove(ref: string): Promise<ImageDeleteEntry[]>;
 	log(message: string): void;
@@ -92,8 +96,9 @@ export interface ImagePrunePorts {
 /**
  * Prune all unused images except those with the keep label. Where the engine's
  * `label!` filter is broken (see labelNegationBroken) Docker's prune would remove
- * nothing, so the images go one by one instead; Docker still refuses any a container
- * uses. That path cannot say how much space it freed, so it reports only the images.
+ * nothing, so the images go one by one instead. Docker refuses an image whose ID a container
+ * uses, but not one a container runs only through its platform manifest (containerd store),
+ * so usage is decided here first. That path cannot say how much space it freed.
  */
 export async function pruneAllUnused(docker: ImagePrunePorts): Promise<ImagePruneResult> {
 	const all = await docker.listImages();
@@ -112,7 +117,7 @@ export async function pruneAllUnused(docker: ImagePrunePorts): Promise<ImagePrun
 
 	const kept = await docker.listImages(buildKeepLabelFilter(false));
 	const containers = await docker.listContainers();
-	const usedIds = new Set(containers.map((c) => c.ImageID));
+	const usedIds = new Set((await containersPerImage(all, containers, () => docker.listImagesWithManifests(), true)).keys());
 	const targets = imageRefsToRemove(all, new Set(kept.map((i) => i.Id)), usedIds);
 	docker.log(`label! filter matches no image (${all.length} listed, ${kept.length} with the keep label, ${usedIds.size} in use by containers); removing ${targets.length} unused images one by one`);
 	const deleted: ImageDeleteEntry[] = [];

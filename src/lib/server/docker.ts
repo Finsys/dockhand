@@ -17,13 +17,16 @@ import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
 import { toWebReadableStream } from './node-readable-stream';
 import { buildImagePruneFilters, pruneAllUnused, holderFailureWarning, type ImagePruneResult } from './image-prune-core';
+import { containerImageNamer, containersPerImage } from './image-usage-core';
 import { demuxDockerStream } from './docker-demux-core';
 import { isExpectedConnectionError, isQuietDockerFailure, transportTimeoutError } from './docker-probe-core';
 import {
 	computeRequestTimeoutMs,
 	isPrunePath,
 	isStopPath,
-	stopTimeoutMs
+	stopTimeoutMs,
+	isDiskUsagePath,
+	DISK_USAGE_TIMEOUT_MS
 } from './backups/request-timeout';
 import { helperWaitDeadline, helperExitFromState, helperFailureDetail, needsDaemonErrorLookup } from './helper-wait-core';
 import { cancelReaderOnAbort } from './reader-abort-core';
@@ -39,7 +42,7 @@ export { isDigestBasedImage };
 import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs, imageReleaseAgeStatus, type ImageCreationMetadata } from './minimum-release-age';
 import { manualPullAgeWarning, verifiedImagePullPlan } from './minimum-release-age-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
-import { resolveNanoCpusConflict, resolvePodmanUsernsMode } from './hostconfig-recreate';
+import { resolveNanoCpusConflict, applyPodmanUsernsMode, stripDefaultMemorySwappiness } from './hostconfig-recreate';
 import { isUnknownNetworkKeyError, retryEndpointKey } from './podman-network-key';
 import { expectedEvents, EXPECTED_EVENT_TTL_MS } from './expected-events-core';
 import { decideRespawnOutcome, isExactNameMatch, isSystemdManagedUnit } from './systemd-recreate-core';
@@ -1164,6 +1167,12 @@ export async function listContainers(all = true, envId?: number | null): Promise
 		}
 	}
 
+	const imageName = await containerImageNamer(
+		containers,
+		(c) => trackedImageReference(c.Image, c.Labels),
+		() => dockerJsonRequest<any[]>('/images/json?manifests=1', {}, envId)
+	);
+
 	return containers.map((container) => {
 		// Extract network info with IP addresses
 		const networks: { [networkName: string]: { ipAddress: string } } = {};
@@ -1212,7 +1221,7 @@ export async function listContainers(all = true, envId?: number | null): Promise
 		return {
 			id: container.Id,
 			name: container.Names[0]?.replace(/^\//, '') || 'unnamed',
-			image: trackedImageReference(container.Image, container.Labels),
+			image: imageName(container),
 			imageId: container.ImageID || '',
 			state: container.State,
 			status: container.Status,
@@ -1288,6 +1297,7 @@ function stopTimeoutEnvSecs(): number | null {
 function edgeTimeoutMs(path: string, streaming: boolean): number {
 	if (streaming || path === '/_hawser/compose' || isPrunePath(path)) return 300000;
 	if (isStopPath(path)) return stopTimeoutMs(stopTimeoutFromPath(path), stopTimeoutEnvSecs());
+	if (isDiskUsagePath(path)) return DISK_USAGE_TIMEOUT_MS;
 	return 30000;
 }
 
@@ -2467,11 +2477,7 @@ export async function recreateContainerFromInspect(
 	}
 
 	// Strip default MemorySwappiness — Podman + cgroupv2 rejects it.
-	// Docker returns -1, Podman returns 0 when unset.
-	const swappiness = createConfig.HostConfig?.MemorySwappiness;
-	if (swappiness == null || swappiness === -1 || swappiness === 0) {
-		delete createConfig.HostConfig.MemorySwappiness;
-	}
+	stripDefaultMemorySwappiness(createConfig.HostConfig);
 
 	// NanoCpus and CpuPeriod/CpuQuota are two ways to express the same CPU limit and are
 	// mutually exclusive at create time. Podman's inspect reports BOTH, so passing the whole
@@ -2483,16 +2489,7 @@ export async function recreateContainerFromInspect(
 	// Podman lowers `--userns keep-id` to UsernsMode:"private" in inspect, which create then
 	// rejects without inline mappings (#1409). Restore the original intent from the annotation
 	// so keep-id survives the recreate; Docker (UsernsMode != "private") is untouched.
-	const usernsFix = resolvePodmanUsernsMode(createConfig.HostConfig?.UsernsMode, config.Annotations);
-	if (usernsFix && createConfig.HostConfig) {
-		if ('mode' in usernsFix) {
-			createConfig.HostConfig.UsernsMode = usernsFix.mode;
-			log?.(`Restored UsernsMode "${usernsFix.mode}" from Podman annotation (was "private")`);
-		} else {
-			delete createConfig.HostConfig.UsernsMode;
-			log?.('Dropped UsernsMode "private" — Podman rejects it without inline UID/GID mappings');
-		}
-	}
+	applyPodmanUsernsMode(createConfig.HostConfig, config.Annotations, log);
 
 	// container:<name> mode shares the network namespace — Docker rejects
 	// networking-related fields on the dependent container since they're
@@ -2731,18 +2728,11 @@ export async function createContainerFromMetadata(
 	delete createConfig.MacAddress;
 
 	// Strip default MemorySwappiness (Podman + cgroupv2 rejects it)
-	const swappiness = createConfig.HostConfig?.MemorySwappiness;
-	if (swappiness == null || swappiness === -1 || swappiness === 0) {
-		delete createConfig.HostConfig.MemorySwappiness;
-	}
+	stripDefaultMemorySwappiness(createConfig.HostConfig);
 
 	// Podman keep-id -> UsernsMode:"private" in inspect, rejected on create (#1409).
 	// Restore the intent from the annotation; Docker (UsernsMode != "private") untouched.
-	const usernsFix = resolvePodmanUsernsMode(createConfig.HostConfig?.UsernsMode, config.Annotations);
-	if (usernsFix && createConfig.HostConfig) {
-		if ('mode' in usernsFix) createConfig.HostConfig.UsernsMode = usernsFix.mode;
-		else delete createConfig.HostConfig.UsernsMode;
-	}
+	applyPodmanUsernsMode(createConfig.HostConfig, config.Annotations);
 
 	// container:<name> mode: clean up conflicting network fields
 	if (networkMode.startsWith('container:')) {
@@ -3229,13 +3219,7 @@ export async function listImages(envId?: number | null): Promise<ImageInfo[]> {
 
 	// Build a map of imageId -> container count
 	// Docker may return -1 for Containers field on some hosts, so we compute it ourselves
-	const imageContainerCount = new Map<string, number>();
-	for (const container of containers) {
-		const imageId = container.ImageID || container.Image;
-		if (imageId) {
-			imageContainerCount.set(imageId, (imageContainerCount.get(imageId) || 0) + 1);
-		}
-	}
+	const imageContainerCount = await containersPerImage(images, containers, () => dockerJsonRequest<any[]>('/images/json?manifests=1', {}, envId), false);
 
 	return images.map((image) => ({
 		id: image.Id,
@@ -3337,9 +3321,13 @@ export async function getImageReleaseAgeWarning(imageName: string, envId?: numbe
 	}
 }
 
-/** Scheduled pulls enforce the cooldown; explicit pulls only report an advisory. */
-export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null, enforceReleaseAge = false): Promise<{ imageId: string; digest: string; reference: string } | undefined> {
-	if (!enforceReleaseAge) {
+/**
+ * releaseAge: 'enforce' refuses an image still inside the minimum image age (automatic updates),
+ * 'advise' pulls anyway with a warning (user-requested pulls), 'skip' waives the age but still
+ * pulls the verified digest (a container labelled dockhand.skip.cooldown=true).
+ */
+export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null, releaseAge: 'enforce' | 'advise' | 'skip' = 'advise'): Promise<{ imageId: string; digest: string; reference: string } | undefined> {
+	if (releaseAge === 'advise') {
 		const warning = await getImageReleaseAgeWarning(imageName, envId);
 		if (warning) {
 			console.warn(`[Pull] ${warning}`);
@@ -3349,8 +3337,12 @@ export async function pullImage(imageName: string, onProgress?: (data: any) => v
 		return undefined;
 	}
 
-	const digest = await verifyImageReleaseAge(imageName, envId);
+	const digest = releaseAge === 'skip'
+		? await getRegistryManifestDigest(imageName, envId)
+		: await verifyImageReleaseAge(imageName, envId);
 	if (!digest) {
+		// Without a registry digest a skipped cooldown still updates, by tag.
+		if (releaseAge === 'skip') console.warn(`[Pull] Registry digest for ${imageName} unavailable; pulling by tag`);
 		await pullImageFromRegistry(imageName, onProgress, envId);
 		return undefined;
 	}
@@ -4997,6 +4989,7 @@ export async function pruneContainers(envId?: number | null) {
 function pruneAllUnusedImages(envId?: number | null): Promise<ImagePruneResult> {
 	return pruneAllUnused({
 		listImages: (filters) => dockerJsonRequest(filters ? `/images/json?filters=${filters}` : '/images/json', {}, envId),
+		listImagesWithManifests: () => dockerJsonRequest('/images/json?manifests=1', {}, envId),
 		listContainers: () => dockerJsonRequest('/containers/json?all=true', {}, envId),
 		prune: () => dockerJsonRequest<ImagePruneResult>(`/images/prune?filters=${buildImagePruneFilters(false)}`, { method: 'POST' }, envId),
 		remove: (ref) => dockerJsonRequest(`/images/${encodeURIComponent(ref)}`, { method: 'DELETE' }, envId),

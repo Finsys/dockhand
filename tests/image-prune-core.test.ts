@@ -89,6 +89,7 @@ describe('pruneAllUnused', () => {
 				return images.filter((i) => i.label);
 			},
 			listContainers: async () => used.map((ImageID) => ({ ImageID })),
+			listImagesWithManifests: async () => { calls.push('list manifests'); return images; },
 			prune: async () => { calls.push('prune'); return { ImagesDeleted: [{ Deleted: 'sha256:x' }], SpaceReclaimed: 42 }; },
 			remove: async (ref: string) => {
 				calls.push(`delete ${ref}`);
@@ -205,6 +206,53 @@ describe('pruneAllUnused', () => {
 	test('nothing to remove is reported as no images, like an empty prune', async () => {
 		const { ports } = engine([images[1]], [], true);
 		expect(await pruneAllUnused(ports)).toEqual({ ImagesDeleted: null });
+	});
+
+	// Measured on Docker 29.8 (containerd store): a rebuild from cache moves the tag to a new
+	// index ID, the container keeps the old one, and DELETE of the tag succeeds even though the
+	// container runs that image. Only the platform manifest shows it is in use.
+	test('an image used only through its platform manifest is kept', async () => {
+		const platform = 'sha256:platform';
+		const rebuilt = { Id: 'sha256:rebuilt', RepoTags: ['worker-card:latest'], Manifests: [{ ID: platform }] };
+		const { ports, calls } = engine([rebuilt, images[3]], [], true);
+		ports.listContainers = async () => [{ ImageID: 'sha256:old-index', ImageManifestDescriptor: { digest: platform } }] as any;
+		await pruneAllUnused(ports);
+		expect(calls).toContain('list manifests');
+		expect(calls.filter((c) => c.startsWith('delete'))).toEqual(['delete hello-world:latest']);
+	});
+
+	test('a failed manifest listing deletes nothing', async () => {
+		const { ports, calls } = engine(images, [], true);
+		ports.listContainers = async () => [{ ImageID: 'sha256:old-index', ImageManifestDescriptor: { digest: 'sha256:platform' } }] as any;
+		ports.listImagesWithManifests = async () => { throw new Error('daemon unreachable'); };
+		await expect(pruneAllUnused(ports)).rejects.toThrow('daemon unreachable');
+		expect(calls.filter((c) => c.startsWith('delete'))).toEqual([]);
+	});
+
+	test('every image holding that manifest is kept, whatever the list order', async () => {
+		const platform = 'sha256:platform';
+		const a = { Id: 'sha256:proj-a', RepoTags: ['proj-a-web:latest'], Manifests: [{ ID: platform }] };
+		const b = { Id: 'sha256:proj-b', RepoTags: ['proj-b-web:latest'], Manifests: [{ ID: platform }] };
+		for (const order of [[a, b, images[3]], [b, a, images[3]]]) {
+			const { ports, calls } = engine(order, [], true);
+			ports.listContainers = async () => [{ ImageID: 'sha256:old-index', ImageManifestDescriptor: { digest: platform } }] as any;
+			await pruneAllUnused(ports);
+			expect(calls.filter((c) => c.startsWith('delete'))).toEqual(['delete hello-world:latest']);
+		}
+	});
+
+	test('a containerd host whose containers all match by ID gets no manifest listing', async () => {
+		const { ports, calls } = engine(images, [], true);
+		ports.listContainers = async () => [{ ImageID: 'sha256:busybox', ImageManifestDescriptor: { digest: 'sha256:platform' } }] as any;
+		await pruneAllUnused(ports);
+		expect(calls).not.toContain('list manifests');
+		expect(calls.filter((c) => c.startsWith('delete'))).toEqual(['delete alpine:3.20', 'delete multi:x', 'delete hello-world:latest']);
+	});
+
+	test('engines without manifest descriptors never get the manifest listing', async () => {
+		const { ports, calls } = engine(images, ['sha256:busybox'], true);
+		await pruneAllUnused(ports);
+		expect(calls).not.toContain('list manifests');
 	});
 });
 
