@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'bun:test';
 import { smtpHostReason } from '../src/lib/server/notifications/smtp-core';
 
-// The SMTP host guard mirrors the MQTT channel's policy: block loopback, link-local
-// cloud metadata and reserved ranges, but allow a private-LAN mail server.
+// The SMTP host guard blocks link-local cloud metadata and reserved ranges, and allows a
+// private-LAN mail server and a relay on the same host (loopback).
 describe('smtpHostReason', () => {
 	test('allows ordinary public mail hosts', () => {
 		expect(smtpHostReason('smtp.gmail.com')).toBeNull();
@@ -22,13 +22,11 @@ describe('smtpHostReason', () => {
 		expect(smtpHostReason('169.254.169.254')).toContain('metadata');
 	});
 
-	test('blocks loopback by IP and by name', () => {
-		expect(smtpHostReason('127.0.0.1')).not.toBeNull();
-		expect(smtpHostReason('0.0.0.0')).not.toBeNull();
-		expect(smtpHostReason('localhost')).not.toBeNull();
-		expect(smtpHostReason('db.localhost')).not.toBeNull();
-		expect(smtpHostReason('[::1]')).not.toBeNull();
-		expect(smtpHostReason('::1')).not.toBeNull();
+	test('allows a relay on the same host (loopback by IP and by name)', () => {
+		expect(smtpHostReason('127.0.0.1')).toBeNull();
+		expect(smtpHostReason('localhost')).toBeNull();
+		expect(smtpHostReason('[::1]')).toBeNull();
+		expect(smtpHostReason('::1%lo0')).toBeNull();
 	});
 
 	test('blocks reserved / multicast', () => {
@@ -43,8 +41,8 @@ describe('smtpHostReason', () => {
 	});
 
 	test('is case- and whitespace-insensitive (no bypass via casing/padding)', () => {
-		expect(smtpHostReason('  LOCALHOST  ')).not.toBeNull();
 		expect(smtpHostReason(' 169.254.169.254 ')).not.toBeNull();
+		expect(smtpHostReason(' 224.0.0.1 ')).not.toBeNull();
 		// a near miss: a public host whose name merely contains the digits is allowed
 		expect(smtpHostReason('smtp-10-0-0-1.example.com')).toBeNull();
 	});

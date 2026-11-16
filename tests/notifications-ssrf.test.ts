@@ -196,6 +196,15 @@ describe('resolvedHostReason - where a notification host name points', () => {
 		}
 	});
 
+	test('allowLoopback lets loopback through and nothing else', async () => {
+		const opt = { allowLoopback: true };
+		expect(await resolvedHostReason('loop.example', lookupAll, opt)).toBeNull();
+		expect(await resolvedHostReason('loop6.example', lookupAll, opt)).toBeNull();
+		for (const h of ['meta.example', 'ecs.example', 'meta6.example', 'meta-mapped.example', 'any6.example']) {
+			expect(await resolvedHostReason(h, lookupAll, opt)).toContain('resolves to a blocked address');
+		}
+	});
+
 	test('IP literals and names that do not resolve are left to the other checks', async () => {
 		const never = async () => { throw new Error('looked up'); };
 		expect(await resolvedHostReason('127.0.0.1', never)).toBeNull();
@@ -204,13 +213,14 @@ describe('resolvedHostReason - where a notification host name points', () => {
 		expect(await resolvedHostReason('missing.example', lookupAll)).toBeNull();
 	});
 
-	test('every sender refuses a name that resolves to loopback before connecting', async () => {
+	test('fetch and MQTT refuse a name that resolves to loopback before connecting; SMTP allows it', async () => {
 		// localhost resolves offline, so this exercises the real resolver and the wiring.
 		await expect(notificationFetch('http://localhost.:8080/hook')).rejects.toThrow(/resolves to a blocked address/);
 		const payload = { title: 't', message: 'm' } as any;
 		expect((await sendMqtt('mqtt://localhost.:1883/t', payload)).error).toMatch(/resolves to a blocked address/);
-		const smtp = { host: 'localhost.', port: 25, secure: false, from_email: 'a@b.c', to_emails: ['a@b.c'] } as any;
-		expect((await sendSmtpNotification(smtp, payload)).error).toMatch(/resolves to a blocked address/);
+		// SMTP is the exception: a relay on the same host is allowed, so the guard lets it through.
+		const smtp = { host: 'localhost.', port: 1, secure: false, from_email: 'a@b.c', to_emails: ['a@b.c'] } as any;
+		expect((await sendSmtpNotification(smtp, payload)).error).not.toMatch(/blocked/);
 	});
 });
 
@@ -218,7 +228,7 @@ describe('IPv6 zone ids', () => {
 	test('a zone id does not hide a loopback address', () => {
 		expect(ipCategory('::1%lo0')).toBe('loopback');
 		expect(ipCategory('[::1%1]')).toBe('loopback');
-		expect(smtpHostReason('::1%lo0')).toContain('loopback');
+		expect(smtpHostReason('::ffff:169.254.169.254')).toContain('metadata');
 		expect(ipCategory('fe80::1%eth0')).toBe('private');
 	});
 });

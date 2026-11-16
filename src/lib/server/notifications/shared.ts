@@ -83,13 +83,15 @@ const METADATA_ADDRESSES = new Set(['169.254.169.254', '169.254.170.2', 'fd00:ec
 
 /**
  * The literal-host checks cannot see where a NAME points. Resolve it and refuse it when
- * any address is loopback, reserved or a cloud metadata endpoint. The rest of 169.254/16
+ * any address is loopback (unless allowLoopback, used by SMTP), reserved or a cloud metadata
+ * endpoint. The rest of 169.254/16
  * stays allowed: Podman maps host.containers.internal there. A name that does not
  * resolve is left to the connection to fail. IP literals are judged by the callers.
  */
 export async function resolvedHostReason(
 	host: string,
-	lookupAll: (host: string) => Promise<string[]> = async (h) => (await lookup(h, { all: true })).map((a) => a.address)
+	lookupAll: (host: string) => Promise<string[]> = async (h) => (await lookup(h, { all: true })).map((a) => a.address),
+	{ allowLoopback = false }: { allowLoopback?: boolean } = {}
 ): Promise<string | null> {
 	const name = host.trim().replace(/^\[|\]$/g, '');
 	if (!name || isIP(name.replace(/%.*$/, ''))) return null;
@@ -102,7 +104,7 @@ export async function resolvedHostReason(
 	for (const address of addresses) {
 		const cat = ipCategory(address);
 		const a = address.toLowerCase();
-		if (cat === 'loopback' || cat === 'reserved' || METADATA_ADDRESSES.has(embeddedV4(a) ?? a)) {
+		if ((cat === 'loopback' && !allowLoopback) || cat === 'reserved' || METADATA_ADDRESSES.has(embeddedV4(a) ?? a)) {
 			return `${name} resolves to a blocked address (${address})`;
 		}
 	}

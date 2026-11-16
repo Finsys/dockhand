@@ -48,7 +48,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * body: {type:string!, name:string!, enabled:boolean, config:{host:string, port:integer, secure:boolean, username:string, password:string, from_email:string, from_name:string, to_emails:array<string>, urls:array<string>}, eventTypes:array<string>, event_types:array<string>}
  * body-example: {"type":"smtp","name":"Ops Alerts","enabled":true,"config":{"host":"smtp.example.com","port":587,"secure":false,"from_email":"dockhand@example.com","to_emails":["ops@example.com"],"password":"***"},"eventTypes":["container_unhealthy"]}
  * resp-200: {id:integer!, type:string!, name:string!, enabled:boolean!, config:{}, eventTypes:array<string>}
- * resp-400: Missing or invalid fields - type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is loopback/localhost/cloud-metadata/reserved
+ * resp-400: Missing or invalid fields - type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is cloud-metadata (169.254/16) or reserved
  * resp-403: Permission denied (requires the notifications:create permission)
  * resp-500: Failed to create notification setting
  */

@@ -6,10 +6,10 @@ import { buildSmtpHtml, smtpHostReason } from './smtp-core';
 
 export async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPayload): Promise<NotificationResult> {
 	try {
-		// Same host policy as the MQTT channel: reject loopback, link-local metadata and
-		// reserved ranges, but allow a private-LAN mail server. The connection is the sink,
+		// Reject link-local metadata and reserved ranges, by address and by where a name
+		// points; a relay on loopback or the LAN is allowed. The connection is the sink,
 		// so the guard sits here too, not only at save time.
-		const hostReason = smtpHostReason(config.host) ?? await resolvedHostReason(config.host);
+		const hostReason = smtpHostReason(config.host) ?? await resolvedHostReason(config.host, undefined, { allowLoopback: true });
 		if (hostReason) {
 			return { success: false, error: `SMTP error: ${hostReason}` };
 		}
