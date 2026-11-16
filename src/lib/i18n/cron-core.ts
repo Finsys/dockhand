@@ -2,6 +2,7 @@
  * The cronstrue locale for each UI locale. The imports register cronstrue's own
  * translations; a UI locale missing here falls back to English.
  */
+import 'cronstrue/locales/bg';
 import 'cronstrue/locales/de';
 import 'cronstrue/locales/es';
 import 'cronstrue/locales/fr';
@@ -24,7 +25,8 @@ const CRONSTRUE_LOCALES: Record<string, string> = {
 	uk: 'uk',
 	'pt-BR': 'pt_BR',
 	tr: 'tr',
-	ko: 'ko'
+	ko: 'ko',
+	bg: 'bg'
 };
 
 export function cronstrueLocaleFor(locale: string): string {
