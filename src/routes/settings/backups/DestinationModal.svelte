@@ -19,6 +19,7 @@
 	import { FieldLabel } from '$lib/components/ui/field-label';
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { backendSupportsTls } from '$lib/shared/repo-predicates';
 	import { buildSftpRepository, isSftpRepository, parseSftpRepository } from '$lib/shared/sftp-repository';
 	import { m } from '$lib/paraglide/messages.js';
@@ -70,12 +71,12 @@
 		if (!destination?.id) return;
 		loadingStats = true;
 		try {
+			// Polled as a job: stats on a large repo outlast a reverse proxy's read timeout.
 			const res = await fetch(`/api/backup/destinations/${destination.id}/task`, {
-				// Accept: json runs the read synchronously so we get {success, stats}, not {jobId}.
-				method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+				method: 'POST', headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ task: 'stats' })
 			});
-			const data = await res.json();
+			const data = await readJobResponse(res) as { success?: boolean; error?: string; stats?: any };
 			if (data.success && data.stats) repoStats = data.stats;
 		} catch {} finally { loadingStats = false; }
 	}
