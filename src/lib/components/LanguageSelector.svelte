@@ -40,7 +40,8 @@
 		ru: 'Русский',
 		uk: 'Українська',
 		'pt-BR': 'Português (Brasil)',
-		tr: 'Türkçe'
+		tr: 'Türkçe',
+		ko: '한국어'
 	};
 
 	/** What is stored, which is not what is rendered: absent means follow the browser. */

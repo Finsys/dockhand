@@ -31,6 +31,7 @@ describe('asLocale', () => {
 		expect(asLocale('uk')).toBe('uk');
 		expect(asLocale('pt-BR')).toBe('pt-BR');
 		expect(asLocale('tr')).toBe('tr');
+		expect(asLocale('ko')).toBe('ko');
 	});
 
 	test('refuses anything else, so a stale or hand-edited value cannot take effect', () => {
@@ -70,6 +71,7 @@ describe('fromNavigator', () => {
 		expect(fromNavigator(['pl-PL'])).toBe('pl');
 		expect(fromNavigator(['uk-UA', 'en'])).toBe('uk');
 		expect(fromNavigator(['tr-TR', 'en'])).toBe('tr');
+		expect(fromNavigator(['ko-KR', 'en'])).toBe('ko');
 	});
 
 	test('fr-CA is taken as itself rather than collapsing to fr-FR', () => {
@@ -99,7 +101,7 @@ describe('fromNavigator', () => {
 	});
 
 	test('gives up when nothing matches', () => {
-		expect(fromNavigator(['ja', 'ko'])).toBeUndefined();
+		expect(fromNavigator(['ja', 'th'])).toBeUndefined();
 		expect(fromNavigator([])).toBeUndefined();
 	});
 });
