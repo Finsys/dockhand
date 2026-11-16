@@ -2,17 +2,16 @@
  * Per-environment cache for Docker's `/system/df` result.
  *
  * `/system/df` walks every image layer, container writable layer and volume, so on
- * some storage backends (Synology/btrfs, QNAP, slow disks) it takes tens of seconds.
- * Several surfaces ask for it (header host info, dashboard, dashboard stream); without
- * a shared cache each page load started another scan, and because callers only stopped
- * *waiting* on a timeout, the scans kept running on the daemon and piled up.
+ * some storage backends (Synology/btrfs, QNAP, slow disks) it takes tens of seconds,
+ * and several surfaces ask for it (header host info, dashboard, dashboard stream).
  *
  * This cache:
  * - returns a fresh-enough result straight from memory (TTL),
  * - shares one in-flight scan per environment between concurrent callers,
  * - lets a caller stop waiting (`waitMs`) without abandoning the scan: the result
  *   still lands in the cache for the next caller,
- * - aborts the underlying request after `hardTimeoutMs` so a scan can't run forever.
+ * - aborts the underlying request after `hardTimeoutMs` on transports that honour the
+ *   signal; a scan that ignores it holds the slot until it answers, at most `giveUpMs`.
  *
  * No `$lib` imports here so it can be unit tested in isolation.
  */
@@ -22,8 +21,14 @@ export interface DiskUsageCacheOptions {
 	ttlMs: number;
 	/** Upper bound on cached environments (oldest evicted first). */
 	maxEntries: number;
-	/** Abort the underlying request after this long. */
+	/** Abort the underlying request after this long (honoured by transports that read the signal). */
 	hardTimeoutMs: number;
+	/**
+	 * Stop waiting on a scan whose transport ignores the abort (a local socket) after this
+	 * long, so a hung request cannot block the environment forever. Its result is still
+	 * stored if it arrives later. Defaults to 5x hardTimeoutMs.
+	 */
+	giveUpMs?: number;
 	/** Clock, injectable for tests. */
 	now?: () => number;
 }
@@ -40,7 +45,10 @@ export interface DiskUsageCache<T> {
 	get(envId: number, waitMs?: number): Promise<T | null>;
 	/** True while a scan for this environment is running. */
 	isLoading(envId: number): boolean;
-	/** Drop cached data (one environment, or all). In-flight scans are left alone. */
+	/**
+	 * Drop cached data (one environment, or all). A scan already running is detached: its
+	 * result is not stored, and the next get() starts a fresh scan.
+	 */
 	clear(envId?: number): void;
 }
 
@@ -51,6 +59,13 @@ export function createDiskUsageCache<T>(
 	const now = options.now ?? Date.now;
 	const cache = new Map<number, { data: T; timestamp: number }>();
 	const inflight = new Map<number, Promise<T | null>>();
+	// Bumped by clear(): a scan that started before the clear must not store its result.
+	const generations = new Map<number, number>();
+	let globalGeneration = 0;
+	const generationOf = (envId: number) => `${globalGeneration}:${generations.get(envId) ?? 0}`;
+	// A scan freed by giveUpMs can land after a newer one: only a newer scan's result is stored.
+	let scanSeq = 0;
+	const storedSeq = new Map<number, number>();
 
 	function store(envId: number, data: T) {
 		cache.delete(envId); // re-insert so Map order stays oldest-first
@@ -67,19 +82,45 @@ export function createDiskUsageCache<T>(
 		if (pending) return pending;
 
 		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), options.hardTimeoutMs);
-		(timer as { unref?: () => void }).unref?.();
+		const abortTimer = setTimeout(() => controller.abort(), options.hardTimeoutMs);
+		(abortTimer as { unref?: () => void }).unref?.();
+		// A transport that ignores the abort keeps the scan running; the slot stays taken until
+		// it settles (one scan per environment), bounded by giveUpMs for a request that hangs.
+		const giveUpMs = options.giveUpMs ?? options.hardTimeoutMs * 5;
+		let giveUpTimer: ReturnType<typeof setTimeout> | undefined;
+		const giveUp = new Promise<never>((_, reject) => {
+			giveUpTimer = setTimeout(() => reject(new Error(`no answer after ${giveUpMs} ms`)), giveUpMs);
+			(giveUpTimer as { unref?: () => void }).unref?.();
+		});
+		giveUp.catch(() => {});
+		const generation = generationOf(envId);
+		const seq = ++scanSeq;
 
-		const promise = (async () => {
+		// The scan starts now; a fetcher that throws synchronously becomes a rejection.
+		const scan = new Promise<T>((resolve) => resolve(fetcher(envId, controller.signal)));
+		// Stored whenever it lands, even after giveUp, unless the cache was cleared meanwhile.
+		scan.then(
+			(data) => {
+				if (data === null || data === undefined || generationOf(envId) !== generation) return;
+				if (seq < (storedSeq.get(envId) ?? 0)) return;
+				storedSeq.set(envId, seq);
+				store(envId, data);
+			},
+			() => {}
+		);
+
+		let promise: Promise<T | null> | undefined;
+		promise = (async () => {
 			try {
-				const data = await fetcher(envId, controller.signal);
-				if (data !== null && data !== undefined) store(envId, data);
+				const data = await Promise.race([scan, giveUp]);
 				return data ?? null;
-			} catch {
+			} catch (error) {
+				console.warn(`[Docker] /system/df failed for env ${envId}:`, error instanceof Error ? error.message : String(error));
 				return null;
 			} finally {
-				clearTimeout(timer);
-				inflight.delete(envId);
+				clearTimeout(abortTimer);
+				clearTimeout(giveUpTimer);
+				if (inflight.get(envId) === promise) inflight.delete(envId);
 			}
 		})();
 
@@ -110,8 +151,15 @@ export function createDiskUsageCache<T>(
 			return inflight.has(envId);
 		},
 		clear(envId) {
-			if (envId === undefined) cache.clear();
-			else cache.delete(envId);
+			if (envId === undefined) {
+				globalGeneration++;
+				cache.clear();
+				inflight.clear();
+			} else {
+				generations.set(envId, (generations.get(envId) ?? 0) + 1);
+				cache.delete(envId);
+				inflight.delete(envId);
+			}
 		}
 	};
 }

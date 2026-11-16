@@ -3,6 +3,8 @@ import {
 	computeRequestTimeoutMs,
 	isPrunePath,
 	isStopPath,
+	isDiskUsagePath,
+	DISK_USAGE_TIMEOUT_MS,
 	stopTimeoutMs,
 	STOP_TIMEOUT_MARGIN_MS
 } from '../../src/lib/server/backups/request-timeout';
@@ -37,6 +39,16 @@ describe('computeRequestTimeoutMs - idle-timeout policy', () => {
 		expect(computeRequestTimeoutMs({ ...base, path: '/images/json?filters=/prune' })).toBe(30000);
 		expect(isPrunePath('/images/json?x=/prune')).toBe(false);
 		expect(isPrunePath('/images/json')).toBe(false);
+	});
+
+	it('the disk usage scan gets 120s: it sends nothing until it finishes, minutes on a NAS', () => {
+		expect(DISK_USAGE_TIMEOUT_MS).toBe(120000);
+		expect(computeRequestTimeoutMs({ ...base, path: '/system/df' })).toBe(120000);
+		expect(computeRequestTimeoutMs({ ...base, path: '/system/df?type=image' })).toBe(120000);
+		// Only that path: neighbours keep the default.
+		expect(isDiskUsagePath('/system/dfx')).toBe(false);
+		expect(isDiskUsagePath('/v1.43/system/df')).toBe(false);
+		expect(computeRequestTimeoutMs({ ...base, path: '/system/info' })).toBe(30000);
 	});
 
 	it('a compose operation gets the COMPOSE_TIMEOUT (default 900s)', () => {

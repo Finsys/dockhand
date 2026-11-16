@@ -66,11 +66,22 @@ export function isPrunePath(path: string): boolean {
 	return path.split('?')[0].endsWith('/prune');
 }
 
+/**
+ * Docker's disk usage scan (`/system/df`) sends nothing until it finishes, which takes
+ * minutes on some NAS storage. It gets the same deadline as the shared disk-usage cache.
+ */
+export const DISK_USAGE_TIMEOUT_MS = 120000;
+
+export function isDiskUsagePath(path: string): boolean {
+	return path.split('?')[0] === '/system/df';
+}
+
 export function computeRequestTimeoutMs(input: RequestTimeoutInput): number | null {
 	// No idle timeout when either end streams: a large body upload or a long-lived response.
 	if (input.streamingBody || input.streamingResponse) return null;
 	if (input.path === '/_hawser/compose') return (input.composeTimeoutSecs ?? 900) * 1000;
 	if (isPrunePath(input.path)) return 300000;
+	if (isDiskUsagePath(input.path)) return DISK_USAGE_TIMEOUT_MS;
 	if (isStopPath(input.path)) return stopTimeoutMs(input.stopTimeoutSecs, input.stopEnvSecs);
 	return 30000;
 }
