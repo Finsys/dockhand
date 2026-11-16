@@ -202,6 +202,9 @@ type environment struct {
 	statusMu       sync.Mutex // guards online + statusReported (written from metrics + events goroutines)
 	online         bool
 	statusReported bool // true after first env_status message sent
+	// End of the last poll's window that was read in full (poll mode); only the
+	// events goroutine touches it. Zero until the first successful poll.
+	lastPollUntil time.Time
 }
 
 // markOnline records the env as online and reports whether this is a transition
@@ -796,13 +799,16 @@ func (m *manager) pollEvents(env *environment) {
 		m.send(OutMessage{Type: "env_status", EnvID: env.id, Online: boolPtr(true)})
 	}
 
-	now := time.Now().Unix()
-	since := now - 30
+	m.mu.Lock()
+	interval := m.pollInterval
+	m.mu.Unlock()
+	now := time.Now()
+	since := pollWindowStart(env.lastPollUntil, now, interval)
 
 	ctx, cancel := context.WithTimeout(env.ctx, 15*time.Second)
 	defer cancel()
 
-	resp, err := env.doRequest(ctx, "GET", fmt.Sprintf("/events?type=container&since=%d&until=%d", since, now))
+	resp, err := env.doRequest(ctx, "GET", fmt.Sprintf("/events?type=container&since=%s&until=%s", dockerTimestamp(since), dockerTimestamp(now)))
 	if err != nil {
 		return
 	}
@@ -828,6 +834,33 @@ func (m *manager) pollEvents(env *environment) {
 			})
 		}
 	}
+	// Only a window read to the end moves on; otherwise the next poll reads it again.
+	if pollScanner.Err() == nil {
+		env.lastPollUntil = now
+	}
+}
+
+// maxPollCatchUp bounds how far back a poll reads after the collector couldn't
+// reach Docker: events older than this are not replayed as if they had just
+// happened. Twice the longest poll interval Dockhand allows (5 minutes).
+const maxPollCatchUp = 10 * time.Minute
+
+// pollWindowStart returns where a poll's window of Docker events starts: just
+// after the end of the last window read in full, so no event between two polls
+// is lost or read twice, whatever the poll interval (#1886). The first poll, and
+// one after a gap longer than maxPollCatchUp, read one interval back.
+func pollWindowStart(lastUntil, now time.Time, interval time.Duration) time.Time {
+	if lastUntil.IsZero() || now.Sub(lastUntil) > maxPollCatchUp {
+		return now.Add(-interval)
+	}
+	// Docker's since and until both include their own instant.
+	return lastUntil.Add(time.Nanosecond)
+}
+
+// dockerTimestamp formats a time as Docker's events API takes it: Unix seconds
+// with nanoseconds.
+func dockerTimestamp(t time.Time) string {
+	return fmt.Sprintf("%d.%09d", t.Unix(), t.Nanosecond())
 }
 
 // ---------------------------------------------------------------------------
