@@ -5,6 +5,7 @@
     "comingSoon": true,
     "changes": [
       { "type": "feature", "text": "DISABLE_FRAME_PROTECTION allows embedding Dockhand in a trusted iframe (#1867)" },
+      { "type": "feature", "text": "Korean interface translation (PR#1910, @hw0603)" },
       { "type": "fix", "text": "self-update starts correctly on podman with cgroup v2 (#1860)" },
       { "type": "fix", "text": "reject an ssh git url paired with a username/password credential with a clear message (#1862)" },
       { "type": "fix", "text": "renaming an environment no longer leaves its stacks showing an empty compose file (#1879)" },
