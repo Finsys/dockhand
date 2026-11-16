@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
 	computeRequestTimeoutMs,
+	edgeRequestTimeoutMs,
 	isPrunePath,
 	isStopPath,
 	isDiskUsagePath,
@@ -154,5 +155,25 @@ describe('the grace period travels on the path, for transports that cannot read 
 		for (const bad of ['?t=abc', '?t=0', '?t=-5', '?t=']) {
 			expect(stopTimeoutMs(fromPath(`/containers/abc/stop${bad}`))).toBe(30000);
 		}
+	});
+});
+
+describe('edge requests get the same deadlines as a direct socket', () => {
+	it('compose waits for COMPOSE_TIMEOUT, not five minutes', () => {
+		expect(edgeRequestTimeoutMs({ path: '/_hawser/compose' }, false)).toBe(900000);
+		expect(edgeRequestTimeoutMs({ path: '/_hawser/compose', composeTimeoutSecs: 1800 }, false)).toBe(1800000);
+		expect(edgeRequestTimeoutMs({ path: '/_hawser/compose', composeTimeoutSecs: 120 }, false)).toBe(120000);
+	});
+
+	it('everything else keeps its deadline', () => {
+		expect(edgeRequestTimeoutMs({ path: '/images/prune?filters=x', composeTimeoutSecs: 1800 }, false)).toBe(300000);
+		expect(edgeRequestTimeoutMs({ path: '/system/df' }, false)).toBe(DISK_USAGE_TIMEOUT_MS);
+		expect(edgeRequestTimeoutMs({ path: '/containers/abc/stop', stopTimeoutSecs: 60 }, false)).toBe(60000 + STOP_TIMEOUT_MARGIN_MS);
+		expect(edgeRequestTimeoutMs({ path: '/containers/json', composeTimeoutSecs: 1800 }, false)).toBe(30000);
+	});
+
+	it('a stream keeps its five-minute bound', () => {
+		expect(edgeRequestTimeoutMs({ path: '/containers/abc/logs?follow=1' }, true)).toBe(300000);
+		expect(edgeRequestTimeoutMs({ path: '/_hawser/compose', composeTimeoutSecs: 1800 }, true)).toBe(300000);
 	});
 });

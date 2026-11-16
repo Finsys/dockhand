@@ -22,11 +22,10 @@ import { demuxDockerStream } from './docker-demux-core';
 import { isExpectedConnectionError, isQuietDockerFailure, transportTimeoutError } from './docker-probe-core';
 import {
 	computeRequestTimeoutMs,
+	edgeRequestTimeoutMs,
 	isPrunePath,
 	isStopPath,
-	stopTimeoutMs,
-	isDiskUsagePath,
-	DISK_USAGE_TIMEOUT_MS
+	stopTimeoutMs
 } from './backups/request-timeout';
 import { helperWaitDeadline, helperExitFromState, helperFailureDetail, needsDaemonErrorLookup } from './helper-wait-core';
 import { cancelReaderOnAbort } from './reader-abort-core';
@@ -1295,10 +1294,15 @@ function stopTimeoutEnvSecs(): number | null {
  * path as `?t=`, put there by stopContainer, so no second inspect is needed.
  */
 function edgeTimeoutMs(path: string, streaming: boolean): number {
-	if (streaming || path === '/_hawser/compose' || isPrunePath(path)) return 300000;
-	if (isStopPath(path)) return stopTimeoutMs(stopTimeoutFromPath(path), stopTimeoutEnvSecs());
-	if (isDiskUsagePath(path)) return DISK_USAGE_TIMEOUT_MS;
-	return 30000;
+	return edgeRequestTimeoutMs(
+		{
+			path,
+			composeTimeoutSecs: parseInt(process.env.COMPOSE_TIMEOUT || '900'),
+			stopTimeoutSecs: stopTimeoutFromPath(path),
+			stopEnvSecs: stopTimeoutEnvSecs()
+		},
+		streaming
+	);
 }
 
 export async function stopContainer(

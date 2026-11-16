@@ -76,6 +76,18 @@ export function isDiskUsagePath(path: string): boolean {
 	return path.split('?')[0] === '/system/df';
 }
 
+/**
+ * The edge (WebSocket) path: the same deadlines, so compose honours COMPOSE_TIMEOUT. A
+ * streaming request keeps its fixed 300 s bound.
+ */
+export function edgeRequestTimeoutMs(
+	input: Omit<RequestTimeoutInput, 'streamingBody' | 'streamingResponse'>,
+	streaming: boolean
+): number {
+	if (streaming) return 300000;
+	return computeRequestTimeoutMs({ ...input, streamingBody: false, streamingResponse: false }) ?? 30000;
+}
+
 export function computeRequestTimeoutMs(input: RequestTimeoutInput): number | null {
 	// No idle timeout when either end streams: a large body upload or a long-lived response.
 	if (input.streamingBody || input.streamingResponse) return null;
