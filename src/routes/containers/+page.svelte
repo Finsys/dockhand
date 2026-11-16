@@ -33,7 +33,7 @@
 		RotateCw,
 		Trash2,
 		Plus,
-		FileText,
+		ScrollText,
 		Pencil,
 		NotepadText,
 		Pin,
@@ -2456,7 +2456,7 @@
 									title={m.containers_list_show_logs()}
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<FileText class="w-4 h-4 text-blue-400" style="filter: drop-shadow(0 0 4px rgba(96,165,250,0.9)) drop-shadow(0 0 8px rgba(96,165,250,0.6));" strokeWidth={2.5} />
+									<ScrollText class="w-4 h-4 text-blue-400" style="filter: drop-shadow(0 0 4px rgba(96,165,250,0.9)) drop-shadow(0 0 8px rgba(96,165,250,0.6));" strokeWidth={2.5} />
 								</button>
 							{:else}
 								<button
@@ -2465,7 +2465,7 @@
 									title={m.containers_list_open_logs()}
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<FileText class="grid-action-icon grid-action-logs text-muted-foreground hover:text-foreground" />
+									<ScrollText class="grid-action-icon grid-action-logs text-muted-foreground hover:text-foreground" />
 								</button>
 							{/if}
 							{/if}
