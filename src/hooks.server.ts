@@ -23,7 +23,8 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
 import { isPublicPath } from '$lib/server/public-paths-core';
-import { isForbiddenCrossOrigin, isCsrfExemptPath, parseTrustedHostnames, csrfOriginCheckDisabled } from '$lib/server/csrf-origin-core';
+import { isForbiddenCrossOrigin, isCsrfExemptPath, parseTrustedOrigins, csrfOriginCheckDisabled } from '$lib/server/csrf-origin-core';
+import { frameProtectionEnabled } from '$lib/server/frame-protection-core';
 import { evaluateExposure } from '$lib/server/exposure-warning';
 import { METRICS_PUBLIC } from '$lib/server/metrics';
 import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
@@ -411,42 +412,48 @@ const authHandle: Handle = async ({ event, resolve }) => {
 
 // Framing protection on content responses: no cross-origin page can embed the UI in a
 // frame and overlay it, so a click on the attacker's page cannot be redressed onto a
-// Dockhand control. The app uses no iframes, so `DENY` / `frame-ancestors 'none'` is
-// safe. nosniff stops a response being read as a type the server did not send. These
-// land on responses that flow back through resolve(); a thrown redirect/error exit is
-// built by SvelteKit outside the hook chain and carries no framable content anyway.
+// Dockhand control. On by default (`DENY` / `frame-ancestors 'none'`); an operator who
+// embeds Dockhand in a trusted parent page (a Home Assistant / homelab dashboard iframe)
+// opts out with DISABLE_FRAME_PROTECTION. nosniff is unaffected - it stops a response
+// being read as a type the server did not send and always applies. These land on
+// responses that flow back through resolve(); a thrown redirect/error exit is built by
+// SvelteKit outside the hook chain and carries no framable content anyway.
 const securityHeaders: Handle = async ({ event, resolve }) => {
 	const response = await resolve(event);
-	response.headers.set('X-Frame-Options', 'DENY');
-	// Do not clobber a route that set its own CSP (e.g. the icon proxy's sandbox policy
-	// over untrusted SVG bytes); only add framing protection where there is none.
-	if (!response.headers.has('Content-Security-Policy')) {
-		response.headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+	if (frameProtectionEnabled(process.env.DISABLE_FRAME_PROTECTION)) {
+		response.headers.set('X-Frame-Options', 'DENY');
+		// Do not clobber a route that set its own CSP (e.g. the icon proxy's sandbox policy
+		// over untrusted SVG bytes); only add framing protection where there is none.
+		if (!response.headers.has('Content-Security-Policy')) {
+			response.headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+		}
 	}
 	response.headers.set('X-Content-Type-Options', 'nosniff');
+	// Do not leak internal paths (stack/container names in the URL) to an external site via
+	// the Referer when a user follows an outbound link, and deny device APIs the UI never uses.
+	response.headers.set('Referrer-Policy', 'no-referrer');
+	response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 	return response;
 };
 
-// Own CSRF origin check (SvelteKit's built-in is disabled in svelte.config.js so public
-// signature-authenticated cross-origin endpoints can be exempted). Reject a cross-site
-// form-content write before the auth handle processes it.
-// Operator escape hatches for the origin check, read once at startup: TRUSTED_ORIGINS marks
-// extra hostnames same-site (for a reverse proxy that rewrites the Origin host), and
-// DISABLE_CSRF_ORIGIN_CHECK turns the check off entirely (last resort).
-const CSRF_TRUSTED_HOSTNAMES = parseTrustedHostnames(process.env.TRUSTED_ORIGINS);
+// Cross-site request protection (see csrf-origin-core.ts). Read once at startup: the trusted
+// origins are TRUSTED_ORIGINS plus ORIGIN, and DISABLE_CSRF_ORIGIN_CHECK turns the check off.
+const CSRF_TRUSTED_ORIGINS = parseTrustedOrigins(process.env.TRUSTED_ORIGINS, process.env.ORIGIN);
 const CSRF_ORIGIN_CHECK_DISABLED = csrfOriginCheckDisabled(process.env.DISABLE_CSRF_ORIGIN_CHECK);
 
 const csrfHandle: Handle = async ({ event, resolve }) => {
+	const headers = event.request.headers;
 	if (
 		isForbiddenCrossOrigin({
 			method: event.request.method,
-			contentType: event.request.headers.get('content-type'),
-			origin: event.request.headers.get('origin'),
-			urlOrigin: event.url.origin,
+			contentType: headers.get('content-type'),
+			origin: headers.get('origin'),
+			secFetchSite: headers.get('sec-fetch-site'),
+			host: headers.get('host'),
 			isExemptPath: isCsrfExemptPath(event.url.pathname),
 			hasSessionCookie: !!event.cookies.get(SESSION_COOKIE),
-			secFetchSite: event.request.headers.get('sec-fetch-site'),
-			trustedHostnames: CSRF_TRUSTED_HOSTNAMES,
+			hasBearerToken: /^bearer\s/i.test(headers.get('authorization') ?? ''),
+			trustedOrigins: CSRF_TRUSTED_ORIGINS,
 			disabled: CSRF_ORIGIN_CHECK_DISABLED
 		})
 	) {
