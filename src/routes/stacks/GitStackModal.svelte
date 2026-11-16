@@ -690,6 +690,7 @@
 			formAutoUpdateCron = '0 3 * * *';
 			formWebhookEnabled = false;
 			formWebhookSecret = '';
+			editHadWebhookSecret = false;
 			formContextDir = null;
 			formBuildOnDeploy = false;
 			formNoBuildCache = false;
@@ -917,6 +918,9 @@
 				formError = data.error || (convertStackName ? m.stacks_git_error_convert_failed() : m.stacks_git_error_save_failed());
 				return;
 			}
+
+			// Saved. The dialog stays open after a deploy, so track whether a secret is now stored.
+			editHadWebhookSecret = formWebhookEnabled && (!!formWebhookSecret || editHadWebhookSecret);
 
 			// Check if deployment failed
 			const deployResult = data.deployResult as { success?: boolean; error?: string } | undefined;
@@ -1458,7 +1462,7 @@
 				</div>
 				<TogglePill
 					bind:checked={formWebhookEnabled}
-					onchange={() => { if (formWebhookEnabled && !formWebhookSecret) formWebhookSecret = generateWebhookSecret(); }}
+					onchange={() => { if (formWebhookEnabled && !formWebhookSecret && !editHadWebhookSecret) formWebhookSecret = generateWebhookSecret(); }}
 				/>
 			</div>
 				<p class="text-xs text-muted-foreground">
@@ -1502,7 +1506,7 @@
 							<Input
 								id="webhook-secret"
 								bind:value={formWebhookSecret}
-								placeholder={m.stacks_git_webhook_secret_placeholder()}
+								placeholder={editHadWebhookSecret ? m.stacks_git_webhook_secret_stored_placeholder() : m.stacks_git_webhook_secret_placeholder()}
 								class="font-mono text-xs {errors.webhookSecret ? 'border-destructive focus-visible:ring-destructive' : ''}"
 								oninput={() => errors.webhookSecret = undefined}
 							/>
@@ -1542,6 +1546,8 @@
 						</div>
 						{#if errors.webhookSecret}
 							<p class="text-xs text-destructive">{errors.webhookSecret}</p>
+						{:else if editHadWebhookSecret && formWebhookSecret}
+							<p class="text-xs text-amber-600 dark:text-amber-500">{m.stacks_git_webhook_secret_replace_hint()}</p>
 						{/if}
 					</div>
 					{#if !gitStack}
