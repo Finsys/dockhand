@@ -1,7 +1,44 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { resolveNanoCpusConflict } from '../src/lib/server/hostconfig-recreate';
+import { resolveNanoCpusConflict, stripDefaultMemorySwappiness } from '../src/lib/server/hostconfig-recreate';
+
+describe('stripDefaultMemorySwappiness', () => {
+	// Podman reports MemorySwappiness=0 for a container with no memory limits, and crun
+	// rejects setting swappiness on cgroup v2 at START even for 0 - this is the self-update
+	// start failure. The three unset-default forms must all be dropped.
+	for (const def of [0, -1, null, undefined]) {
+		it(`drops the default MemorySwappiness ${String(def)}`, () => {
+			const hc: any = { MemorySwappiness: def, Memory: 42 };
+			assert.equal(stripDefaultMemorySwappiness(hc), true);
+			assert.equal('MemorySwappiness' in hc, false);
+			assert.equal(hc.Memory, 42); // unrelated field untouched (non-zero sentinel)
+		});
+	}
+
+	it('keeps a real user-set MemorySwappiness (60) - not a default', () => {
+		const hc: any = { MemorySwappiness: 60 };
+		assert.equal(stripDefaultMemorySwappiness(hc), false);
+		assert.equal(hc.MemorySwappiness, 60);
+	});
+
+	it('keeps a positive near-default like 1', () => {
+		const hc: any = { MemorySwappiness: 1 };
+		assert.equal(stripDefaultMemorySwappiness(hc), false);
+		assert.equal(hc.MemorySwappiness, 1);
+	});
+
+	it('no-op when MemorySwappiness is absent', () => {
+		const hc: any = { Memory: 123 };
+		assert.equal(stripDefaultMemorySwappiness(hc), false);
+		assert.equal(hc.Memory, 123);
+	});
+
+	it('safe on null/undefined hostConfig', () => {
+		assert.equal(stripDefaultMemorySwappiness(null), false);
+		assert.equal(stripDefaultMemorySwappiness(undefined), false);
+	});
+});
 
 describe('resolveNanoCpusConflict (#1381)', () => {
 	it('drops CpuPeriod/CpuQuota when NanoCpus is also set (Podman inspect reports both)', () => {

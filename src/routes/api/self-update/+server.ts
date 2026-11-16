@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
 import { applySelfUpdateNetworks } from '$lib/server/self-update-network-core';
-import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from '$lib/server/mount-dedupe';
+import { buildSelfUpdateCreateConfig } from '$lib/server/self-update-core';
 import {
 	getOwnContainerId,
 	getHostDockerSocket,
@@ -146,50 +146,6 @@ async function cleanupExistingUpdaters(): Promise<void> {
 }
 
 /**
- * Build the container create config from inspect data (same logic as recreateContainerFromInspect).
- * Does NOT include NetworkingConfig: applySelfUpdateNetworks adds the primary network when
- * it pins an IP, and the sidecar connects the rest.
- */
-function buildCreateConfig(inspectData: any, newImage: string): any {
-	const config = inspectData.Config || {};
-	const hostConfig = inspectData.HostConfig || {};
-
-	const createConfig: any = {
-		...config,
-		Image: newImage,
-		HostConfig: { ...hostConfig }
-	};
-
-	// Clear MacAddress for Docker API < 1.44 compatibility
-	delete createConfig.MacAddress;
-
-	// Clear Entrypoint and Cmd so the new image's defaults are used.
-	// This prevents carrying over a stale entrypoint from a previous runtime
-	// (e.g. Bun's docker-entrypoint.sh → Node.js docker-entrypoint-node.sh).
-	delete createConfig.Entrypoint;
-	delete createConfig.Cmd;
-
-	// Clear Hostname so Docker assigns the new container's own ID
-	// Otherwise the old container's hostname is inherited, breaking self-identification
-	delete createConfig.Hostname;
-
-	const additionalBinds = getAdditionalVolumeBinds(hostConfig, inspectData.Mounts || []);
-	// Drop image-VOLUME entries that collide with a bind/tmpfs/inspect mount, so create never
-	// sends a duplicate mount point (#1088 / #1363).
-	const kept = dedupeVolumesForRecreate(createConfig.Volumes, hostConfig, inspectData.Mounts || [], additionalBinds);
-	if (kept) createConfig.Volumes = kept;
-	else delete createConfig.Volumes;
-	if (additionalBinds.length > 0) {
-		createConfig.HostConfig = {
-			...createConfig.HostConfig,
-			Binds: [...(createConfig.HostConfig.Binds || []), ...additionalBinds]
-		};
-	}
-
-	return createConfig;
-}
-
-/**
  * SSE stream endpoint for self-update.
  * Pulls image, creates new container, then launches minimal sidecar.
  */
@@ -275,7 +231,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 					throw new Error('Failed to inspect own container');
 				}
 				const inspectData = await inspectResponse.json();
-				const createConfig = buildCreateConfig(inspectData, newImage);
+				const createConfig = buildSelfUpdateCreateConfig(inspectData, newImage);
 				const { primary, reconnect: networkPlan } = applySelfUpdateNetworks(createConfig, inspectData);
 				if (primary) send('log', { message: `Creating on ${primary} to keep its pinned IP` });
 				if (networkPlan.skipped.length > 0) {
