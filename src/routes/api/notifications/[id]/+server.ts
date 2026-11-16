@@ -11,6 +11,7 @@ import { authorize } from '$lib/server/authorize';
 import { auditNotification } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 import { maskAppriseUrl } from '$lib/server/notifications/events-core';
+import { smtpHostReason } from '$lib/server/notifications/smtp-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -62,7 +63,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * body: {name:string, enabled:boolean, config:{host:string, port:integer, secure:boolean, username:string, password:string, from_email:string, from_name:string, to_emails:array<string>, urls:array<string>}, eventTypes:array<string>, event_types:array<string>}
  * body-example: {"name":"Ops Alerts","enabled":false,"config":{"host":"smtp.example.com","port":587,"from_email":"dockhand@example.com","to_emails":["ops@example.com"],"password":"********"},"eventTypes":["container_unhealthy","container_oom"]}
  * resp-200: {id:integer!, type:string!, name:string!, enabled:boolean!, config:{}, eventTypes:array<string>}
- * resp-400: Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL)
+ * resp-400: Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is loopback/localhost/cloud-metadata/reserved)
  * resp-403: Permission denied (requires the notifications:edit permission)
  * resp-404: Notification setting not found
  * resp-500: Failed to update notification setting
@@ -96,6 +97,10 @@ export const PUT: RequestHandler = async (event) => {
 				const smtpConfig = config as SmtpConfig;
 				if (!smtpConfig.host || !smtpConfig.port || !smtpConfig.from_email || !smtpConfig.to_emails?.length) {
 					return json({ error: 'SMTP config requires host, port, from_email, and to_emails' }, { status: 400 });
+				}
+				const hostReason = smtpHostReason(smtpConfig.host);
+				if (hostReason) {
+					return json({ error: `Invalid SMTP host: ${hostReason}` }, { status: 400 });
 				}
 				// If password is masked, keep the existing one
 				if (smtpConfig.password === '********') {

@@ -3,6 +3,22 @@
  * nodemailer (which the bun unit runner cannot load).
  */
 
+import { dangerousHostReason } from '../url-safety';
+
+/**
+ * SSRF host policy for the SMTP channel, matching the MQTT channel: reject loopback
+ * (incl. the `localhost` name), link-local cloud metadata (169.254.169.254) and
+ * reserved ranges, while allowing a private-LAN mail server (10.x / 192.168.x /
+ * 172.16-31.x), which is a normal self-hosted configuration. Returns a reason string
+ * for a blocked host, or null when the host is acceptable.
+ */
+export function smtpHostReason(host: string | null | undefined): string | null {
+	const h = (host || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+	if (!h) return 'missing SMTP host';
+	if (h === 'localhost' || h.endsWith('.localhost')) return 'loopback address (localhost) blocked';
+	return dangerousHostReason(h);
+}
+
 /**
  * Escape the five HTML-significant characters. The title/message can carry
  * remote-agent-supplied strings (container names, image tags), so they are

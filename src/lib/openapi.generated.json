@@ -11452,7 +11452,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "Update an environment; renaming also renames its on-disk stacks/git-repos directories",
+        "summary": "Update an environment; renaming also renames its on-disk stacks/git-repos directories and repoints the stack paths stored under them",
         "parameters": [
           {
             "name": "id",
@@ -11527,7 +11527,7 @@
             "description": "Environment not found"
           },
           "409": {
-            "description": "Rename target directory already exists, or the on-disk rename failed (e.g. EXDEV across filesystems)"
+            "description": "Another environment already has the new name, the rename target directory already exists, or the on-disk rename failed (e.g. EXDEV across filesystems)"
           },
           "500": {
             "description": "Unexpected error while updating the environment"
@@ -11863,6 +11863,9 @@
         "responses": {
           "200": {
             "description": "Binary image/webp response body, Cache-Control public max-age=3600"
+          },
+          "403": {
+            "description": "Caller lacks the environments:view permission, or is denied access to this environment"
           },
           "404": {
             "description": "No custom icon set for this environment"
@@ -16511,6 +16514,9 @@
           "200": {
             "description": "Successful response"
           },
+          "401": {
+            "description": "Not authenticated"
+          },
           "426": {
             "description": "This endpoint requires a WebSocket upgrade (ws:// or wss://)"
           }
@@ -17025,6 +17031,9 @@
           },
           "400": {
             "description": "The ref is not a valid selfh.st reference"
+          },
+          "401": {
+            "description": "Not authenticated"
           }
         },
         "security": [
@@ -17073,6 +17082,9 @@
           },
           "400": {
             "description": "The request body is missing a refs array"
+          },
+          "401": {
+            "description": "Not authenticated"
           }
         },
         "security": [
@@ -17125,6 +17137,9 @@
         "responses": {
           "200": {
             "description": "The raw selfh.st index.json array (application/json)"
+          },
+          "401": {
+            "description": "Not authenticated"
           },
           "503": {
             "description": "The manifest is unavailable (never cached and the upstream fetch failed)"
@@ -18353,6 +18368,9 @@
               }
             }
           },
+          "401": {
+            "description": "Not authenticated"
+          },
           "404": {
             "description": "LICENSE.txt could not be found/read"
           }
@@ -18406,6 +18424,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Not authenticated"
           },
           "404": {
             "description": "PRIVACY.txt could not be found/read"
@@ -19457,7 +19478,7 @@
             }
           },
           "400": {
-            "description": "Missing or invalid fields — type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL"
+            "description": "Missing or invalid fields - type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is loopback/localhost/cloud-metadata/reserved"
           },
           "403": {
             "description": "Permission denied (requires the notifications:create permission)"
@@ -19765,7 +19786,7 @@
             }
           },
           "400": {
-            "description": "Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL)"
+            "description": "Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is loopback/localhost/cloud-metadata/reserved)"
           },
           "403": {
             "description": "Permission denied (requires the notifications:edit permission)"
@@ -20238,6 +20259,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Not authenticated"
           }
         },
         "security": [
@@ -24818,6 +24842,9 @@
           "400": {
             "description": "hideSystemJobs is not a boolean"
           },
+          "401": {
+            "description": "Not authenticated"
+          },
           "500": {
             "description": "Unexpected error while saving the setting"
           }
@@ -25007,7 +25034,7 @@
         "tags": [
           "secret-providers"
         ],
-        "summary": "Create a secret provider (Vault, Infisical, Doppler, 1Password Connect)",
+        "summary": "Create a secret provider of any supported type",
         "parameters": [],
         "responses": {
           "201": {
@@ -25372,7 +25399,7 @@
         ],
         "responses": {
           "200": {
-            "description": "ok=true returns the key names found via the bulk selector and the resolved op:// refs; ok=false folds a provider error in (still 200) so a slow or auth-gated provider never breaks the editor",
+            "description": "ok=true returns the key names found via the bulk selector and the resolved op:// refs; for a provider that decrypts the stack's env file (SOPS), `stack`+`env` name a git stack and bulkKeys are the names its synced env file decrypts to (needs stacks:view there). ok=false folds a provider error in (still 200) so a slow or auth-gated provider never breaks the editor",
             "content": {
               "application/json": {
                 "schema": {
@@ -25418,7 +25445,7 @@
             "description": "Invalid ID or unknown provider type"
           },
           "403": {
-            "description": "Permission denied (needs secrets:view)"
+            "description": "Permission denied (needs secrets:view, and stacks:view for a stack probe)"
           },
           "404": {
             "description": "Secret provider not found"
@@ -25447,6 +25474,12 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "stack": {
+                    "type": "string"
+                  },
+                  "env": {
+                    "type": "integer"
                   }
                 }
               },

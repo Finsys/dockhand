@@ -72,10 +72,15 @@ export const GET: RequestHandler = async ({ cookies }) => {
 /**
  * @openapi
  * summary: Fallback for non-WebSocket clients; always advises upgrading to a WebSocket connection
+ * resp-401: Not authenticated
  * resp-426: This endpoint requires a WebSocket upgrade (ws:// or wss://)
  * resp-426-example: {"error":"WebSocket required","message":"This endpoint requires a WebSocket connection. Use the ws:// or wss:// protocol.","instructions":["1. Generate a token in Settings","2. Configure the Hawser agent","3. The agent connects automatically"]}
  */
-export const POST: RequestHandler = async () => {
+export const POST: RequestHandler = async ({ cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Not authenticated' }, { status: 401 });
+	}
 	return json(
 		{
 			error: 'WebSocket required',

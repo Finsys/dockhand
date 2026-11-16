@@ -565,8 +565,8 @@ describe('parseEnvFileForForm is the one reader', () => {
 			// git.ts reads through envFileFormVars, the form reader minus SOPS metadata.
 			expect(source).toMatch(/parseEnvFileForForm\(|envFileFormVars\(/);
 			// A hand-rolled value split is how the callers drifted apart, whatever it names
-			// its locals. git.ts legitimately has one in `parseEnvFileContent`, the
-			// DEPLOY-time reader, so that function's body is the one exception.
+			// its locals. The DEPLOY-time reader `parseEnvFileContent` legitimately has one;
+			// it lives in env-file-content-core.ts, and its body is skipped if found here.
 			const deployReader = source.indexOf('export function parseEnvFileContent');
 			const deployReaderEnd = deployReader < 0 ? -1 : source.indexOf('\n}', deployReader);
 			const handRolled = [...source.matchAll(/\.(slice|substring)\(\s*\w+\s*\+\s*1\s*\)/g)]

@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { authorize } from '$lib/server/authorize';
 import { getSelfhstIcon, sanitizeRefList } from '$lib/server/selfhst-icons';
 
 // Cap how many refs one call resolves, and how many upstream fetches run at once,
@@ -30,8 +31,13 @@ const CONCURRENCY = 8;
  * resp-200-desc: icons maps each resolved reference to a data: base64 URI in the format available (svg/webp/png); unresolvable refs are omitted.
  * resp-200-example: {"icons":{"plex":"data:image/svg+xml;base64,PHN2Zy4uLg=="}}
  * resp-400: The request body is missing a refs array
+ * resp-401: Not authenticated
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Not authenticated' }, { status: 401 });
+	}
 	let body: { refs?: unknown };
 	try {
 		body = await request.json();

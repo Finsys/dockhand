@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { authorize } from '$lib/server/authorize';
 import { getSelfhstIcon, isValidSelfhstRef } from '$lib/server/selfhst-icons';
 
 // Security headers applied to every icon response regardless of format. An SVG is
@@ -25,8 +26,13 @@ const PLACEHOLDER_SVG =
  * path: ref:string! selfh.st icon Reference (lowercase letters, digits, hyphens), e.g. "plex"
  * resp-200: Raw image body (image/svg+xml, image/webp, or image/png; a neutral SVG placeholder if it can't be resolved), Cache-Control public max-age=604800
  * resp-400: The ref is not a valid selfh.st reference
+ * resp-401: Not authenticated
  */
-export const GET: RequestHandler = async ({ params }) => {
+export const GET: RequestHandler = async ({ params, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Not authenticated' }, { status: 401 });
+	}
 	const ref = params.ref;
 	if (!isValidSelfhstRef(ref)) {
 		return json({ error: 'Invalid icon reference' }, { status: 400 });
