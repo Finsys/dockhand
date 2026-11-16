@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, accessSync, existsSync, realpathSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -138,6 +138,57 @@ describe('isProtectedPath symlink resolution (the reason safeResolve exists)', (
 		} finally {
 			process.env.DATA_DIR = prev;
 			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe('DATA_DIR under a protected root (DATA_DIR=/root/docker)', () => {
+	const withDataDir = (dir: string, fn: () => void) => {
+		const prev = process.env.DATA_DIR;
+		process.env.DATA_DIR = dir;
+		try { fn(); } finally { process.env.DATA_DIR = prev; }
+	};
+	// An existing but unreadable /root (a non-root runner) fails closed, so only judge an
+	// allowed path there when /root is absent or can be walked.
+	const judgeable = !existsSync('/root') || (() => { try { accessSync('/root', constants.X_OK); return true; } catch { return false; } })();
+
+	test.skipIf(!judgeable)('its stacks are allowed', () => {
+		withDataDir('/root/docker', () => {
+			expect(isProtectedPath('/root/docker/stacks/local/app/compose.yaml')).toBe(false);
+			expect(isProtectedPath('/root/docker/stacks/local/app/.env')).toBe(false);
+		});
+	});
+
+	test('its secrets and the rest of /root stay blocked', () => {
+		withDataDir('/root/docker', () => {
+			expect(isProtectedPath('/root/docker/db/dockhand.db')).toBe(true);
+			expect(isProtectedPath('/root/docker/.encryption_key')).toBe(true);
+			expect(isProtectedPath('/root/docker/deploy-logs/x.log')).toBe(true);
+			expect(isProtectedPath('/root/docker/stacks/app/.ssh/id_rsa')).toBe(true);
+			expect(isProtectedPath('/root/.bashrc')).toBe(true);
+			expect(isProtectedPath('/root/dockerx/compose.yaml')).toBe(true);
+			expect(isProtectedPath('/root/docker/../.bashrc')).toBe(true);
+			expect(isProtectedPath('/etc/shadow')).toBe(true);
+		});
+	});
+
+	test('a link inside DATA_DIR is judged by where it points', () => {
+		// realpath, so the link's own path is literally inside DATA_DIR (macOS tmp is /var -> /private/var).
+		const dataDir = realpathSync(mkdtempSync(join(tmpdir(), 'fsguard-dd-')));
+		symlinkSync('/etc/passwd', join(dataDir, 'leak.yaml'));
+		try {
+			withDataDir(dataDir, () => expect(isProtectedPath(join(dataDir, 'leak.yaml'))).toBe(true));
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test('a DATA_DIR that is a protected root, or above one, exempts nothing', () => {
+		for (const dir of ['/', '/etc', '/root']) {
+			withDataDir(dir, () => {
+				expect(isProtectedPath('/etc/shadow')).toBe(true);
+				expect(isProtectedPath('/root/.docker/config.json')).toBe(true);
+			});
 		}
 	});
 });
