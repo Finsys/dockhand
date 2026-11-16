@@ -97,6 +97,7 @@ import type { AllGridPreferences, GridId, GridColumnPreferences } from '$lib/typ
 import { encrypt, decrypt, decryptStrict, isEncrypted } from './encryption.js';
 import { parseEnvInterpolation } from './env-interpolation';
 import { parseInjectedSecretKeys, serializeInjectedSecretKeys } from './stack-secret-keys';
+import { planStackSourceRebase } from './stack-path-rebase';
 import { invalidateVulnerabilitiesCache } from './vulnerabilities-cache';
 import { DEFAULT_RETENTION, stripUnstorableEscapes, type ScanRecord } from './scan-retention-core';
 import { semverConfigFromSetting } from './semver/global-config';
@@ -3309,6 +3310,27 @@ export async function upsertStackSource(data: {
 		});
 		return getStackSource(data.stackName, data.environmentId) as Promise<StackSourceData>;
 	}
+}
+
+/**
+ * Repoint an environment's stored compose/env paths after its stacks dir moved. Each changed
+ * row id is pushed into `changed` as it is written, so a caller can revert a partial run.
+ */
+export async function rebaseStackSourcePaths(
+	environmentId: number,
+	oldDir: string,
+	newDir: string,
+	changed: number[] = [],
+	onlyIds?: number[]
+): Promise<number> {
+	const rows = await db.select().from(stackSources).where(eq(stackSources.environmentId, environmentId));
+	for (const { id, composePath, envPath } of planStackSourceRebase(rows, oldDir, newDir, onlyIds)) {
+		await db.update(stackSources)
+			.set({ composePath, envPath, updatedAt: new Date().toISOString() })
+			.where(eq(stackSources.id, id));
+		changed.push(id);
+	}
+	return changed.length;
 }
 
 export async function updateStackSource(

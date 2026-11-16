@@ -113,10 +113,12 @@ describe('validateEnvName', () => {
 			expect(isValidEnvName(' ')).toBe(false);
 		});
 
-		test('accepts single dot', () => {
-			// Single-char names skip the last-char rule (the regex tail group
-			// is optional). "." alone is unusual but not actively harmful.
-			expect(isValidEnvName('.')).toBe(true);
+		test('rejects a single dot', () => {
+			// path.join(stacksDir, '.') is stacksDir itself, the parent of every env's stacks dir.
+			expect(validateEnvName('.')).toEqual({ ok: false, reason: 'Name can\'t be a single dot' });
+			// Dots elsewhere stay allowed.
+			expect(isValidEnvName('.a')).toBe(true);
+			expect(isValidEnvName('a.b')).toBe(true);
 		});
 	});
 
