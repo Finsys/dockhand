@@ -580,6 +580,9 @@ export const pendingContainerUpdates = sqliteTable('pending_container_updates', 
 	// Hours left before a held update may be applied. Null when no cooldown applies,
 	// so a row can record "waiting" without claiming the update is ready.
 	releaseAgeRemainingHours: integer('release_age_remaining_hours'),
+	// The new image's org.opencontainers.image.version when a digest update was found:
+	// the version a floating tag's update installs (#1501). Null without the label.
+	newImageVersion: text('new_image_version'),
 	checkedAt: text('checked_at').default(sql`CURRENT_TIMESTAMP`),
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`)
 }, (table) => ({

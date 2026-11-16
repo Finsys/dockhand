@@ -577,6 +577,8 @@ export const pendingContainerUpdates = pgTable('pending_container_updates', {
 	// Hours left before a held update may be applied. Null when no cooldown applies,
 	// so a row can record "waiting" without claiming the update is ready.
 	releaseAgeRemainingHours: integer('release_age_remaining_hours'),
+	// See the SQLite schema.
+	newImageVersion: text('new_image_version'),
 	checkedAt: timestamp('checked_at', { mode: 'string' }).defaultNow(),
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow()
 }, (table) => ({

@@ -1,0 +1,1 @@
+ALTER TABLE `pending_container_updates` ADD `new_image_version` text;

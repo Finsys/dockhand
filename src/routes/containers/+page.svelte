@@ -588,6 +588,7 @@
 	// for a bulk update would promise something it blocks.
 	const coolingDownMap = $derived($containerStore.coolingDown);
 	const pinnedDigestSet = $derived($containerStore.pinnedDigest);
+	const newImageVersionsMap = $derived($containerStore.newImageVersions);
 
 	// Any update indicator on the page - digest updates, newer-version tags, or failed
 	// checks. Drives the compact "dismiss all" (×) button.
@@ -2085,8 +2086,13 @@
 										{/snippet}
 									</ConfirmPopover>
 								{/if}
+								{#if newImageVersionsMap.get(container.id)}
+									<!-- The version the update installs, from the new image's version
+									     label: a floating tag's digest alone can't say (#1501). -->
+									<span class="text-xs text-amber-500 shrink-0" title={m.containers_list_update_available()}>{newImageVersionsMap.get(container.id)}</span>
+								{/if}
 								{#if $appSettings.showImageChangelogLinks}
-									{@const changelogUrl = resolveChangelogUrl(container.image, container.labels)}
+									{@const changelogUrl = resolveChangelogUrl(container.image, container.labels, newImageVersionsMap.get(container.id) ?? null)}
 									{#if changelogUrl}
 										<a
 											href={changelogUrl}

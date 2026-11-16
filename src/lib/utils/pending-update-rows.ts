@@ -15,6 +15,8 @@ export interface PendingUpdateRow {
 	newerVersion?: unknown | null;
 	releaseAgeRemainingHours?: number | null;
 	pinnedToDigest?: boolean;
+	/** The version the digest update installs, from the new image's version label (#1501). */
+	newImageVersion?: string | null;
 }
 
 /** Whether a row is worth persisting at all. */
@@ -37,6 +39,7 @@ export interface CheckResult {
 	newerVersion?: unknown | null;
 	releaseAgeRemainingHours?: number | null;
 	pinnedToDigest?: boolean;
+	newImageVersion?: string | null;
 	systemContainer?: unknown;
 	updateDisabled?: boolean;
 }
@@ -51,6 +54,7 @@ export interface PersistableRow {
 		newerVersion: unknown | null;
 		releaseAgeRemainingHours: number | null;
 		pinnedToDigest: boolean;
+		newImageVersion: string | null;
 	};
 }
 
@@ -73,11 +77,13 @@ export function rowsToPersist(results: CheckResult[]): PersistableRow[] {
 		const releaseAgeRemainingHours = r.releaseAgeRemainingHours ?? null;
 		const newerVersion = r.newerVersion ?? null;
 		if (!isWorthPersisting({ hasImageUpdate, newerVersion, releaseAgeRemainingHours, pinnedToDigest })) continue;
+		// Only a digest move has a new image to name.
+		const newImageVersion = r.hasUpdate ? r.newImageVersion ?? null : null;
 		out.push({
 			containerId: r.containerId,
 			containerName: r.containerName,
 			imageName: r.imageName,
-			options: { hasImageUpdate, newerVersion, releaseAgeRemainingHours, pinnedToDigest }
+			options: { hasImageUpdate, newerVersion, releaseAgeRemainingHours, pinnedToDigest, newImageVersion }
 		});
 	}
 	return out;
@@ -92,6 +98,7 @@ export interface StoredPendingRow {
 	newerVersion: string | null;
 	releaseAgeRemainingHours: number | null;
 	pinnedToDigest: boolean;
+	newImageVersion?: string | null;
 }
 
 /**
@@ -114,7 +121,8 @@ export function withPreviousOnError(
 		const digestHalf = {
 			hasImageUpdate: prev.hasImageUpdate,
 			releaseAgeRemainingHours: prev.releaseAgeRemainingHours,
-			pinnedToDigest: prev.pinnedToDigest
+			pinnedToDigest: prev.pinnedToDigest,
+			newImageVersion: prev.newImageVersion ?? null
 		};
 		const fresh = out.find((r) => r.containerId === prev.containerId);
 		if (fresh) {
@@ -148,6 +156,7 @@ export function splitPendingUpdates(data: PendingUpdatesResponse): {
 	newerVersions: Map<string, unknown>;
 	coolingDown: Map<string, number>;
 	pinnedDigest: Set<string>;
+	newImageVersions: Map<string, string>;
 } {
 	const rows = data.pendingUpdates ?? [];
 	return {
@@ -160,7 +169,10 @@ export function splitPendingUpdates(data: PendingUpdatesResponse): {
 		coolingDown: coolingDown(rows, data.minimumReleaseAgeHours ?? 1),
 		// Carried across a reload so the pin indicator survives it; a row that is only
 		// pinned never appears in `updatable`, so no bulk update can reach it.
-		pinnedDigest: new Set(rows.filter((r) => r.pinnedToDigest).map((r) => r.containerId))
+		pinnedDigest: new Set(rows.filter((r) => r.pinnedToDigest).map((r) => r.containerId)),
+		newImageVersions: new Map(
+			rows.filter((r) => r.newImageVersion).map((r) => [r.containerId, r.newImageVersion as string])
+		)
 	};
 }
 

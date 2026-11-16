@@ -53,10 +53,34 @@ export interface ImageAgeRequest {
 
 type FetchMetadata = (url: string, init: RequestInit) => Promise<Response>;
 
+/** The OCI label most images carry their application version in. */
+export const IMAGE_VERSION_LABEL = 'org.opencontainers.image.version';
+
+/** An image's version label, when it is a plausible version string. */
+export function imageVersionLabel(labels: unknown): string | null {
+	if (!labels || typeof labels !== 'object') return null;
+	const value = (labels as Record<string, unknown>)[IMAGE_VERSION_LABEL];
+	if (typeof value !== 'string') return null;
+	const version = value.trim();
+	return version && version.length <= 128 && !/[\u0000-\u001f]/.test(version) ? version : null;
+}
+
+/** What one image's config blob says about it, for the target platform. */
+export interface ImageConfigMetadata {
+	createdAt: string | null;
+	/** `org.opencontainers.image.version`, when the image sets it. */
+	version: string | null;
+}
+
+/** When the image was built (the minimum image age), or null when unknown. */
+export async function fetchImageCreatedAt(request: ImageAgeRequest, fetchMetadata: FetchMetadata = fetch): Promise<string | null> {
+	return (await fetchImageConfigMetadata(request, fetchMetadata))?.createdAt ?? null;
+}
+
 /** Standard registry metadata only. All documents are fetched by digest and
  * hash-verified, including the selected platform manifest and its config blob.
  * Unknown/ambiguous metadata returns null so callers use first observation. */
-export async function fetchImageCreatedAt(request: ImageAgeRequest, fetchMetadata: FetchMetadata = fetch): Promise<string | null> {
+export async function fetchImageConfigMetadata(request: ImageAgeRequest, fetchMetadata: FetchMetadata = fetch): Promise<ImageConfigMetadata | null> {
 	try {
 		const { registry, repo, platform } = request;
 		if (!validDigest(request.digest) || !repo.split('/').every(part => /^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$/.test(part))) return null;
@@ -83,11 +107,11 @@ export async function fetchImageCreatedAt(request: ImageAgeRequest, fetchMetadat
 			if (!validDigest(config?.digest) || !CONFIG_TYPES.includes(config?.mediaType ?? '')) return null;
 			const { body: configBody } = await readVerifiedJson(`${base}/blobs/${config.digest}`, config.digest, 4 * 1024 * 1024, 'application/json');
 			const body = configBody as {
-				created?: unknown; os?: string; architecture?: string; variant?: string;
+				created?: unknown; os?: string; architecture?: string; variant?: string; config?: { Labels?: unknown };
 			};
 			if (body?.os !== platform.os || body.architecture !== platform.architecture) return null;
 			if (platform.variant && body.variant && body.variant !== platform.variant) return null;
-			return validImageCreatedAt(body.created);
+			return { createdAt: validImageCreatedAt(body.created), version: imageVersionLabel(body.config?.Labels) };
 		}
 		return null;
 

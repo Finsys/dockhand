@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { fetchImageCreatedAt, imagePlatform, type ImageAgeRequest } from '../src/lib/server/registry/image-age';
+import { fetchImageConfigMetadata, fetchImageCreatedAt, imagePlatform, imageVersionLabel, type ImageAgeRequest } from '../src/lib/server/registry/image-age';
 
 const IMAGE = 'application/vnd.oci.image.manifest.v1+json';
 const INDEX = 'application/vnd.oci.image.index.v1+json';
@@ -218,4 +218,33 @@ test('normalizes the target daemon architecture without assuming the local runti
 	expect(imagePlatform('linux', 'armv6l')).toEqual({ os: 'linux', architecture: 'arm', variant: 'v6' });
 	expect(imagePlatform(undefined, 'amd64')).toBeNull();
 	expect(imagePlatform('linux', null)).toBeNull();
+});
+
+describe('image version label (#1501)', () => {
+	test('comes from the same verified config blob as the creation time', async () => {
+		const f = fixture({ created, os: 'linux', architecture: 'amd64', config: { Labels: { 'org.opencontainers.image.version': '3.1.1' } } });
+		expect(await fetchImageConfigMetadata(f.request, f.fetcher)).toEqual({ createdAt: created, version: '3.1.1' });
+		expect(f.calls).toHaveLength(2);
+	});
+
+	test('is null for an image without the label, with the creation time still read', async () => {
+		const f = fixture();
+		expect(await fetchImageConfigMetadata(f.request, f.fetcher)).toEqual({ createdAt: created, version: null });
+	});
+
+	test('is chosen for the daemon platform from a multi-arch index', async () => {
+		const amd64 = fixture({ created, os: 'linux', architecture: 'amd64', config: { Labels: { 'org.opencontainers.image.version': '6.2.0.17' } } });
+		addIndex(amd64, [{ digest: digestOf(amd64.manifest), mediaType: IMAGE, platform: { os: 'linux', architecture: 'amd64' } }]);
+		amd64.documents.set(digestOf(amd64.manifest), amd64.manifest);
+		expect((await fetchImageConfigMetadata(amd64.request, amd64.fetcher))?.version).toBe('6.2.0.17');
+	});
+
+	test('accepts a plausible version string only', () => {
+		expect(imageVersionLabel({ 'org.opencontainers.image.version': ' v1.2.3 ' })).toBe('v1.2.3');
+		expect(imageVersionLabel({ 'org.opencontainers.image.version': '' })).toBeNull();
+		expect(imageVersionLabel({ 'org.opencontainers.image.version': 'x'.repeat(129) })).toBeNull();
+		expect(imageVersionLabel({ 'org.opencontainers.image.version': '1.0\n2.0' })).toBeNull();
+		expect(imageVersionLabel({ 'org.opencontainers.image.version': 3 })).toBeNull();
+		expect(imageVersionLabel(null)).toBeNull();
+	});
 });

@@ -62,6 +62,8 @@ interface UpdateInfo {
 	// OLD image Env/Labels captured before any pull — for the rebase (#1226, #1256).
 	oldImageConfig?: ImageEnvLabels | null;
 	skipCooldown: boolean;
+	/** The new image's version label, when it has one (#1501). */
+	newImageVersion?: string;
 }
 
 // Track running update checks to prevent concurrent execution
@@ -264,9 +266,10 @@ export async function runEnvUpdateCheckJob(
 						currentDigest: result.currentDigest,
 						newDigest: result.registryDigest,
 						oldImageConfig,
-						skipCooldown
+						skipCooldown,
+						newImageVersion: result.newImageVersion
 					});
-					await log(`    UPDATE AVAILABLE`);
+					await log(`    UPDATE AVAILABLE${result.newImageVersion ? ` (version ${result.newImageVersion})` : ''}`);
 					await log(`      Current: ${result.currentDigest?.substring(0, 24) || 'unknown'}...`);
 					await log(`      New:     ${result.registryDigest?.substring(0, 24) || 'unknown'}...`);
 				} else if (result.releaseAgeRemainingHours) {
@@ -353,7 +356,8 @@ export async function runEnvUpdateCheckJob(
 					hasImageUpdate: !!digest,
 					newerVersion: semverByContainer.get(cid) ?? null,
 					releaseAgeRemainingHours: cooldownByContainer.get(cid) ?? null,
-					pinnedToDigest: pinnedByContainer.get(cid) ?? false
+					pinnedToDigest: pinnedByContainer.get(cid) ?? false,
+					newImageVersion: digest?.newImageVersion ?? null
 				}
 			};
 		});

@@ -255,7 +255,8 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(await docker.getImageReleaseAgeWarning(image, 1), null, 'Manual advisory must use the same durable platform');
 	await assert.rejects(docker.verifyImageReleaseAge(image, 2), /cooldown/, 'A different platform must retain its own cooldown');
 	await assert.rejects(docker.verifyImageReleaseAge(image, 3), /cooldown/, 'An unknown environment must not borrow the mature platform');
-	assert.equal(calls.filter(call => call === 'GET /info').length, 5, 'Exercise actual daemon info failures in every age path');
+	// Five age paths, plus the found update's version label read (#1501).
+	assert.equal(calls.filter(call => call === 'GET /info').length, 6, 'Exercise actual daemon info failures in every age path');
 	assert.equal(pullReferences.length, 0);
 } else if (phase === 'blocked-registry') {
 	for (const reference of ['localhost:5000/app:latest', '127.0.0.1:5000/app:latest', '169.254.169.254/app:latest']) {
@@ -352,17 +353,18 @@ if (phase === 'metadata-info-failure') {
 		assert.equal(indexReads(), 2, 'A transient index failure is read once more before it is reported');
 	} else if (phase === 'multiarch-different') {
 		// The current index plus each of the two local digests (both 404: not an index) is
-		// read once. The cached sign-in serves the HEAD and all three index reads.
+		// read once, and the update found reads the new index once more for its version
+		// label (#1501). The cached sign-in serves the HEAD and every read.
 		const manifestGets = () => calls.filter(call => call.startsWith('GET /v2/team/app/manifests/')).length;
 		const challenges = () => calls.filter(call => call === 'GET /v2/').length;
 		assert.equal(result.hasUpdate, true, JSON.stringify(result));
 		assert.equal(result.error, undefined);
-		assert.equal(manifestGets(), 3);
+		assert.equal(manifestGets(), 4);
 		assert.equal(challenges(), 1, 'One sign-in serves the HEAD and every index read of a check');
 		// Repeated: every read by digest, the 404s included, is reused, and so is the sign-in.
 		const again = await docker.checkImageUpdateAvailable(image, old, 1);
 		assert.equal(again.hasUpdate, true, JSON.stringify(again));
-		assert.equal(manifestGets(), 3, 'A repeated check must reuse every read by digest');
+		assert.equal(manifestGets(), 4, 'A repeated check must reuse every read by digest');
 		assert.equal(challenges(), 1, 'A repeated check within the token lifetime must not sign in again');
 	} else {
 		assert.equal(result.hasUpdate, false, JSON.stringify(result));
