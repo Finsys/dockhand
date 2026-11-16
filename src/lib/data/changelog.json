@@ -1,5 +1,29 @@
 [
   {
+    "version": "1.0.58",
+    "date": "",
+    "comingSoon": true,
+    "changes": [
+      { "type": "feature", "text": "DISABLE_FRAME_PROTECTION allows embedding Dockhand in a trusted iframe (#1867)" },
+      { "type": "fix", "text": "self-update starts correctly on podman with cgroup v2 (#1860)" },
+      { "type": "fix", "text": "reject an ssh git url paired with a username/password credential with a clear message (#1862)" },
+      { "type": "fix", "text": "renaming an environment no longer leaves its stacks showing an empty compose file (#1879)" },
+      { "type": "fix", "text": "no false 403 when opened by an address other than ORIGIN (#1878)" },
+      { "type": "fix", "text": "repository stats no longer time out behind a reverse proxy (#1874)" },
+      { "type": "fix", "text": "the disk usage panel no longer starts a new scan on every page load on slow storage (#1891, PR#1893, @elric667)" },
+      { "type": "fix", "text": "image ships docker-compose 5.7.0 and an updated restic, fixing CVE-2026-116591 (#1884)" },
+      { "type": "fix", "text": "stack deploys no longer write .env file contents to the log (#1890, PR#1894, @elric667)" },
+      { "type": "fix", "text": "scheduled updates honour the dockhand.skip.cooldown label instead of failing at the pull (#1895)" },
+      { "type": "fix", "text": "containerd image store: images no longer show as unused after a rebuild (#1896)" },
+      { "type": "fix", "text": "the git stack webhook secret field shows when a secret is already set (#1898)" },
+      { "type": "fix", "text": "the logs panel shows the container it is switched to while streaming is paused (#1889)" },
+      { "type": "fix", "text": "a webhook arriving during a running git sync no longer sends a false git sync failed notification (PR#1899, @Totopo27)" },
+      { "type": "fix", "text": "a running backup no longer writes tens of MB/s to the database (#1914)" },
+      { "type": "fix", "text": "the stack editor no longer shows variables from a SOPS-encrypted env file as missing (#1913)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.58"
+  },
+  {
     "version": "1.0.57",
     "date": "2026-11-04",
     "changes": [
