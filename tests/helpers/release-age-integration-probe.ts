@@ -14,7 +14,13 @@ const scanning = phase.includes('scan');
 const systemd = phase.includes('systemd');
 const systemdFailure = systemd && (phase.includes('race') || phase.includes('inspect-failure') || phase.includes('preflight'));
 const deferred = phase.includes('young');
-let remainingMs = deferred || phase === 'skip-cooldown' ? 3600001 : 0;
+// skip-label: the container carries dockhand.skip.cooldown=true while its image is still young.
+const skipLabel = phase.includes('skip-label');
+// nodigest: the registry stops answering after the update check, so the pull has no digest.
+const noDigest = phase.includes('nodigest');
+let registryDown = false;
+let advisories = 0;
+let remainingMs = deferred || skipLabel || phase === 'skip-cooldown' ? 3600001 : 0;
 let ageChecks = 0;
 const pendingUpdates: any[] = [];
 const logs: string[] = [];
@@ -42,7 +48,7 @@ let removedPending = 0;
 let current = {
 	Id: originalId, Name: '/app', Image: old,
 	// Begin with a container previously created from an immutable ID, to check the next update.
-	Config: { Image: old, Env: ['VERSION=old'], Labels: trackedImageLabels({ ...(systemd ? { PODMAN_SYSTEMD_UNIT: 'app.service' } : {}), ...(phase.includes('watch-off') ? { 'dockhand.watch.digest': 'false' } : {}) }, image, old) },
+	Config: { Image: old, Env: ['VERSION=old'], Labels: trackedImageLabels({ ...(systemd ? { PODMAN_SYSTEMD_UNIT: 'app.service' } : {}), ...(phase.includes('watch-off') ? { 'dockhand.watch.digest': 'false' } : {}), ...(skipLabel ? { 'dockhand.skip.cooldown': 'true' } : {}) }, image, old) },
 	HostConfig: { NetworkMode: 'host' }, State: { Running: systemd }, NetworkSettings: { Networks: {} }
 };
 const noop = async () => {};
@@ -79,8 +85,8 @@ if (metadataDatabase) {
 } else {
 	mock.module(root + 'minimum-release-age', () => ({
 		getMinimumReleaseAgeConfig: async (id: number) => ({ hours: id === 2 || phase.includes('disabled') ? 0 : 24 }),
-		imageReleaseAgeRemainingMs: async () => { ageChecks++; return remainingMs; },
-		imageReleaseAgeStatus: async () => ({ source: 'first-observed', observedAt: new Date().toISOString(), remainingMs: 86400000 })
+		imageReleaseAgeRemainingMs: async () => { ageChecks++; if (noDigest) registryDown = true; return remainingMs; },
+		imageReleaseAgeStatus: async () => (advisories++, { source: 'first-observed', observedAt: new Date().toISOString(), remainingMs: 86400000 })
 	}));
 }
 mock.module(root + 'release-age-advisory', () => ({ releaseAgeAdvisory: (lookup: any) => boundedAdvisory(lookup, 30) }));
@@ -122,6 +128,7 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 	if (url.hostname !== 'daemon.test') {
 		assert.equal(url.hostname, 'registry.example.com', 'Unexpected network access');
 		if ((phase === 'timeout-auth' && path === '/v2/') || (phase === 'timeout-head' && method === 'HEAD')) { stalledSignal = init.signal!; return new Promise(() => {}); }
+		if (registryDown) return new Response('', { status: 503 });
 		if (path === '/v2/') return new Response('{}');
 		if (phase.includes('keep-on-error') && method === 'HEAD') return new Response('', { status: 502 });
 		if (phase.startsWith('multiarch-') && method === 'GET' && path.endsWith('/manifests/' + digest)) {
@@ -385,7 +392,7 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(skipped.registryDigest, digest);
 	assert.equal(pullReferences.length, 0, 'Checking only must not pull');
 } else if (phase === 'young') {
-	await assert.rejects(docker.pullImage(image, undefined, 1, true), /cooldown/);
+	await assert.rejects(docker.pullImage(image, undefined, 1, 'enforce'), /cooldown/);
 	assert.equal(pullReferences.length, 0, 'Ineligible images must not be pulled');
 } else if (phase === 'warning-json') {
 	const { POST } = await import('../../src/routes/api/containers/batch-update/+server');
@@ -465,12 +472,18 @@ if (phase === 'metadata-info-failure') {
 		assert.ok(executions.some(e => e.status === 'success'), JSON.stringify(executions));
 		if (phase.startsWith('env')) assert.equal(pendingUpdates.length, 1, 'Mature update must be surfaced to the environment UI');
 	} else {
-		assert.ok(createBody, JSON.stringify(executions));
-		assert.equal(createBody.Image, phase.includes('disabled') ? image : approved, 'Recreation must use the verified image despite tag movement');
-		assert.equal(createBody.Env[0], phase.includes('disabled') ? 'VERSION=other' : 'VERSION=approved', 'Rebase must use the verified image too');
+		// A skipped cooldown still pulls the verified digest; only without one does it fall back to the tag.
+		const unverified = phase.includes('disabled') || noDigest;
+		assert.ok(createBody, JSON.stringify({ executions, logs }));
+		if (skipLabel) {
+			assert.equal(ageChecks, 1, 'The pull must not re-run the age gate the label skips');
+			assert.equal(advisories, 0, 'A scheduled pull must not report a manual-pull advisory');
+		}
+		assert.equal(createBody.Image, unverified ? image : approved, 'Recreation must use the verified image despite tag movement');
+		assert.equal(createBody.Env[0], unverified ? 'VERSION=other' : 'VERSION=approved', 'Rebase must use the verified image too');
 		assert.equal(trackedImageReference(createBody.Image, createBody.Labels), image, 'Future update checks retain the source tag');
-		assert.equal(pullReferences[0], phase.includes('disabled') ? image.split(':')[0] : image.split(':')[0] + '@' + digest);
-		if (!phase.includes('disabled')) assert.equal(portableImageReference(createBody.Image, createBody.Labels), image.split(':')[0] + '@' + digest);
+		assert.equal(pullReferences[0], unverified ? image.split(':')[0] : image.split(':')[0] + '@' + digest);
+		if (!unverified) assert.equal(portableImageReference(createBody.Image, createBody.Labels), image.split(':')[0] + '@' + digest);
 		if (scanning) assert.deepEqual(scans, [approved], 'Scan the same image that will be created');
 		assert.ok(executions.some(e => e.status === 'success'), JSON.stringify(executions));
 		if (phase.includes('portable')) await assertPortableRoundTrip(image.split(':')[0] + '@' + digest);

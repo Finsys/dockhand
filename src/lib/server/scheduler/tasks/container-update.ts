@@ -430,9 +430,9 @@ export async function runContainerUpdate(
 		}
 
 		log(`Checking registry for updates: ${imageNameFromConfig}`);
+		const skipCooldown = isCooldownSkippedByLabel(inspectData.Config?.Labels);
 		const registryCheck = await withCheckRetry(() => checkImageUpdateAvailable(
-			imageNameFromConfig, currentImageId, envId, true,
-			isCooldownSkippedByLabel(inspectData.Config?.Labels)
+			imageNameFromConfig, currentImageId, envId, true, skipCooldown
 		), { log, label: `${containerName} (${imageNameFromConfig})${envId ? `, env ${envId}` : ''}` });
 
 		if (registryCheck.isLocalImage) {
@@ -495,7 +495,7 @@ export async function runContainerUpdate(
 			try {
 				// Pull new image
 				log(`Pulling new image: ${imageNameFromConfig}`);
-				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log, label: `${containerName} (${imageNameFromConfig})${envId ? `, env ${envId}` : ''}` });
+				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, skipCooldown ? 'skip' : 'enforce'), { log, label: `${containerName} (${imageNameFromConfig})${envId ? `, env ${envId}` : ''}` });
 				verifiedImageId = pulled?.imageId;
 				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;
@@ -589,7 +589,7 @@ export async function runContainerUpdate(
 			// No scanning - simple pull
 			log(`Pulling update (no vulnerability scan)...`);
 			try {
-				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log, label: `${containerName} (${imageNameFromConfig})${envId ? `, env ${envId}` : ''}` });
+				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, skipCooldown ? 'skip' : 'enforce'), { log, label: `${containerName} (${imageNameFromConfig})${envId ? `, env ${envId}` : ''}` });
 				verifiedImageId = pulled?.imageId;
 				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;
