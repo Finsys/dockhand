@@ -1188,7 +1188,11 @@
 			return undefined;
 		})();
 		const refPairs = inlineRefPairs();
-		if (!selector && refPairs.length === 0) {
+		// SOPS has no selector: the server decrypts this stack's env file instead.
+		const stackProbe = selectedProviderType === 'sops' && mode === 'edit' && stackName
+			? { stack: stackName, env: $currentEnvironment?.id ?? null }
+			: {};
+		if (!selector && refPairs.length === 0 && !('stack' in stackProbe)) {
 			providerKeySet = new Set();
 			probeError = null;
 			updateEditorMarkers();
@@ -1199,7 +1203,7 @@
 			const response = await fetch(`/api/secret-providers/${formSecretProviderId}/probe`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ selector, refs: refPairs.map((p) => p.ref) })
+				body: JSON.stringify({ selector, refs: refPairs.map((p) => p.ref), ...stackProbe })
 			});
 			if (seq !== probeSeq) return; // a newer probe superseded this one
 			const data = await response.json();
