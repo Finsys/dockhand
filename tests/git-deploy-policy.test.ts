@@ -142,6 +142,7 @@ describe('isConcurrentSyncSkip', () => {
 	test('a real sync failure is not a concurrent skip', () => {
 		expect(isConcurrentSyncSkip('Git clone failed: Permission denied (publickey)')).toBe(false);
 		expect(isConcurrentSyncSkip('Repository not found')).toBe(false);
+		expect(isConcurrentSyncSkip('Repository not synced - deploy the stack first')).toBe(false);
 	});
 
 	test('a missing error is not a concurrent skip', () => {

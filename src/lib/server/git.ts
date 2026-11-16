@@ -24,11 +24,12 @@ import { createRunRecorder } from './deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from './deploy-run-record-core';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials } from './git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials, incompatibleCredentialReason } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
-import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX, isConcurrentSyncSkip } from './git-deploy-policy';
+import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX, isConcurrentSyncSkip, SYNC_IN_PROGRESS_ERROR } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
-import { expandValue } from '$lib/utils/env-file-values';
+import { parseEnvFileContent, redactEnvVarsForLog } from './env-file-content-core';
+export { parseEnvFileContent };
 import { envFileFormVars } from './secretproviders/sops-core';
 import {
 	parseManifest,
@@ -142,17 +143,6 @@ if (!existsSync(GIT_REPOS_DIR)) {
 
 export function getGitReposDir(): string {
 	return GIT_REPOS_DIR;
-}
-
-/**
- * Redact all env var values for safe logging. Only key names are preserved.
- */
-function redactEnvVarsForLog(vars: Record<string, string>): Record<string, string> {
-	const redacted: Record<string, string> = {};
-	for (const key of Object.keys(vars)) {
-		redacted[key] = '***';
-	}
-	return redacted;
 }
 
 function getRepoPath(repoId: number): string {
@@ -321,6 +311,8 @@ function cleanupSshKey(credential: GitCredentialData | null, env?: GitEnv): void
 
 function buildRepoUrl(url: string, credential: GitCredentialData | null): string {
 	assertSafeRepoUrl(url);
+	const incompatible = incompatibleCredentialReason(url, credential?.authType);
+	if (incompatible) throw new Error(incompatible);
 	return stripUrlCredentials(url, credential?.authType);
 }
 
@@ -633,6 +625,11 @@ async function testRepositoryConnection(options: {
 }): Promise<TestResult> {
 	const { url, branch, credential } = options;
 
+	const incompatible = incompatibleCredentialReason(url, credential?.authType);
+	if (incompatible) {
+		return { success: false, error: incompatible };
+	}
+
 	const env = await buildGitEnv(credential);
 	assertSafeGitRef(branch);
 	const repoUrl = buildRepoUrl(url, credential);
@@ -789,9 +786,11 @@ export async function listRemoteBranches(options: {
 	const credential = credentialId ? await getGitCredential(credentialId) : null;
 
 	const env = await buildGitEnv(credential);
-	const repoUrl = buildRepoUrl(url, credential);
 
 	try {
+		// buildRepoUrl inside the try so an incompatible credential/URL reason surfaces
+		// through the catch below instead of escaping as a generic 500.
+		const repoUrl = buildRepoUrl(url, credential);
 		const result = await execGit(
 			['ls-remote', '--heads', '--refs', repoUrl],
 			process.cwd(),
@@ -832,7 +831,7 @@ export async function syncRepository(repoId: number): Promise<SyncResult> {
 
 	// Check if sync is already in progress
 	if (repo.syncStatus === 'syncing') {
-		return { success: false, error: 'Sync already in progress' };
+		return { success: false, error: SYNC_IN_PROGRESS_ERROR };
 	}
 
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
@@ -1069,7 +1068,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 	// Check if sync is already in progress
 	if (gitStack.syncStatus === 'syncing') {
 		console.log(`${logPrefix} ERROR: Sync already in progress`);
-		return { success: false, error: 'Sync already in progress' };
+		return { success: false, error: SYNC_IN_PROGRESS_ERROR };
 	}
 
 	const repo = await getGitRepository(gitStack.repositoryId);
@@ -1677,6 +1676,12 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 	const effectiveBranch = resolveStackBranch(gitStack, repo);
 
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
+
+	const incompatible = incompatibleCredentialReason(repo.url, credential?.authType);
+	if (incompatible) {
+		return { success: false, error: incompatible };
+	}
+
 	const env = await buildGitEnv(credential);
 	assertSafeGitRef(effectiveBranch);
 	const repoUrl = buildRepoUrl(repo.url, credential);
@@ -1766,8 +1771,8 @@ export async function deployGitStackWithProgress(
 
 	// Check if sync is already in progress
 	if (gitStack.syncStatus === 'syncing') {
-		onProgress({ status: 'error', error: 'Sync already in progress' });
-		return { success: false, error: 'Sync already in progress' };
+		onProgress({ status: 'error', error: SYNC_IN_PROGRESS_ERROR });
+		return { success: false, error: SYNC_IN_PROGRESS_ERROR };
 	}
 
 	const repo = await getGitRepository(gitStack.repositoryId);
@@ -2172,75 +2177,38 @@ export async function listGitStackEnvFiles(stackId: number): Promise<{ files: st
 	}
 }
 
-/**
- * Parse a .env file content into key-value pairs.
- * Handles comments, empty lines, and quoted values.
- */
-export function parseEnvFileContent(
-	content: string,
-	stackName?: string,
-	options?: { expand?: boolean }
-): Record<string, string> {
-	// Expanding is for a DEPLOY, which needs the values a service will see. A caller
-	// showing the file to somebody wants their own text back, references and all -
-	// resolving it there would turn ${DIRECTORY} into a path in front of them, and an
-	// edit saved from that view would flatten the variable for good.
-	const expand = options?.expand !== false;
-	const logPrefix = stackName ? `[Stack:${stackName}]` : '[Git]';
-	const result: Record<string, string> = {};
-	const skippedLines: string[] = [];
-	const invalidKeys: string[] = [];
-
-	console.log(`${logPrefix} ----------------------------------------`);
-	console.log(`${logPrefix} PARSE ENV FILE CONTENT`);
-	console.log(`${logPrefix} ----------------------------------------`);
-	// Never log the file itself or any part of a line: .env files hold secrets.
-	// Only lengths, line numbers, keys and the masked values below go to the log.
-	console.log(`${logPrefix} Raw content length:`, content.length, 'chars');
-
-	const lines = content.split('\n');
-	console.log(`${logPrefix} Total lines:`, lines.length);
-
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
-		const trimmed = line.trim();
-		// Skip empty lines and comments
-		if (!trimmed || trimmed.startsWith('#')) {
-			if (trimmed) skippedLines.push(`Line ${i + 1} (comment)`);
-			continue;
-		}
-
-		// Find the first = sign
-		const eqIndex = trimmed.indexOf('=');
-		if (eqIndex === -1) {
-			skippedLines.push(`Line ${i + 1} (no =)`);
-			continue;
-		}
-
-		const key = trimmed.substring(0, eqIndex).trim();
-		const value = trimmed.substring(eqIndex + 1).trim();
-
-		// Only add if key is valid env var name
-		if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-			// Quotes are the file's syntax, and a value may refer to an earlier line -
-			// both of which compose resolves before a service ever sees the value.
-			result[key] = expand ? expandValue(value, result) : value;
-		} else {
-			invalidKeys.push(`Line ${i + 1}: "${key}" (invalid key format)`);
-		}
+/** The raw text of an env file in a git stack's repository clone. */
+export async function readGitStackEnvFileContent(
+	stackId: number,
+	envFilePath: string
+): Promise<{ content?: string; error?: string }> {
+	const gitStack = await getGitStack(stackId);
+	if (!gitStack) {
+		return { error: 'Git stack not found' };
 	}
 
-	console.log(`${logPrefix} Parsed env vars count:`, Object.keys(result).length);
-	console.log(`${logPrefix} Parsed env var keys:`, Object.keys(result).join(', '));
-	console.log(`${logPrefix} Parsed env vars (masked):`, JSON.stringify(redactEnvVarsForLog(result), null, 2));
-	if (skippedLines.length > 0) {
-		console.log(`${logPrefix} Skipped lines (${skippedLines.length}):`, skippedLines.slice(0, 10).join('; '));
-	}
-	if (invalidKeys.length > 0) {
-		console.log(`${logPrefix} Invalid keys (${invalidKeys.length}):`, invalidKeys.join('; '));
+	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
+	if (!existsSync(repoPath)) {
+		return { error: 'Repository not synced - deploy the stack first' };
 	}
 
-	return result;
+	// Must stay inside the clone; a committed link may lead out, never into a forbidden stack path.
+	let fullPath: string;
+	try {
+		fullPath = repoFilePath(repoPath, envFilePath, 'Env file path');
+	} catch (error) {
+		return { error: error instanceof Error ? error.message : 'Invalid file path' };
+	}
+
+	if (!existsSync(fullPath)) {
+		return { error: `File not found: ${envFilePath}` };
+	}
+
+	try {
+		return { content: readFileSync(fullPath, 'utf-8') };
+	} catch (error: any) {
+		return { error: error.message };
+	}
 }
 
 /**
@@ -2250,30 +2218,13 @@ export async function readGitStackEnvFile(
 	stackId: number,
 	envFilePath: string
 ): Promise<{ vars: Record<string, string>; error?: string }> {
-	const gitStack = await getGitStack(stackId);
-	if (!gitStack) {
-		return { vars: {}, error: 'Git stack not found' };
-	}
-
-	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
-	if (!existsSync(repoPath)) {
-		return { vars: {}, error: 'Repository not synced - deploy the stack first' };
-	}
-
-	// Must stay inside the clone; a committed link may lead out, never into a forbidden stack path.
-	let fullPath: string;
-	try {
-		fullPath = repoFilePath(repoPath, envFilePath, 'Env file path');
-	} catch (error) {
-		return { vars: {}, error: error instanceof Error ? error.message : 'Invalid file path' };
-	}
-
-	if (!existsSync(fullPath)) {
-		return { vars: {}, error: `File not found: ${envFilePath}` };
+	const read = await readGitStackEnvFileContent(stackId, envFilePath);
+	if (read.content === undefined) {
+		return { vars: {}, error: read.error };
 	}
 
 	try {
-		const content = readFileSync(fullPath, 'utf-8');
+		const content = read.content;
 		// The editor's reading, shared with every other filler of that form: quoting is
 		// the file's syntax and comes off, while a `${NAME}` reference stays as the user
 		// wrote it rather than being resolved the way a deploy would. This is also the

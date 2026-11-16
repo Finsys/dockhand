@@ -57,7 +57,7 @@ export function isDeployFailure(syncStatus: string | null | undefined, syncError
 	return syncStatus === 'error' && typeof syncError === 'string' && syncError.startsWith(DEPLOY_FAILURE_PREFIX);
 }
 
-/** Error syncGitStack returns when another sync of the same stack is still running. */
+/** Error a git sync returns when another sync of the same stack or repository is still running. */
 export const SYNC_IN_PROGRESS_ERROR = 'Sync already in progress';
 
 /**
