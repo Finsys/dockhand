@@ -17,6 +17,8 @@ export interface PendingUpdateRow {
 	pinnedToDigest?: boolean;
 	/** The version the digest update installs, from the new image's version label (#1501). */
 	newImageVersion?: string | null;
+	/** The digest that label was read for; set once read, label or not. */
+	newImageVersionDigest?: string | null;
 }
 
 /** Whether a row is worth persisting at all. */
@@ -40,6 +42,7 @@ export interface CheckResult {
 	releaseAgeRemainingHours?: number | null;
 	pinnedToDigest?: boolean;
 	newImageVersion?: string | null;
+	newImageVersionDigest?: string | null;
 	systemContainer?: unknown;
 	updateDisabled?: boolean;
 }
@@ -55,6 +58,7 @@ export interface PersistableRow {
 		releaseAgeRemainingHours: number | null;
 		pinnedToDigest: boolean;
 		newImageVersion: string | null;
+		newImageVersionDigest: string | null;
 	};
 }
 
@@ -79,11 +83,12 @@ export function rowsToPersist(results: CheckResult[]): PersistableRow[] {
 		if (!isWorthPersisting({ hasImageUpdate, newerVersion, releaseAgeRemainingHours, pinnedToDigest })) continue;
 		// Only a digest move has a new image to name.
 		const newImageVersion = r.hasUpdate ? r.newImageVersion ?? null : null;
+		const newImageVersionDigest = r.hasUpdate ? r.newImageVersionDigest ?? null : null;
 		out.push({
 			containerId: r.containerId,
 			containerName: r.containerName,
 			imageName: r.imageName,
-			options: { hasImageUpdate, newerVersion, releaseAgeRemainingHours, pinnedToDigest, newImageVersion }
+			options: { hasImageUpdate, newerVersion, releaseAgeRemainingHours, pinnedToDigest, newImageVersion, newImageVersionDigest }
 		});
 	}
 	return out;
@@ -99,6 +104,7 @@ export interface StoredPendingRow {
 	releaseAgeRemainingHours: number | null;
 	pinnedToDigest: boolean;
 	newImageVersion?: string | null;
+	newImageVersionDigest?: string | null;
 }
 
 /**
@@ -122,7 +128,8 @@ export function withPreviousOnError(
 			hasImageUpdate: prev.hasImageUpdate,
 			releaseAgeRemainingHours: prev.releaseAgeRemainingHours,
 			pinnedToDigest: prev.pinnedToDigest,
-			newImageVersion: prev.newImageVersion ?? null
+			newImageVersion: prev.newImageVersion ?? null,
+			newImageVersionDigest: prev.newImageVersionDigest ?? null
 		};
 		const fresh = out.find((r) => r.containerId === prev.containerId);
 		if (fresh) {

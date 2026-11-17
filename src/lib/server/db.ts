@@ -6107,6 +6107,23 @@ export async function getPendingContainerUpdates(environmentId: number): Promise
 }
 
 /**
+ * The version label recorded for a digest's image in an environment, when a pending
+ * update already read it: `{ version: null }` means the image has no label. Null when
+ * no row names that digest, so the label still has to be read from the registry.
+ * Lets a check after a restart skip the registry for an update it already knows.
+ */
+export async function getRecordedImageVersion(environmentId: number, digest: string): Promise<{ version: string | null } | null> {
+	const [row] = await db.select({ version: pendingContainerUpdates.newImageVersion })
+		.from(pendingContainerUpdates)
+		.where(and(
+			eq(pendingContainerUpdates.environmentId, environmentId),
+			eq(pendingContainerUpdates.newImageVersionDigest, digest)
+		))
+		.limit(1);
+	return row ? { version: row.version ?? null } : null;
+}
+
+/**
  * Clear all pending container updates for an environment.
  * Update checks call it once they have their results, right before saving them.
  */
@@ -6133,6 +6150,7 @@ export async function addPendingContainerUpdate(
 		releaseAgeRemainingHours?: number | null;
 		pinnedToDigest?: boolean;
 		newImageVersion?: string | null;
+		newImageVersionDigest?: string | null;
 	} = {}
 ): Promise<void> {
 	const hasImageUpdate = options.hasImageUpdate ?? true;
@@ -6140,6 +6158,7 @@ export async function addPendingContainerUpdate(
 	const releaseAgeRemainingHours = options.releaseAgeRemainingHours ?? null;
 	const pinnedToDigest = options.pinnedToDigest ?? false;
 	const newImageVersion = options.newImageVersion ?? null;
+	const newImageVersionDigest = options.newImageVersionDigest ?? null;
 	const now = new Date().toISOString();
 	// Use insert with onConflictDoUpdate for upsert behavior
 	await db.insert(pendingContainerUpdates)
@@ -6153,6 +6172,7 @@ export async function addPendingContainerUpdate(
 			releaseAgeRemainingHours,
 			pinnedToDigest,
 			newImageVersion,
+			newImageVersionDigest,
 			checkedAt: now
 		})
 		.onConflictDoUpdate({

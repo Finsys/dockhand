@@ -319,13 +319,13 @@ describe('withPreviousOnError (a failed check keeps what was known)', () => {
 	});
 	const fresh = (id: string, options: Partial<PersistableRow['options']>): PersistableRow => ({
 		containerId: id, containerName: id, imageName: 'img',
-		options: { hasImageUpdate: false, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null, ...options }
+		options: { hasImageUpdate: false, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null, newImageVersionDigest: null, ...options }
 	});
 
 	test('an errored container keeps its known update', () => {
 		const rows = withPreviousOnError([], [prev({ hasImageUpdate: true })], new Set(['a']));
 		expect(rows).toEqual([{ containerId: 'a', containerName: 'app', imageName: 'nginx:latest',
-			options: { hasImageUpdate: true, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null, newerVersion: null } }]);
+			options: { hasImageUpdate: true, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null, newImageVersionDigest: null, newerVersion: null } }]);
 	});
 
 	test('a container whose check succeeded gets exactly the fresh result, the old row is dropped', () => {
@@ -341,7 +341,7 @@ describe('withPreviousOnError (a failed check keeps what was known)', () => {
 			new Set(['a'])
 		);
 		expect(r).toHaveLength(1);
-		expect(r[0].options).toEqual({ hasImageUpdate: true, newerVersion: { tag: '3.0' }, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null });
+		expect(r[0].options).toEqual({ hasImageUpdate: true, newerVersion: { tag: '3.0' }, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null, newImageVersionDigest: null });
 	});
 
 	test('a kept pin and a kept hold stay what they were', () => {
@@ -371,27 +371,34 @@ describe('the version a floating-tag update installs (#1501)', () => {
 		containerId: 'a', containerName: 'web', imageName: 'lissy93/dashy:latest', ...over
 	});
 
-	test('is recorded with the digest update it belongs to', () => {
-		const rows = rowsToPersist([result({ hasUpdate: true, newImageVersion: '3.1.1' })]);
-		expect(rows[0].options.newImageVersion).toBe('3.1.1');
+	const digest = 'sha256:' + 'f'.repeat(64);
+
+	test('is recorded with the digest update it belongs to, and the digest it was read for', () => {
+		const rows = rowsToPersist([result({ hasUpdate: true, newImageVersion: '3.1.1', newImageVersionDigest: digest })]);
+		expect(rows[0].options).toMatchObject({ newImageVersion: '3.1.1', newImageVersionDigest: digest });
 	});
 
-	test('is absent without a label, and the update is recorded as before', () => {
+	test('a read without a label is recorded too, so it is not read again', () => {
+		const rows = rowsToPersist([result({ hasUpdate: true, newImageVersionDigest: digest })]);
+		expect(rows[0].options).toMatchObject({ hasImageUpdate: true, newImageVersion: null, newImageVersionDigest: digest });
+	});
+
+	test('a read that failed records no digest, so the next check tries again', () => {
 		const rows = rowsToPersist([result({ hasUpdate: true })]);
-		expect(rows[0].options).toMatchObject({ hasImageUpdate: true, newImageVersion: null });
+		expect(rows[0].options).toMatchObject({ hasImageUpdate: true, newImageVersion: null, newImageVersionDigest: null });
 	});
 
 	test('is not recorded for a container without a digest update', () => {
-		const rows = rowsToPersist([result({ hasUpdate: false, newerVersion: { tag: '2.0.0' }, newImageVersion: '3.1.1' })]);
-		expect(rows[0].options.newImageVersion).toBeNull();
+		const rows = rowsToPersist([result({ hasUpdate: false, newerVersion: { tag: '2.0.0' }, newImageVersion: '3.1.1', newImageVersionDigest: digest })]);
+		expect(rows[0].options).toMatchObject({ newImageVersion: null, newImageVersionDigest: null });
 	});
 
 	test('survives a failed check with the rest of the digest half', () => {
 		const rows = withPreviousOnError([], [{
 			containerId: 'a', containerName: 'web', currentImage: 'lissy93/dashy:latest', hasImageUpdate: true,
-			newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: '3.1.1'
+			newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: '3.1.1', newImageVersionDigest: digest
 		}], new Set(['a']));
-		expect(rows[0].options.newImageVersion).toBe('3.1.1');
+		expect(rows[0].options).toMatchObject({ newImageVersion: '3.1.1', newImageVersionDigest: digest });
 	});
 
 	test('reaches the UI keyed by container', () => {

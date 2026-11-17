@@ -41,6 +41,8 @@ export interface UpdateCheckResult {
 	 * for a floating tag, the version the update installs (#1501).
 	 */
 	newImageVersion?: string;
+	/** The digest that label was read for, recorded so later checks don't read it again. */
+	newImageVersionDigest?: string;
 }
 
 /**
@@ -233,7 +235,8 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					updateDisabled,
 					newerVersion: newerVersion ?? undefined,
 					pinnedToDigest: result.pinnedToDigest,
-					newImageVersion: digestUpdate ? result.newImageVersion : undefined
+					newImageVersion: digestUpdate ? result.newImageVersion : undefined,
+					newImageVersionDigest: digestUpdate ? result.newImageVersionDigest : undefined
 				};
 			} catch (error: any) {
 				return {

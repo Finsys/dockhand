@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d7492956-660e-48d0-9510-68814bbd8be0",
+  "id": "1e87237c-821e-4bf7-afc7-73510fbea800",
   "prevId": "52013086-6f80-4386-a9e7-75e6f12eafd5",
   "tables": {
     "api_tokens": {
@@ -2601,6 +2601,13 @@
         },
         "new_image_version": {
           "name": "new_image_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "new_image_version_digest": {
+          "name": "new_image_version_digest",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

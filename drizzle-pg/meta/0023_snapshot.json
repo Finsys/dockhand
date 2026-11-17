@@ -1,5 +1,5 @@
 {
-  "id": "c6bbb0a9-e576-4f9c-b6cd-d0b7b7797ccb",
+  "id": "42bbab76-afdd-4c3c-a5a6-f364677b0f35",
   "prevId": "b974c3ed-653d-4ac1-8ab2-c20db81fabfe",
   "version": "7",
   "dialect": "postgresql",
@@ -2479,6 +2479,12 @@
         },
         "new_image_version": {
           "name": "new_image_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "new_image_version_digest": {
+          "name": "new_image_version_digest",
           "type": "text",
           "primaryKey": false,
           "notNull": false

@@ -579,6 +579,7 @@ export const pendingContainerUpdates = pgTable('pending_container_updates', {
 	releaseAgeRemainingHours: integer('release_age_remaining_hours'),
 	// See the SQLite schema.
 	newImageVersion: text('new_image_version'),
+	newImageVersionDigest: text('new_image_version_digest'),
 	checkedAt: timestamp('checked_at', { mode: 'string' }).defaultNow(),
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow()
 }, (table) => ({

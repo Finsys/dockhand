@@ -33,7 +33,7 @@ import { configuredMacAddress, endpointForRecreate } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
 import { mapContainerNetworks } from '$lib/utils/network-identity';
 import type { Environment } from './db';
-import { getSetting } from './db';
+import { getSetting, getRecordedImageVersion } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
 import { imageCheckPlan, resolvePinnedToDigest, isDigestBasedImage, portableImageReference, trackedImageLabels, trackedImageReference } from '../utils/tracked-image';
 // Re-exported: the updaters import it from here, and it belongs beside imagePinning.
@@ -3974,22 +3974,37 @@ async function getRegistryImageCreatedAt(imageName: string, digest: string, envI
  * The `org.opencontainers.image.version` label of the image a digest names, read from
  * its config blob for the environment's platform (#1501). For a floating tag such as
  * `:latest` a digest is all an update check knows; this is the version that update
- * would install. One config read per new digest, shared with the minimum image age;
- * null when the image has no such label or the registry can't be read.
+ * would install. `{ version: null }` when the image has no such label; null when it
+ * couldn't be read, so a later check tries again.
+ *
+ * One registry read per new digest: a pending update already recorded for the digest
+ * answers first, so a restart doesn't read again (Docker Hub counts manifest reads as
+ * pulls); then the in-memory cache, shared with the minimum image age's config read.
  */
-export async function getRegistryImageVersion(imageName: string, digest: string, envId?: number | null): Promise<string | null> {
+export async function getRegistryImageVersion(imageName: string, digest: string, envId?: number | null): Promise<{ version: string | null } | null> {
 	try {
+		if (envId != null) {
+			const recorded = await getRecordedImageVersion(envId, digest);
+			if (recorded) return recorded;
+		}
 		const signal = AbortSignal.timeout(8000);
 		const target = await registryImageTarget(imageName, digest, envId, signal);
 		if (!target) return null;
 		const known = imageVersions.get(target.key);
-		if (known && Date.now() < known.retryAt) return known.version;
+		if (known && Date.now() < known.retryAt) return known.retryAt === Infinity ? { version: known.version } : null;
 		const metadata = await fetchImageConfigMetadata(await registryImageRequest(target, digest, signal));
 		rememberImageMetadata(target, metadata);
-		return metadata?.version ?? null;
+		return metadata ? { version: metadata.version } : null;
 	} catch {
 		return null;
 	}
+}
+
+/** The fields a found update carries for its new image's version label. */
+async function newImageVersionFields(imageName: string, digest: string, envId?: number): Promise<Pick<ImageUpdateCheckResult, 'newImageVersion' | 'newImageVersionDigest'>> {
+	const read = await getRegistryImageVersion(imageName, digest, envId);
+	if (!read) return {};
+	return { newImageVersionDigest: digest, ...(read.version ? { newImageVersion: read.version } : {}) };
 }
 
 /**
@@ -4142,6 +4157,11 @@ export interface ImageUpdateCheckResult {
 	 * installs, which the digest alone can't say (#1501).
 	 */
 	newImageVersion?: string;
+	/**
+	 * The digest the version label was read for, set once the read was answered (label
+	 * or not), so the pending update records it and later checks reuse it.
+	 */
+	newImageVersionDigest?: string;
 }
 
 /**
@@ -4248,8 +4268,8 @@ async function checkTagForUpdate(
 				const remaining = await imageCooldownRemainingMs(checkedReference, rd, envId);
 				if (remaining > 0 && !skipCooldown) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 			}
-			const newImageVersion = hasUpdate && rd ? await getRegistryImageVersion(checkedReference, rd, envId) : null;
-			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd, ...(newImageVersion ? { newImageVersion } : {}) };
+			const version = hasUpdate && rd ? await newImageVersionFields(checkedReference, rd, envId) : {};
+			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd, ...version };
 		}
 
 		// Query registry for current manifest digest
@@ -4295,13 +4315,12 @@ async function checkTagForUpdate(
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], registryDigest, localDigests, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 		}
 
-		const newImageVersion = await getRegistryImageVersion(checkedReference, registryDigest, envId);
 		return {
 			hasUpdate: true,
 			currentDigest: currentRepoDigests[0],
 			registryDigest,
 			localDigests,
-			...(newImageVersion ? { newImageVersion } : {})
+			...await newImageVersionFields(checkedReference, registryDigest, envId)
 		};
 	} catch (e: any) {
 		return { hasUpdate: false, error: e.message };
