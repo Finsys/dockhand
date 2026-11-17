@@ -5,7 +5,8 @@
  * dropdowns stay complete without the page loading the full findings array.
  */
 import { json } from '@sveltejs/kit';
-import { getVulnerabilitiesMeta } from '$lib/server/vulnerabilities';
+import { getVulnerabilitiesMeta, getVulnerabilityGroups } from '$lib/server/vulnerabilities';
+import { parseVulnGroupBy, VULN_GROUP_BY } from '$lib/server/vulnerability-groups-core';
 import { EMPTY_META } from '$lib/server/vulnerabilities-cache';
 import { authorizeVulnAccess } from '$lib/server/vuln-access';
 import type { RequestHandler } from './$types';
@@ -15,13 +16,27 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Return the total finding count, severity summary, and distinct image/container/stack filter values for an environment
+ * description: With groupBy (container, image or stack), returns {groupBy, groups} instead - each scanned container, image or stack with its critical/high/medium/low/total counts, most severe first. A clean one is listed with zeroes; one whose image was never scanned is not listed. A stack counts each image once.
+ * query: groupBy:string Group the counts by "container", "image" or "stack"
  * resp-200: {total:integer!, summary:object!, images:array<string>!, containers:array<string>!, stacks:array<string>!}
  * resp-200-desc: An empty metadata object is returned when no environment resolves; a permission failure returns the status from the access check
  * resp-200-example: {"total":12,"summary":{"critical":1,"high":3,"medium":5,"low":3},"images":["nginx:latest"],"containers":["web"],"stacks":["frontend"]}
+ * resp-400: groupBy is not container, image or stack
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const { envIdNum, denied } = await authorizeVulnAccess(cookies, url);
 	if (denied) return json({ error: denied.message }, { status: denied.status });
+
+	const groupByParam = url.searchParams.get('groupBy');
+	if (groupByParam !== null) {
+		const groupBy = parseVulnGroupBy(groupByParam);
+		if (!groupBy) {
+			return json({ error: `groupBy must be one of ${VULN_GROUP_BY.join(', ')}` }, { status: 400 });
+		}
+		if (!envIdNum) return json({ groupBy, groups: [] });
+		return json({ groupBy, groups: await getVulnerabilityGroups(envIdNum, groupBy) });
+	}
+
 	if (!envIdNum) return json(EMPTY_META);
 
 	const meta = await getVulnerabilitiesMeta(envIdNum);
