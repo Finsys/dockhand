@@ -19,6 +19,7 @@ import { getCachedDiskUsage } from '$lib/server/disk-usage-cache';
 import { listComposeStacks } from '$lib/server/stacks';
 import { countLivePending, countImageUpdates, countLivePinnedDigest, countPinnedDigest, countLiveNewerVersion, countNewerVersion } from '$lib/server/pending-updates-core';
 import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
+import { LIST_TIMEOUT_MS } from '$lib/server/env-probe-core';
 import { authorize } from '$lib/server/authorize';
 import { parseLabels } from '$lib/utils/label-colors';
 
@@ -217,16 +218,16 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				}
 				envStats.online = true;
 
-				// Fetch all data in parallel (with 10 second timeout per operation)
+				// Fetch all data in parallel (per-operation listing budget, DASHBOARD_TIMEOUT_MS)
 				// Disk usage comes from the shared cache (one /system/df per env, 5 min TTL);
 				// it returns null when SKIP_DF_COLLECTION is set
 				const [containers, images, volumes, networks, stacks, diskUsage] = await Promise.all([
-					withTimeout(listContainers(true, env.id).catch(() => []), 10000, []),
-					withTimeout(listImages(env.id).catch(() => []), 10000, []),
-					withTimeout(listVolumes(env.id).catch(() => []), 10000, []),
-					withTimeout(listNetworks(env.id).catch(() => []), 10000, []),
-					withTimeout(listComposeStacks(env.id).catch(() => []), 10000, []),
-					getCachedDiskUsage(env.id, 10000)
+					withTimeout(listContainers(true, env.id).catch(() => []), LIST_TIMEOUT_MS, []),
+					withTimeout(listImages(env.id).catch(() => []), LIST_TIMEOUT_MS, []),
+					withTimeout(listVolumes(env.id).catch(() => []), LIST_TIMEOUT_MS, []),
+					withTimeout(listNetworks(env.id).catch(() => []), LIST_TIMEOUT_MS, []),
+					withTimeout(listComposeStacks(env.id).catch(() => []), LIST_TIMEOUT_MS, []),
+					getCachedDiskUsage(env.id, LIST_TIMEOUT_MS)
 				]);
 
 				// Process containers
