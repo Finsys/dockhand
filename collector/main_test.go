@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"testing"
+	"time"
 )
 
 // mustStats decodes a JSON stats payload into containerStats for the tests.
@@ -105,5 +106,57 @@ func TestCalcCPUPercentSystemCounterReset(t *testing.T) {
 	s := mustStats(t, `{"cpu_stats":{"cpu_usage":{"total_usage":2000},"system_cpu_usage":4000,"online_cpus":2},"precpu_stats":{"cpu_usage":{"total_usage":1000},"system_cpu_usage":5000},"memory_stats":{"usage":1000}}`)
 	if got := calcCPUPercent(s); got != 0 {
 		t.Fatalf("system counter reset must be 0, got %v", got)
+	}
+}
+
+func TestPollWindowStartContinuesFromTheLastWindow(t *testing.T) {
+	last := time.Date(2026, 11, 16, 10, 0, 0, 500, time.UTC)
+	now := last.Add(60 * time.Second)
+	got := pollWindowStart(last, now, 60*time.Second)
+	// One nanosecond on: Docker includes since and until, so the event at the
+	// last window's end is not read twice.
+	if want := last.Add(time.Nanosecond); !got.Equal(want) {
+		t.Fatalf("since = %v, want %v", got, want)
+	}
+}
+
+func TestPollWindowStartCoversALongIntervalWhole(t *testing.T) {
+	// The bug: every poll read the last 30 seconds whatever the interval, so a
+	// 5-minute interval missed four and a half minutes of every five.
+	last := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	now := last.Add(5 * time.Minute)
+	if got := pollWindowStart(last, now, 5*time.Minute); now.Sub(got) < 5*time.Minute-time.Nanosecond {
+		t.Fatalf("window starts %v before now, want the whole interval", now.Sub(got))
+	}
+}
+
+func TestPollWindowStartFirstPollReadsOneInterval(t *testing.T) {
+	now := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	if got := pollWindowStart(time.Time{}, now, 90*time.Second); !got.Equal(now.Add(-90 * time.Second)) {
+		t.Fatalf("since = %v, want one interval back", got)
+	}
+}
+
+func TestPollWindowStartDoesNotReplayALongOutage(t *testing.T) {
+	last := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	now := last.Add(maxPollCatchUp + time.Second)
+	if got := pollWindowStart(last, now, 60*time.Second); !got.Equal(now.Add(-60 * time.Second)) {
+		t.Fatalf("since = %v, want one interval back after a long gap", got)
+	}
+}
+
+func TestPollWindowStartCatchesUpAShortOutage(t *testing.T) {
+	// A missed poll or two: the next one reads everything since the last window.
+	last := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	now := last.Add(3 * time.Minute)
+	if got := pollWindowStart(last, now, 60*time.Second); !got.Equal(last.Add(time.Nanosecond)) {
+		t.Fatalf("since = %v, want just after the last window", got)
+	}
+}
+
+func TestDockerTimestamp(t *testing.T) {
+	ts := time.Unix(1794832642, 5).UTC()
+	if got := dockerTimestamp(ts); got != "1794832642.000000005" {
+		t.Fatalf("dockerTimestamp = %q", got)
 	}
 }
