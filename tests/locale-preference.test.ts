@@ -33,6 +33,7 @@ describe('asLocale', () => {
 		expect(asLocale('tr')).toBe('tr');
 		expect(asLocale('ko')).toBe('ko');
 		expect(asLocale('bg')).toBe('bg');
+		expect(asLocale('ja')).toBe('ja');
 	});
 
 	test('refuses anything else, so a stale or hand-edited value cannot take effect', () => {
@@ -56,7 +57,7 @@ describe('FOLLOW_BROWSER', () => {
 
 describe('fromNavigator', () => {
 	test('takes the first language the build carries, not the first listed', () => {
-		expect(fromNavigator(['xx', 'ja', 'de'])).toBe('de');
+		expect(fromNavigator(['xx', 'th', 'de'])).toBe('de');
 	});
 
 	test('falls back from a region to the bare language', () => {
@@ -74,6 +75,7 @@ describe('fromNavigator', () => {
 		expect(fromNavigator(['tr-TR', 'en'])).toBe('tr');
 		expect(fromNavigator(['ko-KR', 'en'])).toBe('ko');
 		expect(fromNavigator(['bg-BG', 'en'])).toBe('bg');
+		expect(fromNavigator(['ja-JP', 'en'])).toBe('ja');
 	});
 
 	test('fr-CA is taken as itself rather than collapsing to fr-FR', () => {
@@ -103,7 +105,7 @@ describe('fromNavigator', () => {
 	});
 
 	test('gives up when nothing matches', () => {
-		expect(fromNavigator(['ja', 'th'])).toBeUndefined();
+		expect(fromNavigator(['it', 'th'])).toBeUndefined();
 		expect(fromNavigator([])).toBeUndefined();
 	});
 });
@@ -125,7 +127,7 @@ describe('resolveLocale', () => {
 	});
 
 	test('falls back to English when neither says anything usable', () => {
-		expect(resolveLocale(undefined, ['ja'])).toBe('en');
+		expect(resolveLocale(undefined, ['th'])).toBe('en');
 		expect(resolveLocale(undefined, [])).toBe('en');
 	});
 });
