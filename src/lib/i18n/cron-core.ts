@@ -6,6 +6,7 @@ import 'cronstrue/locales/bg';
 import 'cronstrue/locales/de';
 import 'cronstrue/locales/es';
 import 'cronstrue/locales/fr';
+import 'cronstrue/locales/ja';
 import 'cronstrue/locales/ko';
 import 'cronstrue/locales/pl';
 import 'cronstrue/locales/pt_BR';
@@ -26,7 +27,8 @@ const CRONSTRUE_LOCALES: Record<string, string> = {
 	'pt-BR': 'pt_BR',
 	tr: 'tr',
 	ko: 'ko',
-	bg: 'bg'
+	bg: 'bg',
+	ja: 'ja'
 };
 
 export function cronstrueLocaleFor(locale: string): string {
