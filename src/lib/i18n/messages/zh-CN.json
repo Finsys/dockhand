@@ -6682,7 +6682,7 @@
 	"settings_secrets_field_keepass_key_file": "密钥文件路径",
 	"settings_secrets_field_keepass_key_file_hint": "数据库密钥文件的可选绝对路径(容器内路径)。",
 	"settings_secrets_bulk_op_placeholder": "1Password Environment ID",
-	"settings_secrets_bulk_op_hint": "批量加载此 1Password Environment 中的所有机密。留空则仅注入内联 op:// 引用。",
+	"settings_secrets_bulk_op_hint": "可选：批量加载此 1Password Environment 中的所有机密。如需单独映射，请留空并将堆栈变量的值设为 op-env://<environment-id>/<secret-name>。保险库引用使用 op://<vault>/<item>/<field>。",
 	"settings_secrets_bulk_vault_label": "KV v2 路径",
 	"settings_secrets_bulk_vault_hint": "批量加载此 KV v2 路径下的所有键(位于已配置的挂载下)。",
 	"settings_secrets_bulk_infisical_hint": "批量加载此路径下的所有机密(项目和环境取自提供者配置)。",

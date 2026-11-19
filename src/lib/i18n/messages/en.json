@@ -6703,7 +6703,7 @@
 	"settings_secrets_field_keepass_key_file": "Key file path",
 	"settings_secrets_field_keepass_key_file_hint": "Optional absolute path to the database key file, as seen inside the container.",
 	"settings_secrets_bulk_op_placeholder": "1Password Environment id",
-	"settings_secrets_bulk_op_hint": "Bulk-load every secret from this 1Password Environment. Leave blank to inject only inline op:// references.",
+	"settings_secrets_bulk_op_hint": "Optional: bulk-load every secret from this 1Password Environment. For individual mappings, leave blank and set a stack variable's value to op-env://<environment-id>/<secret-name>. Vault references use op://<vault>/<item>/<field>.",
 	"settings_secrets_bulk_vault_label": "KV v2 path",
 	"settings_secrets_bulk_vault_hint": "Bulk-load every key at this KV v2 path (under the configured mount).",
 	"settings_secrets_bulk_infisical_hint": "Bulk-load every secret at this path (project and environment come from the provider config).",

@@ -103,6 +103,7 @@ describe('isInlineProviderRef', () => {
 		// One per provider family that resolves inline refs on deploy; a missing
 		// prefix here reads as MISSING in the editor while deploying fine.
 		expect(isInlineProviderRef('op://vault/item/field')).toBe(true);
+		expect(isInlineProviderRef('op-env://environment-id/APP_POSTGRES_PASSWORD')).toBe(true);
 		expect(isInlineProviderRef('keepass://Group/Entry/Password')).toBe(true);
 		expect(isInlineProviderRef('azurekv://my-secret')).toBe(true);
 		expect(isInlineProviderRef('pass://MockVault/my-item/password')).toBe(true);
@@ -110,6 +111,7 @@ describe('isInlineProviderRef', () => {
 
 	test('a quoted reference still counts - 1Password copies it with quotes', () => {
 		expect(isInlineProviderRef('"op://vault/item/field"')).toBe(true);
+		expect(isInlineProviderRef('"op-env://environment-id/APP_POSTGRES_PASSWORD"')).toBe(true);
 		expect(isInlineProviderRef("'pass://v/i/f'")).toBe(true);
 		expect(isInlineProviderRef('  "azurekv://my-secret"  ')).toBe(true);
 	});

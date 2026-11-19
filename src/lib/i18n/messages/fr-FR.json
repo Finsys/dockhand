@@ -6299,7 +6299,7 @@
 	"settings_secrets_field_keepass_key_file": "Chemin du fichier de clé",
 	"settings_secrets_field_keepass_key_file_hint": "Chemin absolu facultatif du fichier de clé de la base de données, tel que vu dans le conteneur.",
 	"settings_secrets_bulk_op_placeholder": "ID de l'environnement 1Password",
-	"settings_secrets_bulk_op_hint": "Charge en masse tous les secrets de cet environnement 1Password. Laissez vide pour n'injecter que les références op:// en ligne.",
+	"settings_secrets_bulk_op_hint": "Facultatif : charge tous les secrets de cet environnement 1Password. Pour des correspondances individuelles, laissez vide et définissez la valeur d'une variable de la stack sur op-env://<environment-id>/<secret-name>. Les références de coffre utilisent op://<vault>/<item>/<field>.",
 	"settings_secrets_bulk_vault_label": "Chemin KV v2",
 	"settings_secrets_bulk_vault_hint": "Charge en masse toutes les clés de ce chemin KV v2 (sous le montage configuré).",
 	"settings_secrets_bulk_infisical_hint": "Charge en masse tous les secrets de ce chemin (le projet et l'environnement viennent de la configuration du fournisseur).",
