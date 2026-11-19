@@ -7058,7 +7058,7 @@
 	"settings_secrets_field_keepass_key_file": "Pfad zur Schlüsseldatei",
 	"settings_secrets_field_keepass_key_file_hint": "Optionaler absoluter Pfad zur Schlüsseldatei der Datenbank, wie er im Container sichtbar ist.",
 	"settings_secrets_bulk_op_placeholder": "ID der 1Password-Umgebung",
-	"settings_secrets_bulk_op_hint": "Lädt alle Secrets aus dieser 1Password-Umgebung. Lass das Feld leer, um nur Inline-Referenzen mit op:// einzuspeisen.",
+	"settings_secrets_bulk_op_hint": "Optional: Lädt alle Secrets aus dieser 1Password-Umgebung. Für einzelne Zuordnungen lass das Feld leer und setze den Wert einer Stack-Variable auf op-env://<environment-id>/<secret-name>. Vault-Referenzen verwenden op://<vault>/<item>/<field>.",
 	"settings_secrets_bulk_vault_label": "KV-v2-Pfad",
 	"settings_secrets_bulk_vault_hint": "Lädt alle Schlüssel unter diesem KV-v2-Pfad (unterhalb des konfigurierten Mounts).",
 	"settings_secrets_bulk_infisical_hint": "Lädt alle Secrets unter diesem Pfad (Projekt und Umgebung stammen aus der Provider-Konfiguration).",

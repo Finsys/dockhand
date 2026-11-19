@@ -3,7 +3,7 @@
  *
  * Thin wrapper around the official @1password/sdk that exposes only what
  * Dockhand needs: validating a service account token, reading variables from a
- * 1Password Environment, and interpolating op:// references.
+ * 1Password Environment, and interpolating op:// and Dockhand's op-env:// references.
  *
  * Decrypted tokens stay inside this module and the in-memory SDK client.
  * Nothing here writes to disk or to the database.
@@ -50,7 +50,9 @@ export const serviceAccountProvider: SecretProvider<ServiceAccountConfig> = {
 	supportsBulk: true,
 
 	isReference(value: unknown): value is string {
-		return typeof value === 'string' && stripSurroundingQuotes(value).startsWith('op://');
+		if (typeof value !== 'string') return false;
+		const ref = stripSurroundingQuotes(value);
+		return ref.startsWith('op://') || ref.startsWith('op-env://');
 	},
 
 	async testConnection({ token }: ServiceAccountConfig): Promise<TestConnectionResult> {
@@ -76,8 +78,39 @@ export const serviceAccountProvider: SecretProvider<ServiceAccountConfig> = {
 		if (refs.length === 0) {
 			return result;
 		}
+		const vaultRefs: string[] = [];
+		const environmentRefs = new Map<string, { ref: string; name: string }[]>();
+		for (const ref of new Set(refs)) {
+			if (!ref.startsWith('op-env://')) {
+				vaultRefs.push(ref);
+				continue;
+			}
+			const match = /^op-env:\/\/([^/?#\s]+)\/([^/?#\s]+)$/.exec(ref);
+			if (!match) {
+				throw new Error('Invalid 1Password Environment reference (need op-env://<environment-id>/<secret-name>)');
+			}
+			const [, environmentId, name] = match;
+			const entries = environmentRefs.get(environmentId) ?? [];
+			entries.push({ ref, name });
+			environmentRefs.set(environmentId, entries);
+		}
+
 		const client = await makeClient(token);
-		const response = await client.secrets.resolveAll(refs);
+		// Read each Environment once per batch, but return only explicitly mapped secrets.
+		for (const [environmentId, entries] of environmentRefs) {
+			const response = await client.environments.getVariables(environmentId);
+			const variables = new Map(response.variables.map((v) => [v.name, v.value]));
+			for (const { ref, name } of entries) {
+				const value = variables.get(name);
+				if (value === undefined) {
+					throw new Error(`1Password Environment secret not found: ${ref}`);
+				}
+				result.set(ref, value);
+			}
+		}
+
+		if (vaultRefs.length === 0) return result;
+		const response = await client.secrets.resolveAll(vaultRefs);
 		const skipped: string[] = [];
 		for (const [ref, item] of Object.entries(response.individualResponses)) {
 			if (item.error) {

@@ -8,9 +8,9 @@
 import { describe, test, expect } from 'bun:test';
 import { stripSurroundingQuotes } from '../src/lib/server/secretproviders/shared';
 // NOTE: do NOT import service-account.ts here - it loads @1password/sdk (a native
-// module) at import time, which the unit-test env cannot resolve. Its isReference is
-// the identical `stripSurroundingQuotes(value).startsWith('op://')` as connectProvider,
-// which IS tested below; the pure helper carries the real quote logic.
+// module) at import time, which the unit-test env cannot resolve. Its Vault and
+// Environment reference detection is covered in secret-provider-onepassword.test.ts;
+// the pure helper carries the real quote logic.
 import { connectProvider } from '../src/lib/server/secretproviders/connect';
 import { protonProvider } from '../src/lib/server/secretproviders/proton';
 import { keepassProvider } from '../src/lib/server/secretproviders/keepass';

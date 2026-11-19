@@ -8,7 +8,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { getProviderIcon } from '$lib/components/provider-icons';
 	import { providerTypeLabel } from '../../routes/settings/secrets/ProviderModal.svelte';
-	import { effectiveMissing, isInlineProviderRef } from '$lib/utils/invault-markers';
+	import { effectiveMissing, isInlineProviderRef, INLINE_REF_PREFIXES } from '$lib/utils/invault-markers';
 	import { parseRawContent, generateRawContent, keysInRawContent, mergeParsedIntoVariables, mergeVariablesIntoRawContent, textEditorContent as deriveTextEditorContent, injectedKeysNeedCollapse } from '$lib/utils/env-panel-core';
 	import { m } from '$lib/paraglide/messages.js';
 
@@ -443,7 +443,7 @@
 			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 				<Info class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 				<p class="text-xs text-amber-700 dark:text-amber-300">
-					{m.stackenv_providerref_before()} (<code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">op://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">keepass://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">azurekv://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">pass://</code>) {m.stackenv_providerref_resolved()} <strong>{m.stackenv_providerref_here()}</strong>{m.stackenv_providerref_here_after()} <strong>{m.stackenv_providerref_not()}</strong> {m.stackenv_providerref_not_after()} <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">environment:</code> {m.stackenv_providerref_block()} <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">${'{VAR}'}</code> {m.stackenv_providerref_instead()}
+					{m.stackenv_providerref_before()} ({#each INLINE_REF_PREFIXES as prefix, index}{#if index > 0}, {/if}<code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">{prefix}</code>{/each}) {m.stackenv_providerref_resolved()} <strong>{m.stackenv_providerref_here()}</strong>{m.stackenv_providerref_here_after()} <strong>{m.stackenv_providerref_not()}</strong> {m.stackenv_providerref_not_after()} <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">environment:</code> {m.stackenv_providerref_block()} <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">${'{VAR}'}</code> {m.stackenv_providerref_instead()}
 				</p>
 			</div>
 		{/if}

@@ -6937,7 +6937,7 @@
 	"settings_secrets_field_keepass_key_file": "Ścieżka pliku klucza",
 	"settings_secrets_field_keepass_key_file_hint": "Opcjonalna bezwzględna ścieżka do pliku klucza bazy danych, widziana wewnątrz kontenera.",
 	"settings_secrets_bulk_op_placeholder": "id środowiska 1Password",
-	"settings_secrets_bulk_op_hint": "Ładuje zbiorczo wszystkie sekrety z tego środowiska 1Password. Pozostaw puste, aby wstrzykiwać tylko referencje inline op://.",
+	"settings_secrets_bulk_op_hint": "Opcjonalnie: ładuje wszystkie sekrety z tego środowiska 1Password. Aby mapować pojedyncze sekrety, pozostaw puste i ustaw wartość zmiennej stosu na op-env://<environment-id>/<secret-name>. Odwołania do sejfu używają op://<vault>/<item>/<field>.",
 	"settings_secrets_bulk_vault_label": "Ścieżka KV v2",
 	"settings_secrets_bulk_vault_hint": "Ładuje zbiorczo wszystkie klucze pod tą ścieżką KV v2 (w ramach skonfigurowanego mountu).",
 	"settings_secrets_bulk_infisical_hint": "Ładuje zbiorczo wszystkie sekrety pod tą ścieżką (projekt i środowisko pochodzą z konfiguracji providera).",
