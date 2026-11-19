@@ -84,8 +84,10 @@ describe('findNewerVersionTag — prereleases', () => {
 		).toBe('1.1.0-alpine-rc1');
 	});
 
-	it('does not treat rc1 -> rc2 (same numeric version) as newer', () => {
-		expect(findNewerVersionTag('1.0.0-rc1', ['1.0.0-rc2', '1.0.0-rc3'])).toBeNull();
+	it('orders a prerelease counter on the same version (rc1 -> rc3)', () => {
+		// A later build of the same prerelease is a newer image. The running tag is itself
+		// a prerelease, so prerelease candidates are in scope without includePrerelease.
+		expect(findNewerVersionTag('1.0.0-rc1', ['1.0.0-rc2', '1.0.0-rc3'])?.tag).toBe('1.0.0-rc3');
 	});
 });
 
@@ -399,9 +401,76 @@ describe('findNewerVersionTag - linuxserver build counters', () => {
 		expect(findNewerVersionTag('v2.5.2-ls122', tags, { matchFlavor: true })).toBeNull();
 	});
 
-	// A rebuild of the SAME upstream version is a digest change, not a newer version -
-	// the version tuple is what decides, and 2.5.1 is not newer than 2.5.1.
-	it('does not treat a higher counter on the same version as a newer version', () => {
-		expect(findNewerVersionTag('v2.5.1-ls120', ['v2.5.1-ls120', 'v2.5.1-ls121'], { matchFlavor: true })).toBeNull();
+	it('offers a higher build counter on the same version as a newer image', () => {
+		// linuxserver rebuilds the same upstream version under an incrementing -lsNNN
+		// counter; a higher counter is a newer image. The counter
+		// breaks the tie once the numeric versions are equal.
+		expect(
+			findNewerVersionTag('v2.5.1-ls120', ['v2.5.1-ls120', 'v2.5.1-ls121'], { matchFlavor: true })?.tag
+		).toBe('v2.5.1-ls121');
+	});
+});
+
+describe('build/revision suffix ordering and the CalVer boundary', () => {
+	it('offers a higher numeric revision suffix on the same version (pbs 4.2.8-1.1 -> -1.2)', () => {
+		expect(
+			findNewerVersionTag('4.2.8-1.1', ['4.2.8-1.1', '4.2.8-1.2'], { matchFlavor: true })?.tag
+		).toBe('4.2.8-1.2');
+	});
+
+	it('offers a linuxserver -rN-lsNNN revision bump of the same upstream (deluge)', () => {
+		// 2.2.0-r2-ls366 -> 2.2.0-r3-ls370 is a later build of the SAME 2.2.0.
+		expect(
+			findNewerVersionTag('2.2.0-r2-ls366', ['2.2.0-r2-ls366', '2.2.0-r3-ls370'], { matchFlavor: true })?.tag
+		).toBe('2.2.0-r3-ls370');
+	});
+
+	it('orders numeric identifiers numerically, not lexically (ls9 < ls10)', () => {
+		expect(
+			findNewerVersionTag('1.0-ls9', ['1.0-ls9', '1.0-ls10'], { matchFlavor: true })?.tag
+		).toBe('1.0-ls10');
+	});
+
+	it('does NOT offer a CalVer tag as an update to a SemVer current', () => {
+		// A repo carrying both 3.1.0 and a date-based 2025.1.1 must not drift a SemVer
+		// container onto the CalVer scheme, even though 2025 > 3 numerically.
+		expect(findNewerVersionTag('3.1.0', ['3.1.0', '2025.1.1'])).toBeNull();
+	});
+
+	it('does NOT offer an Ubuntu-style YY.0M CalVer to a SemVer current', () => {
+		expect(findNewerVersionTag('3.1.0', ['3.1.0', '20.04'])).toBeNull();
+	});
+
+	it('still offers a newer CalVer to a CalVer current (boundary is one-way)', () => {
+		expect(findNewerVersionTag('2025.1.1', ['2025.1.1', '2025.2.0'])?.tag).toBe('2025.2.0');
+	});
+
+	it('collapses builds of one version+flavor to the newest, which becomes the target', () => {
+		// Successive -lsNNN builds are the same version, so they share a dedup slot and
+		// the newest wins - the user is pointed at the latest build of 2.5.1.
+		const r = findNewerVersionTag('v2.5.1-ls120', ['v2.5.1-ls121', 'v2.5.1-ls122', 'v2.5.1-ls123'], { matchFlavor: true });
+		expect(r?.tag).toBe('v2.5.1-ls123');
+		expect(r?.skipped).toEqual(['v2.5.1-ls123']);
+	});
+
+	it('never offers a cross-variant update between version-bearing variant tokens', () => {
+		// php8.1 and php8.2 (and node18/node20, cuda11.8/cuda12.1, alpine3.19/alpine3.20)
+		// are DIFFERENT runtimes, not build counters, so an auto-update must never jump
+		// one onto another even though their numeric versions move.
+		expect(findNewerVersionTag('7.4-php8.1', ['7.4-php8.1', '8.1-php8.2'], { matchFlavor: true })).toBeNull();
+		expect(findNewerVersionTag('3.11-alpine3.19', ['3.11-alpine3.19', '3.12-alpine3.20'], { matchFlavor: true })).toBeNull();
+		expect(findNewerVersionTag('1.0-cuda11.8', ['1.0-cuda11.8', '2.0-cuda12.1'], { matchFlavor: true })).toBeNull();
+		expect(findNewerVersionTag('1-node18', ['1-node18', '2-node20'], { matchFlavor: true })).toBeNull();
+		// But a bump WITHIN the same variant is still offered.
+		expect(findNewerVersionTag('7.4-php8.1', ['7.4-php8.1', '8.0-php8.1'], { matchFlavor: true })?.tag).toBe('8.0-php8.1');
+	});
+
+	it('does not merge two different flavors that share a numeric version', () => {
+		// With flavor matching OFF, 1.2-alpine and 1.2-slim both reach dedup and share
+		// the numeric version 1.2; each must keep its own slot so BOTH are offered,
+		// rather than one silently displacing the other on a shared key.
+		const r = findNewerVersionTag('1.0', ['1.2-alpine', '1.2-slim'], { matchFlavor: false });
+		expect(r?.skipped).toContain('1.2-alpine');
+		expect(r?.skipped).toContain('1.2-slim');
 	});
 });

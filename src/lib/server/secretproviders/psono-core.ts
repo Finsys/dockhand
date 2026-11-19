@@ -144,6 +144,77 @@ export function secretToEnvVar(
 }
 
 /**
+ * The {key,value} items of a Psono Environment Variables secret, or null when the
+ * decrypted record is not one. Psono stores this type's pairs under
+ * `environment_variables_variables: [{key,value}]` (the field name in Psono's own
+ * client, alongside `environment_variables_title`/`_notes`), one secret holding a
+ * whole `.env`, so it has no scalar value field for `secretToEnvVar` to read - it is
+ * handled on its own. `env_vars` is accepted as a fallback for the normalised shape
+ * some Psono tooling emits.
+ */
+export function envVarsEntries(decrypted: unknown): Array<{ key: string; value: string }> | null {
+	if (!decrypted || typeof decrypted !== 'object' || Array.isArray(decrypted)) return null;
+	const rec = decrypted as Record<string, unknown>;
+	const arr = Array.isArray(rec.environment_variables_variables)
+		? rec.environment_variables_variables
+		: rec.env_vars;
+	if (!Array.isArray(arr)) return null;
+	const out: Array<{ key: string; value: string }> = [];
+	for (const item of arr) {
+		if (!item || typeof item !== 'object') continue;
+		const { key, value } = item as Record<string, unknown>;
+		if (typeof key === 'string' && key !== '' && typeof value === 'string') {
+			out.push({ key, value });
+		}
+	}
+	return out;
+}
+
+/**
+ * Every usable variable a bulk pull should take from an Environment Variables
+ * secret, or null when it is not that type (so the caller falls back to the scalar
+ * `secretToEnvVar`). The key is the variable NAME verbatim - a user who stored
+ * `SECRET_KEY` there chose that name deliberately - so a key that is not a valid
+ * shell variable name is dropped rather than rewritten, with the reason returned
+ * so the caller can warn. Duplicate keys within one secret keep the first.
+ */
+export function envVarsSecretToEntries(
+	decrypted: unknown
+): { entries: Array<{ name: string; value: string }>; skipped: string[] } | null {
+	const items = envVarsEntries(decrypted);
+	if (items === null) return null;
+	const entries: Array<{ name: string; value: string }> = [];
+	const seen = new Set<string>();
+	const skipped: string[] = [];
+	for (const { key, value } of items) {
+		if (!isEnvVarName(key)) {
+			skipped.push(key);
+			continue;
+		}
+		if (seen.has(key)) continue;
+		seen.add(key);
+		entries.push({ name: key, value });
+	}
+	return { entries, skipped };
+}
+
+/** Whether a string is usable verbatim as a shell/env variable name. */
+export function isEnvVarName(name: string): boolean {
+	return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+}
+
+/**
+ * A key safe to put in a log line. A skipped env_vars key is by definition one that
+ * failed `isEnvVarName`, so it is arbitrary decrypted text - control characters and
+ * newlines would let it forge log lines or corrupt a terminal. JSON-quoting escapes
+ * those, and the length is bounded so one key cannot flood the log.
+ */
+export function safeKeyForLog(key: string): string {
+	const capped = key.length > 64 ? key.slice(0, 64) + '...' : key;
+	return JSON.stringify(capped);
+}
+
+/**
  * A Psono title turned into a usable env-var name.
  *
  * Titles are free text ("Prod DB password"), so anything that cannot appear in a
@@ -201,6 +272,14 @@ export function parsePsonoReference(value: string): PsonoReference | null {
 export function referenceValue(decrypted: unknown, field: string | null): string | null {
 	if (!decrypted || typeof decrypted !== 'object' || Array.isArray(decrypted)) return null;
 	const obj = decrypted as Record<string, unknown>;
+	// An Environment Variables secret addresses a key by name: `psono://<id>/<KEY>`
+	// reads the matching item of the env_vars array, not a scalar field.
+	const items = envVarsEntries(obj);
+	if (items !== null) {
+		if (field === null) return null;
+		const hit = items.find((e) => e.key === field);
+		return hit ? hit.value : null;
+	}
 	if (field === null) {
 		const v = firstString(obj, VALUE_FIELDS);
 		return v;

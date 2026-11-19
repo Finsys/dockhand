@@ -18,6 +18,7 @@ import {
 } from './docker';
 import {
 	isDaemonExportFailure,
+	scanErrorOutput,
 	chooseReportedError,
 	resolveRegistryScanTarget,
 	needsRepoTags,
@@ -33,6 +34,7 @@ import { sendEventNotification } from './notifications';
 import { detectRemoteSocketPath } from './scanner-socket-detect';
 import { truncateForLog, classifyUnparseableOutput, pickScanDisplayName } from './scanner-output-core';
 import { checkNewerVersion } from './semver/check';
+import { userCheckListedAfter } from './semver/tag-source-core';
 import {
 	getHostDockerSocket,
 	getHostDataDir,
@@ -722,9 +724,12 @@ async function runScannerContainerImpl(
 			try {
 				return await run(false);
 			} catch (daemonError) {
-				const dmsg = daemonError instanceof Error ? daemonError.message : String(daemonError);
 				// Both halves failed; the core decides which failure explains the outcome.
-				throw chooseReportedError(rmsg, dmsg) === 'registry' ? registryError : daemonError;
+				// It classifies the daemon error for the export bug, so feed it the FULL
+				// output, not the truncated message (same ~1000-char cut as below).
+				throw chooseReportedError(rmsg, scanErrorOutput(daemonError)) === 'registry'
+					? registryError
+					: daemonError;
 			}
 		}
 	}
@@ -732,8 +737,9 @@ async function runScannerContainerImpl(
 	try {
 		return await run(false);
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
-		if (!isDaemonExportFailure(msg)) throw error;
+		// Classify on the FULL scanner output, not the truncated error message: the
+		// export-bug signal usually lands after the message's ~1000-char cut.
+		if (!isDaemonExportFailure(scanErrorOutput(error))) throw error;
 		// The daemon handed the scanner an incomplete tar (containerd/OCI store blob
 		// loss). Remember this env and retry from the registry.
 		console.warn(`[Scanner] ${scannerType}: daemon export produced an incomplete image for ${imageName}; retrying from the registry`);
@@ -929,9 +935,9 @@ async function runScannerContainerCore(
 	// image (e.g. a self-hosted ZOT) authenticates. Public images match nothing
 	// and scan anonymously, exactly as before this fix.
 	if (registryMode) {
-		// findRegistryCredentials matches on the registry HOST, not the full ref, so
-		// resolve the registry the same way image pulls do (parseImageReference), not
-		// by passing the tagged image name (which never matches a stored org path).
+		// findRegistryCredentials takes the registry host and the repo separately, so
+		// resolve both the way image pulls do (parseImageReference), not by passing the
+		// tagged image name.
 		// Resolved above, in the same `if (registryMode)` block that rewrote the command,
 		// so the scan and its credentials always describe one image. A missing target
 		// would mean the two blocks had drifted apart.
@@ -939,7 +945,7 @@ async function runScannerContainerCore(
 			throw new Error('Registry mode reached the credential step without a resolved target');
 		}
 		const { registry, authority } = registryScanTarget;
-		const creds = await findRegistryCredentials(registry);
+		const creds = await findRegistryCredentials(registry, parseImageReference(registryScanTarget.ref).repo);
 		const authEnv = registryAuthEnv(scannerType, creds, authority ?? undefined);
 		if (authEnv.length > 0) {
 			envVars.push(...authEnv);
@@ -1407,6 +1413,8 @@ export async function checkScannerNewerVersions(): Promise<{
 	trivy: { current: string; latest: string | null };
 }> {
 	const defaults = await getGlobalScannerDefaults();
+	// Asked for by a user from the settings page, so tag lists are listed afresh.
+	const listedAfter = userCheckListedAfter(Date.now());
 
 	const newest = async (image: string): Promise<string | null> => {
 		try {
@@ -1414,7 +1422,7 @@ export async function checkScannerNewerVersions(): Promise<{
 			// variants of every release, so ignoring the flavor offers a plain tag a
 			// -debug variant, and vice versa. Passed explicitly rather than relying on
 			// the default, which a change to findNewerVersionTag could flip.
-			const newer = await checkNewerVersion(image, { maxBump: 'major', matchFlavor: true });
+			const newer = await checkNewerVersion(image, { maxBump: 'major', matchFlavor: true }, undefined, [], undefined, listedAfter);
 			return newer?.tag ?? null;
 		} catch (e) {
 			console.error('[Scanner] Newer-version check failed for', image, e);

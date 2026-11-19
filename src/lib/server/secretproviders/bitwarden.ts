@@ -295,14 +295,25 @@ function secretRecord(payload: unknown[]): Record<string, string> {
 		if (typeof key !== 'string' || typeof value !== 'string' || value.includes('\0')) {
 			throw new BwsAdapterError('Bitwarden bws returned an invalid secret list');
 		}
+		// Skip a key that cannot become an env var rather than failing the whole
+		// pull. Invalid/reserved names are skipped like KeePass and Proton; a
+		// duplicate keeps the first value like KeePass (Proton hard-fails on one).
+		// Log the key name only, never the value. Bitwarden keys are free-form, so
+		// a dash/space name (plex-token) is common and must not sink every secret.
 		if (!ENV_NAME_RE.test(key)) {
-			throw new BwsAdapterError('Bitwarden secret key is not a valid environment variable name');
+			// JSON.stringify the key here (and only here): this branch runs when the
+			// key failed ENV_NAME_RE, so it may carry a newline/control char that would
+			// otherwise forge log lines. The two warns below already passed the regex.
+			console.warn(`Bitwarden bulk skipped secret ${JSON.stringify(key)}: not a valid environment variable name`);
+			continue;
 		}
 		if (DANGEROUS_KEYS.has(key)) {
-			throw new BwsAdapterError('Bitwarden secret key is not allowed');
+			console.warn(`Bitwarden bulk skipped secret "${key}": reserved name`);
+			continue;
 		}
 		if (seen.has(key)) {
-			throw new BwsAdapterError('Bitwarden bws returned duplicate secret keys');
+			console.warn(`Bitwarden bulk skipped a duplicate secret "${key}"; the first value is used`);
+			continue;
 		}
 		seen.add(key);
 		result[key] = value;

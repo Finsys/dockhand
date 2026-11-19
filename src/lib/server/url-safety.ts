@@ -33,7 +33,8 @@ export function isSafeWebhookUrl(raw: string): { ok: boolean; reason?: string } 
  * (169.254.169.254) hosts — the addresses with no legitimate notification use
  * and the highest SSRF value — while allowing ordinary LAN ranges (10.x,
  * 192.168.x, 172.16-31.x) so a self-hosted ntfy/gotify/webhook receiver on the
- * local network still works. Same literal-host caveat as isSafeWebhookUrl.
+ * local network still works. It reads the host as written; the notification
+ * senders also check where a name resolves (resolvedHostReason).
  */
 export function isSafeNotificationUrl(raw: string): { ok: boolean; reason?: string } {
 	let u: URL;
@@ -108,7 +109,7 @@ function hextetsToV4(hi: number, lo: number): string {
  * that only classifies the v6 prefix would wave through a loopback/metadata/private
  * target encoded this way. The embedded v4 is judged through the same range checks.
  */
-function embeddedV4(h: string): string | null {
+export function embeddedV4(h: string): string | null {
 	const x = expandV6(h);
 	if (!x) return null;
 
@@ -198,7 +199,8 @@ export function canonicalV4(host: string): string {
 }
 
 export function ipCategory(host: string): IpCategory | null {
-	const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+	// A zone id (`::1%lo0`) names an interface; the address is what precedes it.
+	const h = host.toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '');
 	// IPv6 loopback / unspecified, then link-local / unique-local (private).
 	if (h === '::1') return 'loopback';
 	if (h === '::' || h === '::0') return 'reserved'; // unspecified / all-interfaces

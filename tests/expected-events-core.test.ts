@@ -89,3 +89,21 @@ describe('ExpectedEventsTracker', () => {
 		expect(t.shouldSuppress('b', 'die', T0 + 25_000)).toBe(true);
 	});
 });
+
+describe('marking chosen actions', () => {
+	test('a scheduled start silences only the start', () => {
+		const t = new ExpectedEventsTracker();
+		t.markExpected('abc', 0, 30_000, ['start']);
+		expect(t.shouldSuppress('abc', 'start', 1000)).toBe(true);
+		for (const a of ['die', 'kill', 'stop', 'oom']) expect(t.shouldSuppress('abc', a, 1000)).toBe(false);
+		expect(t.shouldSuppress('abc', 'start', 30_001)).toBe(false);
+	});
+
+	test('the default stays the stop an update causes', () => {
+		const t = new ExpectedEventsTracker();
+		t.markExpected('abc', 0, 30_000);
+		expect(t.shouldSuppress('abc', 'start', 1000)).toBe(false);
+		expect(t.shouldSuppress('abc', 'stop', 1000)).toBe(true);
+	});
+});
+

@@ -1,8 +1,8 @@
 /**
  * List every version-looking tag an image's registry publishes, so the pure
  * `findNewerVersionTag` can pick the newest. Routes to the right fetch strategy
- * by host (Docker Hub API vs generic Registry v2), and caches per repo for 6h —
- * the set of published tags changes slowly and this keeps registries un-hammered.
+ * by host (Docker Hub API vs generic Registry v2), and caches each listing: 1 h for a
+ * complete list, 10 min for a partial or failed one (tag-source-core.ts).
  *
  * GHCR note: ghcr.io works through the generic v2 path here. GitHub's Packages
  * API returns versions newest-first (nicer for repos buried under git-hash tags),
@@ -11,66 +11,30 @@
 import { parseImageReference, isDockerHub } from '../registry/image-ref';
 import { findRegistryCredentials } from '../docker';
 import { fetchDockerHubTags } from './strategies/docker-hub';
-import { fetchGenericV2Tags } from './strategies/generic-v2';
+import { fetchGenericV2Tags, fetchGenericV2TagsAfter } from './strategies/generic-v2';
+import { createTagCache, tagListings } from './tag-source-core';
 
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-
-interface CacheEntry {
-	tags: string[];
-	expiresAt: number;
-}
-// Keyed by `registry/repo`. Registry credentials are stored per-HOST (not per
-// environment) in Dockhand's registries table, so the tag list for a given
-// registry/repo is the same regardless of which env asked - the key needs no env
-// dimension. A generic V2 registry that needs auth uses the stored credentials
-// for that host (same lookup the digest check uses); an unauthenticated repo just
-// works anonymously.
-const cache = new Map<string, CacheEntry>();
-// In-flight fetches keyed the same way, so a burst of same-image containers in
-// one check pass (CONCURRENCY=20) collapses to ONE registry request per repo
-// instead of one per container.
-const inflight = new Map<string, Promise<string[]>>();
+const tagCache = createTagCache();
 
 /**
- * All tags published for the image behind `imageRef`, cached per repo. Returns
- * `[]` on any registry failure — the caller treats "no tags" as "nothing newer".
+ * The tags an image's registry publishes that newer-version detection can read, from
+ * the listings `tagListings` picks, each cached on its own. A partial listing returns the
+ * tags it read; a failed one returns [], which the caller treats as nothing newer.
  */
-export async function listVersionTags(imageRef: string): Promise<string[]> {
-	const { registry, repo } = parseImageReference(imageRef);
-	const cacheKey = `${registry}/${repo}`;
-
-	const cached = cache.get(cacheKey);
-	if (cached && cached.expiresAt > Date.now()) return cached.tags;
-
-	const pending = inflight.get(cacheKey);
-	if (pending) return pending;
-
-	const promise = (async () => {
-		let tags: string[] = [];
-		try {
-			if (isDockerHub(registry)) {
-				tags = await fetchDockerHubTags(repo);
-			} else {
-				const credentials = await findRegistryCredentials(registry).catch(() => null);
-				tags = await fetchGenericV2Tags(registry, repo, credentials);
-			}
-		} catch {
-			tags = [];
-		}
-		cache.set(cacheKey, { tags, expiresAt: Date.now() + CACHE_TTL_MS });
-		return tags;
-	})();
-
-	inflight.set(cacheKey, promise);
-	try {
-		return await promise;
-	} finally {
-		inflight.delete(cacheKey);
-	}
+export async function listVersionTags(imageRef: string, listedAfter?: number): Promise<string[]> {
+	const { registry, repo, tag } = parseImageReference(imageRef);
+	const dockerHub = isDockerHub(registry);
+	const lists = await Promise.all(tagListings(registry, repo, tag, dockerHub).map(({ key, after }) =>
+		tagCache.get(key, async () => {
+			if (dockerHub) return fetchDockerHubTags(repo);
+			const credentials = await findRegistryCredentials(registry, repo).catch(() => null);
+			return after ? fetchGenericV2TagsAfter(registry, repo, credentials, after) : fetchGenericV2Tags(registry, repo, credentials);
+		}, listedAfter)
+	));
+	return lists.length === 1 ? lists[0] : [...new Set(lists.flat())];
 }
 
-/** Test-only: clear the per-repo tag cache. */
+/** Test-only: clear the tag cache. */
 export function __resetTagSourceCacheForTests(): void {
-	cache.clear();
-	inflight.clear();
+	tagCache.clear();
 }

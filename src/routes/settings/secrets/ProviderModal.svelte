@@ -34,6 +34,7 @@
 		{ value: 'azure-kv', label: 'Azure Key Vault' },
 		{ value: 'keepass', label: 'KeePassXC' },
 		{ value: 'psono', label: 'Psono' },
+		{ value: 'sops', label: 'SOPS (age)' },
 	];
 
 	// Config fields per provider type, matching the config shapes in
@@ -92,6 +93,9 @@
 			{ key: 'databasePath', get label() { return m.settings_secrets_field_keepass_database_path(); }, type: 'text', required: true, placeholder: '/secrets/passwords.kdbx', get hint() { return m.settings_secrets_field_keepass_database_path_hint(); } },
 			{ key: 'password', get label() { return m.settings_secrets_field_keepass_password(); }, type: 'password', required: false, requiredWhen: (c) => !(c.keyFilePath ?? '').trim(), get placeholder() { return m.settings_secrets_field_keepass_password_placeholder(); }, get hint() { return m.settings_secrets_field_keepass_password_hint(); } },
 			{ key: 'keyFilePath', get label() { return m.settings_secrets_field_keepass_key_file(); }, type: 'text', required: false, placeholder: '/secrets/db.keyx', get hint() { return m.settings_secrets_field_keepass_key_file_hint(); } },
+		],
+		sops: [
+			{ key: 'ageKey', get label() { return m.settings_secrets_field_sops_age_key(); }, type: 'password', required: true, placeholder: 'AGE-SECRET-KEY-1...', get hint() { return m.settings_secrets_field_sops_age_key_hint(); } },
 		],
 	};
 
@@ -499,6 +503,17 @@
 						>{m.settings_secrets_psono_note_off()}<code
 							>psono://&lt;secret-id&gt;/&lt;field&gt;</code
 						>{m.settings_secrets_psono_note_after()}
+					</span>
+				</p>
+			{/if}
+			{#if formType === 'sops'}
+				<!-- Not the external-CLI note below: the sops client ships in the image, so
+				     what matters is which env file it decrypts and where the values go. -->
+				<p class="flex items-start gap-2 text-xs text-muted-foreground">
+					<Info class="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+					<span>
+						{m.settings_secrets_sops_note_before()} <code>sops encrypt</code> {m.settings_secrets_sops_note_override_before()}
+						<code>DOCKHAND_SOPS_PATH</code>{m.settings_secrets_sops_note_after()}
 					</span>
 				</p>
 			{/if}

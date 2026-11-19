@@ -28,8 +28,12 @@ import {
 	type Outcome,
 } from './operations-core';
 
-/** How often (ms) progress updates are persisted. */
-const PROGRESS_INTERVAL_MS = 1000;
+/**
+ * How often (ms) restic's `% done` lines are persisted. Each append rewrites the whole
+ * log column, so the write cost grows with the log; a long backup must append rarely.
+ * The live UI and docker logs still get every line.
+ */
+const PROGRESS_INTERVAL_MS = 60_000;
 
 export interface OpenOptions {
 	kind: OperationKind;
@@ -38,6 +42,10 @@ export interface OpenOptions {
 	environmentId: number | null;
 	entityName: string;
 	triggeredBy: 'cron' | 'manual' | 'webhook';
+	/** The destination this run writes to, stamped into the record so the History
+	 *  view reports the repo each run ACTUALLY used - not the config's current one,
+	 *  which changes when the schedule is re-pointed (#1783). */
+	destinationId?: number;
 }
 
 /**
@@ -55,6 +63,10 @@ export class Operation {
 		// A stable prefix for the process log so every op line is greppable in
 		// `docker logs` — e.g. `[Backup:postgres#42]` / `[Restore:mystack#7]`.
 		private logTag: string,
+		// The destination this run writes to, folded into the final details so the
+		// History view reports the repo each run used rather than the config's
+		// current one (#1783). null when the caller does not own a destination.
+		private destinationId: number | null,
 		private onProgressCb?: (status: string, message: string, detail?: unknown) => void
 	) {}
 
@@ -69,7 +81,7 @@ export class Operation {
 		});
 		await updateScheduleExecution(row.id, { startedAt: new Date().toISOString() });
 		const label = opts.kind === 'backup' ? 'Backup' : opts.kind === 'restore' ? 'Restore' : opts.kind;
-		return new Operation(row.id, `[${label}:${opts.entityName}#${row.id}]`, onProgress);
+		return new Operation(row.id, `[${label}:${opts.entityName}#${row.id}]`, opts.destinationId ?? null, onProgress);
 	}
 
 	/** Append a detailed line to the operation log (DB debugging trail) AND mirror it
@@ -126,6 +138,7 @@ export class Operation {
 			errorMessage: isFailure ? terminal.message : undefined,
 			details: {
 				...(details ?? {}),
+				...(this.destinationId != null ? { destinationId: this.destinationId } : {}),
 				...(terminal.errorCode ? { errorCode: terminal.errorCode } : {}),
 				...(terminal.message && !isFailure ? { note: terminal.message } : {}),
 			},

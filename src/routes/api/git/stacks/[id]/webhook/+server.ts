@@ -3,8 +3,9 @@ import type { RequestHandler } from './$types';
 import { getGitStack } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
 import { auditGitStack } from '$lib/server/audit';
-import { verifyWebhookSignature } from '$lib/server/webhook-signature';
+import { verifyWebhookSignature, timingSafeStringEqual } from '$lib/server/webhook-signature';
 import { decideWebhookSecretPolicy, allowSecretlessWebhook } from '$lib/server/webhook-secret-policy';
+import { decideWebhookRefSkip } from '$lib/server/git-webhook-ref';
 
 function detectSource(request: Request): string {
 	if (request.headers.get('x-hub-signature-256')) return 'github';
@@ -17,7 +18,7 @@ function detectSource(request: Request): string {
  * summary: Webhook trigger (GitHub/GitLab) that deploys a git stack when its signature/token verifies
  * description: Public endpoint authenticated by the stack's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification.
  * path: id:integer! Git stack ID (from GET /api/git/stacks)
- * resp-200: {success:boolean, skipped:boolean, error:string}
+ * resp-200: {success:boolean, skipped:boolean, error:string, output:string}
  * resp-200-example: {"success":true,"skipped":false}
  * resp-400: The id path segment is not a valid integer
  * resp-401: The webhook signature or token did not verify
@@ -51,9 +52,23 @@ export const POST: RequestHandler = async (event) => {
 			});
 			return json({ error: 'Webhook secret is not configured for this stack' }, { status: 401 });
 		}
+		// The raw body is needed both to verify the HMAC and to read the push ref. A
+		// repository webhook fires for every branch, so a push that is not for the branch
+		// this stack tracks is dropped before deploy; a skip returns 200 so the provider
+		// does not retry. Applies to both the verified and the secretless-opt-in paths.
+		const payload = await request.text();
+		const refSkip = decideWebhookRefSkip(payload, gitStack.branch || gitStack.repository.branch);
+		const skipResponse = async (ref: string, branch: string) => {
+			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
+				method: 'POST', source, result: 'skipped'
+			});
+			return json({ success: true, skipped: true, output: `Push was to ${ref}, not tracked branch ${branch}` });
+		};
+
 		if (policy.action === 'deploy-unverified') {
 			// ALLOW_WEBHOOKS_WITHOUT_SECRET opt-in (isolated network): deploy without
 			// verification, but record the unverified trigger in the audit trail.
+			if (refSkip.skip) return skipResponse(refSkip.ref, refSkip.trackedBranch);
 			const result = await deployGitStack(id, { force: false, triggeredBy: 'webhook' });
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 				method: 'POST', source, verification: 'skipped_no_secret', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
@@ -63,7 +78,6 @@ export const POST: RequestHandler = async (event) => {
 
 		// policy.action === 'verify' here, so a secret is present.
 		const webhookSecret = gitStack.webhookSecret as string;
-		const payload = await request.text();
 		const githubSignature = request.headers.get('x-hub-signature-256');
 		const gitlabToken = request.headers.get('x-gitlab-token');
 
@@ -75,6 +89,8 @@ export const POST: RequestHandler = async (event) => {
 			});
 			return json({ error: 'Invalid webhook signature' }, { status: 401 });
 		}
+
+		if (refSkip.skip) return skipResponse(refSkip.ref, refSkip.trackedBranch);
 
 		// Deploy the git stack (syncs and deploys only if there are changes)
 		const result = await deployGitStack(id, { force: false, triggeredBy: 'webhook' });
@@ -94,7 +110,7 @@ export const POST: RequestHandler = async (event) => {
  * summary: GET webhook trigger for a git stack, with the secret passed as the `secret` query parameter
  * path: id:integer! Git stack ID (from GET /api/git/stacks)
  * query: secret:string Webhook secret; required only if the stack has a webhook secret configured
- * resp-200: {success:boolean, skipped:boolean, error:string}
+ * resp-200: {success:boolean, skipped:boolean, error:string, output:string}
  * resp-200-example: {"success":true,"skipped":false}
  * resp-400: The id path segment is not a valid integer
  * resp-401: The provided secret did not match the stack's webhook secret
@@ -135,9 +151,9 @@ export const GET: RequestHandler = async (event) => {
 			return json(result);
 		}
 
-		// Verify secret via query parameter for GET requests
+		// Verify secret via query parameter for GET requests (constant-time).
 		const secret = url.searchParams.get('secret');
-		if (secret !== gitStack.webhookSecret) {
+		if (!secret || !gitStack.webhookSecret || !timingSafeStringEqual(secret, gitStack.webhookSecret)) {
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 				method: 'GET', source: 'get', error: 'invalid_secret'
 			});

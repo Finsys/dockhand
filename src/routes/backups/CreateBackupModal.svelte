@@ -15,7 +15,7 @@
 	import VolumePicker from '$lib/components/backup/VolumePicker.svelte';
 	import StackFilesPicker from '$lib/components/backup/StackFilesPicker.svelte';
 	import DestinationPicker from '$lib/components/backup/DestinationPicker.svelte';
-	import { normalizeMounts, volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
+	import { normalizeMounts, volumesForStack, fileBindKeys, type VolumeInfo } from '$lib/utils/mounts';
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -375,6 +375,7 @@
 							bind:selectedVolumes
 							emptyLabel={selectedItem.type === 'stack' ? m.containers_backup_no_volumes_stack() : m.containers_backup_no_volumes_container()}
 							showBindWarning={true}
+							fileKeys={fileBindKeys(selectedItem.volumes, stackListing?.kind === 'listed' ? stackListing : null)}
 						/>
 					{/if}
 

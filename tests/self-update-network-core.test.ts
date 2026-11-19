@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isSafeNetworkName, planNetworkEnvVars } from '../src/lib/server/self-update-network-core';
+import { applySelfUpdateNetworks, isSafeNetworkName, planNetworkEnvVars } from '../src/lib/server/self-update-network-core';
 
 /**
  * What the update sidecar is allowed to be told about a container's networks.
@@ -150,5 +150,83 @@ describe('addresses a real deployment uses', () => {
 		const plan = planNetworkEnvVars(Object.fromEntries(names.map((n) => [n, {}])));
 		expect(plan.skipped).toEqual([]);
 		expect(plan.envVars[0]).toBe(`NETWORKS=${names.join(' ')}`);
+	});
+});
+
+describe('applySelfUpdateNetworks', () => {
+	// The reported compose: ipv4_address 192.168.1.50 + mac_address 02:42:c0:a8:01:32 on 'management'.
+	const reported = () => ({
+		HostConfig: { NetworkMode: 'management' },
+		NetworkSettings: {
+			Networks: {
+				management: {
+					IPAMConfig: { IPv4Address: '192.168.1.50' },
+					Aliases: ['dockhand'],
+					Links: ['db:db'],
+					IPAddress: '192.168.1.50',
+					MacAddress: '02:42:c0:a8:01:32'
+				},
+				other: { IPAddress: '172.20.0.4', MacAddress: '3e:65:8f:50:ce:b9' }
+			} as Record<string, any>
+		}
+	});
+
+	test('a pinned primary IP goes in at create with its MAC, aliases and links; the sidecar gets the rest', () => {
+		const createConfig: Record<string, unknown> = {};
+		const { primary, reconnect } = applySelfUpdateNetworks(createConfig, reported());
+		expect(primary).toBe('management');
+		expect(createConfig).toEqual({
+			NetworkingConfig: {
+				EndpointsConfig: {
+					management: { IPAMConfig: { IPv4Address: '192.168.1.50' }, Aliases: ['dockhand'], Links: ['db:db'], MacAddress: '02:42:c0:a8:01:32' }
+				}
+			}
+		});
+		expect(reconnect.envVars).toEqual(['NETWORKS=other']);
+	});
+
+	test('a pinned IPv6 alone counts, and a generated MAC is not carried', () => {
+		const createConfig: Record<string, unknown> = {};
+		const { primary } = applySelfUpdateNetworks(createConfig, {
+			HostConfig: { NetworkMode: 'lan' },
+			NetworkSettings: { Networks: { lan: { IPAMConfig: { IPv6Address: 'fd00::50' }, IPAddress: '10.0.0.4', MacAddress: '02:42:0a:00:00:04' } } }
+		});
+		expect(primary).toBe('lan');
+		expect(createConfig).toEqual({ NetworkingConfig: { EndpointsConfig: { lan: { IPAMConfig: { IPv6Address: 'fd00::50' } } } } });
+	});
+
+	test('no pinned IP on the primary network: nothing changes, every network to the sidecar', () => {
+		// Including a MAC the user set and a pinned IP on a secondary network.
+		for (const ipam of [null, undefined, {}, { IPv4Address: '' }]) {
+			const inspect = reported();
+			inspect.NetworkSettings.Networks.management.IPAMConfig = ipam;
+			inspect.NetworkSettings.Networks.other.IPAMConfig = { IPv4Address: '172.20.0.4' };
+			const createConfig: Record<string, unknown> = {};
+			const { primary, reconnect } = applySelfUpdateNetworks(createConfig, inspect);
+			expect(primary).toBeNull();
+			expect(createConfig).toEqual({});
+			expect(reconnect).toEqual(planNetworkEnvVars(inspect.NetworkSettings.Networks));
+		}
+	});
+
+	test('the default bridge is found under its network name', () => {
+		const { primary } = applySelfUpdateNetworks({}, {
+			HostConfig: { NetworkMode: 'default' },
+			NetworkSettings: { Networks: { bridge: { IPAMConfig: { IPv4Address: '172.17.0.9' }, MacAddress: '' } } }
+		});
+		expect(primary).toBe('bridge');
+	});
+
+	test('host, none and container: modes keep the sidecar path', () => {
+		for (const mode of ['host', 'none', 'container:abc', 'service:web']) {
+			const createConfig: Record<string, unknown> = {};
+			const { primary } = applySelfUpdateNetworks(createConfig, {
+				HostConfig: { NetworkMode: mode },
+				// Never pinnable in Docker; the guard holds even if inspect said otherwise.
+				NetworkSettings: { Networks: { [mode]: { IPAMConfig: { IPv4Address: '10.0.0.9' }, MacAddress: '' } } }
+			});
+			expect(primary).toBeNull();
+			expect(createConfig).toEqual({});
+		}
 	});
 });

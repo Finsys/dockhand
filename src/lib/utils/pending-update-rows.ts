@@ -4,7 +4,8 @@
  * A row can record a digest update, a newer-version-tag suggestion, a held update
  * waiting out the minimum image age, or a combination. The distinction that
  * matters: a HELD update must never be offered for a bulk update, because the
- * cooldown is precisely what would block it. Pure so both the server aggregation
+ * cooldown is precisely what would block it. A PINNED one is the same shape of
+ * answer - the digest moved, but applying it would pull the manifest already running. Pure so both the server aggregation
  * and the client store agree on the rules.
  */
 
@@ -13,6 +14,7 @@ export interface PendingUpdateRow {
 	hasImageUpdate?: boolean;
 	newerVersion?: unknown | null;
 	releaseAgeRemainingHours?: number | null;
+	pinnedToDigest?: boolean;
 }
 
 /** Whether a row is worth persisting at all. */
@@ -20,8 +22,10 @@ export function isWorthPersisting(row: {
 	hasImageUpdate?: boolean;
 	newerVersion?: unknown | null;
 	releaseAgeRemainingHours?: number | null;
+	pinnedToDigest?: boolean;
 }): boolean {
-	return !!row.hasImageUpdate || row.newerVersion != null || !!row.releaseAgeRemainingHours;
+	return !!row.hasImageUpdate || row.newerVersion != null || !!row.releaseAgeRemainingHours
+		|| !!row.pinnedToDigest;
 }
 
 /** One update-check result, as far as deciding what to persist is concerned. */
@@ -32,6 +36,7 @@ export interface CheckResult {
 	hasUpdate?: boolean;
 	newerVersion?: unknown | null;
 	releaseAgeRemainingHours?: number | null;
+	pinnedToDigest?: boolean;
 	systemContainer?: unknown;
 	updateDisabled?: boolean;
 }
@@ -45,6 +50,7 @@ export interface PersistableRow {
 		hasImageUpdate: boolean;
 		newerVersion: unknown | null;
 		releaseAgeRemainingHours: number | null;
+		pinnedToDigest: boolean;
 	};
 }
 
@@ -59,16 +65,65 @@ export function rowsToPersist(results: CheckResult[]): PersistableRow[] {
 	const out: PersistableRow[] = [];
 	for (const r of results) {
 		if (r.systemContainer || r.updateDisabled) continue;
-		const hasImageUpdate = !!r.hasUpdate;
+		const pinnedToDigest = !!r.pinnedToDigest;
+		// A pinned move is recorded as pinned, NOT as an image update: `hasImageUpdate` is
+		// what a bulk update acts on, and pulling the pinned reference returns the manifest
+		// already running.
+		const hasImageUpdate = !!r.hasUpdate && !pinnedToDigest;
 		const releaseAgeRemainingHours = r.releaseAgeRemainingHours ?? null;
 		const newerVersion = r.newerVersion ?? null;
-		if (!isWorthPersisting({ hasImageUpdate, newerVersion, releaseAgeRemainingHours })) continue;
+		if (!isWorthPersisting({ hasImageUpdate, newerVersion, releaseAgeRemainingHours, pinnedToDigest })) continue;
 		out.push({
 			containerId: r.containerId,
 			containerName: r.containerName,
 			imageName: r.imageName,
-			options: { hasImageUpdate, newerVersion, releaseAgeRemainingHours }
+			options: { hasImageUpdate, newerVersion, releaseAgeRemainingHours, pinnedToDigest }
 		});
+	}
+	return out;
+}
+
+/** A row as stored, as far as carrying it over is concerned (`newerVersion` is JSON text). */
+export interface StoredPendingRow {
+	containerId: string;
+	containerName: string;
+	currentImage: string;
+	hasImageUpdate: boolean;
+	newerVersion: string | null;
+	releaseAgeRemainingHours: number | null;
+	pinnedToDigest: boolean;
+}
+
+/**
+ * The rows to persist once a check is done, keeping what a failed check could not
+ * re-confirm. A container whose registry check errored keeps the digest half of its
+ * previous row (update, pin, hold) - a transient registry failure must not erase an
+ * update that is already known. Its newer-version half is the fresh one when this
+ * check found one, else the previous. Every other container gets exactly `rows`.
+ */
+export function withPreviousOnError(
+	rows: PersistableRow[],
+	previous: StoredPendingRow[],
+	erroredIds: ReadonlySet<string>
+): PersistableRow[] {
+	const out = rows.map((r) => ({ ...r, options: { ...r.options } }));
+	for (const prev of previous) {
+		if (!erroredIds.has(prev.containerId)) continue;
+		let previousNewer: unknown = null;
+		try { previousNewer = prev.newerVersion ? JSON.parse(prev.newerVersion) : null; } catch { previousNewer = null; }
+		const digestHalf = {
+			hasImageUpdate: prev.hasImageUpdate,
+			releaseAgeRemainingHours: prev.releaseAgeRemainingHours,
+			pinnedToDigest: prev.pinnedToDigest
+		};
+		const fresh = out.find((r) => r.containerId === prev.containerId);
+		if (fresh) {
+			Object.assign(fresh.options, digestHalf);
+			continue;
+		}
+		const options = { ...digestHalf, newerVersion: previousNewer };
+		if (!isWorthPersisting(options)) continue;
+		out.push({ containerId: prev.containerId, containerName: prev.containerName, imageName: prev.currentImage, options });
 	}
 	return out;
 }
@@ -92,6 +147,7 @@ export function splitPendingUpdates(data: PendingUpdatesResponse): {
 	updatable: { containerId: string; containerName: string }[];
 	newerVersions: Map<string, unknown>;
 	coolingDown: Map<string, number>;
+	pinnedDigest: Set<string>;
 } {
 	const rows = data.pendingUpdates ?? [];
 	return {
@@ -101,7 +157,10 @@ export function splitPendingUpdates(data: PendingUpdatesResponse): {
 		newerVersions: new Map(
 			rows.filter((r) => r.newerVersion).map((r) => [r.containerId, r.newerVersion])
 		),
-		coolingDown: coolingDown(rows, data.minimumReleaseAgeHours ?? 1)
+		coolingDown: coolingDown(rows, data.minimumReleaseAgeHours ?? 1),
+		// Carried across a reload so the pin indicator survives it; a row that is only
+		// pinned never appears in `updatable`, so no bulk update can reach it.
+		pinnedDigest: new Set(rows.filter((r) => r.pinnedToDigest).map((r) => r.containerId))
 	};
 }
 
@@ -130,4 +189,17 @@ export function coolingDown(rows: PendingUpdateRow[], cooldownHours = 1): Map<st
 		}
 	}
 	return out;
+}
+
+/**
+ * The two cooldown fields a container detail carries, kept in lockstep: a
+ * container is marked waiting ONLY when hours are known for it, so the UI can
+ * never draw the clock without the number beside it.
+ */
+export function containerCooldownFields(
+	coolingDownHoursById: Map<string, number>,
+	id: string
+): { coolingDown: boolean; coolingDownHours: number | undefined } {
+	const hours = coolingDownHoursById.get(id);
+	return { coolingDown: hours !== undefined, coolingDownHours: hours };
 }

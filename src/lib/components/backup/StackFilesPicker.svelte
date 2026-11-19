@@ -14,6 +14,7 @@
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { m } from '$lib/paraglide/messages.js';
+	import { isLoadBearingStackEntry, isStackEntryLocked, effectiveStackFileExclusions } from '$lib/utils/stack-files-picker';
 
 	type Entry = { name: string; type: 'dir' | 'file'; size: number; capturedAs?: 'bind' | 'volume' };
 	type Listing =
@@ -51,34 +52,18 @@
 		: 'socket'
 	);
 
-	// A stack always needs its compose + env files - never deselectable (matches the server
-	// isLoadBearingStackFile guard, which refuses to exclude them even if the config lists them).
-	function isLoadBearing(name: string): boolean {
-		const n = name.toLowerCase();
-		return (
-			n === 'compose.yaml' || n === 'compose.yml' ||
-			n === 'docker-compose.yml' || n === 'docker-compose.yaml' ||
-			n === '.env' || n.startsWith('.env.')
-		);
-	}
-
-	// An entry the user cannot deselect HERE: either load-bearing (always kept) or captured via
-	// its own bind/volume channel (controlled in the Volumes section, not here).
-	function isLocked(e: Entry): boolean {
-		return isLoadBearing(e.name) || e.capturedAs != null;
-	}
-
 	const entries = $derived(listing?.kind === 'listed' ? listing.entries : []);
-	const selectable = $derived(entries.filter((e) => !isLocked(e)));
-	// "All files" is on when nothing selectable is excluded.
-	const allFiles = $derived(excludedStackFiles.length === 0);
+	const selectable = $derived(entries.filter((e) => !isStackEntryLocked(e)));
+	// What the server will actually exclude; "All files" is on when that is nothing.
+	const effectiveExcluded = $derived(effectiveStackFileExclusions(excludedStackFiles));
+	const allFiles = $derived(effectiveExcluded.length === 0);
 
 	function toggleAll(on: boolean) {
 		excludedStackFiles = on ? [] : selectable.map((e) => e.name);
 	}
 
 	function toggleEntry(e: Entry) {
-		if (isLocked(e)) return;
+		if (isStackEntryLocked(e)) return;
 		excludedStackFiles = excludedStackFiles.includes(e.name)
 			? excludedStackFiles.filter((n) => n !== e.name)
 			: [...excludedStackFiles, e.name];
@@ -180,10 +165,10 @@
 			</div>
 			<div class="divide-y max-h-40 overflow-y-auto">
 				{#each entries as entry}
-					{@const locked = isLocked(entry)}
+					{@const locked = isStackEntryLocked(entry)}
 					<label class="flex items-center gap-2 px-3 py-1.5 text-xs" class:cursor-pointer={!allFiles && !locked} class:opacity-60={locked}>
 						<Checkbox
-							checked={!excludedStackFiles.includes(entry.name)}
+							checked={!effectiveExcluded.includes(entry.name)}
 							disabled={allFiles || locked}
 							onCheckedChange={() => toggleEntry(entry)}
 							class="h-3.5 w-3.5"
@@ -196,7 +181,7 @@
 						<span class="font-mono truncate">{entry.name}</span>
 						{#if entry.capturedAs}
 							<span class="text-muted-foreground ml-auto shrink-0 italic">{entry.capturedAs === 'bind' ? m.backupui_captured_as_bind() : m.backupui_captured_as_volume()}</span>
-						{:else if isLoadBearing(entry.name)}
+						{:else if isLoadBearingStackEntry(entry.name)}
 							<span class="text-muted-foreground ml-auto shrink-0 italic">{m.backupui_always_kept()}</span>
 						{:else if entry.type === 'file'}
 							<span class="text-muted-foreground ml-auto shrink-0">{fmtSize(entry.size)}</span>

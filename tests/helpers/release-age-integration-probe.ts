@@ -14,7 +14,13 @@ const scanning = phase.includes('scan');
 const systemd = phase.includes('systemd');
 const systemdFailure = systemd && (phase.includes('race') || phase.includes('inspect-failure') || phase.includes('preflight'));
 const deferred = phase.includes('young');
-let remainingMs = deferred ? 3600001 : 0;
+// skip-label: the container carries dockhand.skip.cooldown=true while its image is still young.
+const skipLabel = phase.includes('skip-label');
+// nodigest: the registry stops answering after the update check, so the pull has no digest.
+const noDigest = phase.includes('nodigest');
+let registryDown = false;
+let advisories = 0;
+let remainingMs = deferred || skipLabel || phase === 'skip-cooldown' ? 3600001 : 0;
 let ageChecks = 0;
 const pendingUpdates: any[] = [];
 const logs: string[] = [];
@@ -42,10 +48,16 @@ let removedPending = 0;
 let current = {
 	Id: originalId, Name: '/app', Image: old,
 	// Begin with a container previously created from an immutable ID, to check the next update.
-	Config: { Image: old, Env: ['VERSION=old'], Labels: trackedImageLabels(systemd ? { PODMAN_SYSTEMD_UNIT: 'app.service' } : {}, image, old) },
+	Config: { Image: old, Env: ['VERSION=old'], Labels: trackedImageLabels({ ...(systemd ? { PODMAN_SYSTEMD_UNIT: 'app.service' } : {}), ...(phase.includes('watch-off') ? { 'dockhand.watch.digest': 'false' } : {}), ...(skipLabel ? { 'dockhand.skip.cooldown': 'true' } : {}) }, image, old) },
 	HostConfig: { NetworkMode: 'host' }, State: { Running: systemd }, NetworkSettings: { Networks: {} }
 };
 const noop = async () => {};
+// The saved pending rows: a clear really empties them, so reading after the clear finds nothing.
+let pendingStore: any[] = phase.includes('keep-on-error')
+	? [{ containerId: originalId, containerName: 'app', currentImage: image, hasImageUpdate: true, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false }]
+	: phase.endsWith('-stale')
+		? [{ containerId: 'gone', containerName: 'gone', currentImage: image, hasImageUpdate: true, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false }]
+		: [];
 const environment = { id: 1, name: 'test', connectionType: 'direct', protocol: 'http', host: 'daemon.test', port: 2375 };
 const db = {
 	setEnvSetting: noop, deleteSetting: noop,
@@ -56,8 +68,12 @@ const db = {
 	createScheduleExecution: async () => ({ id: 1 }), updateScheduleExecution: async (_id: number, data: any) => { executions.push(data); },
 	appendScheduleExecutionLog: async (_id: number, line: string) => { logs.push(line); }, saveVulnerabilityScan: noop, getCombinedScanForImage: async () => null,
 	getEnvUpdateCheckSettings: async () => ({ enabled: true, autoUpdate: true, vulnerabilityCriteria: 'never' }),
-	getGlobalSemverConfig: async () => ({ enabled: false }), clearPendingContainerUpdates: noop,
-	addPendingContainerUpdate: async (...args: any[]) => { pendingUpdates.push(args); }, removePendingContainerUpdate: async () => { removedPending++; }, removePendingContainerUpdateByName: async () => { removedPending++; }, getPendingContainerUpdates: async () => []
+	getGlobalSemverConfig: async () => ({ enabled: false }), getPinnedDigestReportEnabled: async () => true, clearPendingContainerUpdates: async () => { pendingStore = []; },
+	addPendingContainerUpdate: async (...args: any[]) => {
+		pendingUpdates.push(args);
+		// Upsert into the saved rows too, so the order of clear and insert is observable.
+		pendingStore = [...pendingStore.filter(r => r.containerId !== args[1]), { containerId: args[1], containerName: args[2], currentImage: args[3], ...args[4] }];
+	}, removePendingContainerUpdate: async () => { removedPending++; }, removePendingContainerUpdateByName: async () => { removedPending++; }, getPendingContainerUpdates: async () => [...pendingStore]
 };
 mock.module(root + 'db', () => db);
 mock.module(root + 'hawser', () => ({ sendEdgeRequest: noop, sendEdgeStreamRequest: noop, isEdgeConnected: () => false }));
@@ -69,8 +85,8 @@ if (metadataDatabase) {
 } else {
 	mock.module(root + 'minimum-release-age', () => ({
 		getMinimumReleaseAgeConfig: async (id: number) => ({ hours: id === 2 || phase.includes('disabled') ? 0 : 24 }),
-		imageReleaseAgeRemainingMs: async () => { ageChecks++; return remainingMs; },
-		imageReleaseAgeStatus: async () => ({ source: 'first-observed', observedAt: new Date().toISOString(), remainingMs: 86400000 })
+		imageReleaseAgeRemainingMs: async () => { ageChecks++; if (noDigest) registryDown = true; return remainingMs; },
+		imageReleaseAgeStatus: async () => (advisories++, { source: 'first-observed', observedAt: new Date().toISOString(), remainingMs: 86400000 })
 	}));
 }
 mock.module(root + 'release-age-advisory', () => ({ releaseAgeAdvisory: (lookup: any) => boundedAdvisory(lookup, 30) }));
@@ -112,17 +128,28 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 	if (url.hostname !== 'daemon.test') {
 		assert.equal(url.hostname, 'registry.example.com', 'Unexpected network access');
 		if ((phase === 'timeout-auth' && path === '/v2/') || (phase === 'timeout-head' && method === 'HEAD')) { stalledSignal = init.signal!; return new Promise(() => {}); }
+		if (registryDown) return new Response('', { status: 503 });
 		if (path === '/v2/') return new Response('{}');
+		if (phase.includes('keep-on-error') && method === 'HEAD') return new Response('', { status: 502 });
+		if (phase.startsWith('multiarch-') && method === 'GET' && path.endsWith('/manifests/' + digest)) {
+			if (phase === 'multiarch-unknown') return new Response('', { status: 502 });
+			const child = phase === 'multiarch-different' ? 'sha256:' + 'e'.repeat(64) : old;
+			return Response.json({ mediaType: 'application/vnd.oci.image.index.v1+json', manifests: [{ digest: child, platform: { os: 'linux', architecture: 'amd64' } }] });
+		}
+		// A local digest that is not an index answers 404 under the index-only Accept.
+		if (phase === 'multiarch-different' && method === 'GET' && path.includes('/manifests/sha256:')) return new Response('', { status: 404 });
 		if (path.includes('/manifests/')) return Response.json({ schemaVersion: 2 }, { headers: { 'Docker-Content-Digest': digest } });
 		throw new Error('Unexpected registry request ' + path);
 	}
 	if (path.startsWith('/distribution/')) {
 		assert.ok(path.includes(image), 'Update checks must follow the original tag');
-		if (phase === 'timeout-daemon') { stalledSignal = init.signal!; return new Promise(() => {}); }
 		if (phase.startsWith('timeout-')) return new Response(null, { status: 404 });
 		return Response.json({ Descriptor: { digest } });
 	}
 	if (phase === 'metadata-info-failure' && path === '/info') return new Response('{}', { status: 503 });
+	if (phase === 'multiarch-different' && path === '/info') return Response.json({ OSType: 'linux', Architecture: 'x86_64' });
+	// The environment cannot be listed: a check must fail without touching the saved updates.
+	if (phase.endsWith('-list') && path === '/containers/json') return Response.json({ message: 'daemon unreachable' }, { status: 500 });
 	if (path === '/containers/json') {
 		if (url.searchParams.has('filters')) return Response.json(systemd ? [{ Id: current.Id, Names: ['/app'], State: current.State.Running ? 'running' : 'exited' }] : []);
 		return Response.json([{ Id: current.Id, Names: ['/app'], Image: current.Config.Image, ImageID: current.Image, Labels: current.Config.Labels, State: 'exited', Status: 'Exited (0)' }]);
@@ -143,6 +170,7 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 		replacementInspections++;
 		if (phase.includes('inspect-failure')) return new Response('{}', { status: 503 });
 	}
+	if (phase === 'env-keep-on-error-throw' && path === '/containers/' + originalId + '/json') return Response.json({ message: 'inspect failed' }, { status: 500 });
 	if (path.startsWith('/containers/') && path.endsWith('/json')) return Response.json(current);
 	if (path.startsWith('/images/') && path.endsWith('/json')) {
 		const ref = path.slice('/images/'.length, -'/json'.length);
@@ -242,6 +270,103 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(stalledSignal?.aborted, true);
 	assert.ok(progress.some(p => p.status === 'warning' && p.message.includes('could not be determined')));
 	assert.equal(pullReferences.length, 1, 'An advisory timeout must still pull');
+} else if (phase.endsWith('-stale')) {
+	// A row for a container that no longer exists is dropped by a check that completes.
+	if (phase.startsWith('env-')) {
+		const { runEnvUpdateCheckJob } = await import(root + 'scheduler/tasks/env-update-check');
+		await runEnvUpdateCheckJob(1, 'cron');
+	} else {
+		const { POST } = await import('../../src/routes/api/containers/check-updates/+server');
+		const response = await POST({ url: new URL('http://dockhand/api/containers/check-updates?env=1'), cookies: {}, request: new Request('http://dockhand', { method: 'POST', headers: { Accept: 'application/json' } }) } as any);
+		await response.text();
+	}
+	assert.deepEqual(pendingStore.map(r => [r.containerId, r.hasImageUpdate]), [[originalId, true]], 'A completed check must replace the saved rows with what it found: ' + JSON.stringify(pendingStore));
+} else if (phase.endsWith('-list')) {
+	// Listing the environment fails before anything is checked: the saved updates stay.
+	if (phase.startsWith('env-')) {
+		const { runEnvUpdateCheckJob } = await import(root + 'scheduler/tasks/env-update-check');
+		await runEnvUpdateCheckJob(1, 'cron');
+		assert.ok(executions.some(e => e.status === 'failed'), JSON.stringify(executions));
+	} else {
+		const { POST } = await import('../../src/routes/api/containers/check-updates/+server');
+		const response = await POST({ url: new URL('http://dockhand/api/containers/check-updates?env=1'), cookies: {}, request: new Request('http://dockhand', { method: 'POST', headers: { Accept: 'application/json' } }) } as any);
+		const body = await response.text();
+		assert.ok(/error|fail/i.test(body), 'The manual check must report the failure: ' + body);
+	}
+	assert.ok(calls.includes('GET /containers/json'), 'The listing must have been attempted: ' + calls.join(', '));
+	assert.equal(pendingStore.length, 1, 'A failed check must not clear the known updates: ' + JSON.stringify(pendingStore));
+	assert.equal(pendingStore[0].containerId, originalId);
+} else if (phase.includes('keep-on-error')) {
+	// The registry fails; the update already known for the container must survive.
+	if (phase.startsWith('env-keep-on-error')) {
+		const { runEnvUpdateCheckJob } = await import(root + 'scheduler/tasks/env-update-check');
+		await runEnvUpdateCheckJob(1, 'cron');
+	} else {
+		const { POST } = await import('../../src/routes/api/containers/check-updates/+server');
+		const response = await POST({ url: new URL('http://dockhand/api/containers/check-updates?env=1'), cookies: {}, request: new Request('http://dockhand', { method: 'POST', headers: { Accept: 'application/json' } }) } as any);
+		const body = await response.json();
+		assert.ok(body.results.some((r: any) => r.error), JSON.stringify(body));
+	}
+	const kept = pendingUpdates.find((args) => args[1] === originalId);
+	assert.ok(kept, 'The known update must be re-persisted: ' + JSON.stringify(pendingUpdates));
+	assert.equal(kept[4].hasImageUpdate, true);
+	assert.equal(pullReferences.length, 0, 'A failed check must not apply anything');
+} else if (phase.includes('watch-off')) {
+	// dockhand.watch.digest=false: the registry is not asked at all.
+	if (phase === 'watch-off-check') {
+		const result = await docker.checkImageUpdateAvailable(image, old, 1, true, false, false);
+		assert.equal(result.hasUpdate, false, JSON.stringify(result));
+		assert.ok((result.localDigests ?? []).includes(old), 'Local digests are still returned for the newer-version check');
+	} else if (phase === 'manual-watch-off') {
+		const { POST } = await import('../../src/routes/api/containers/check-updates/+server');
+		const response = await POST({ url: new URL('http://dockhand/api/containers/check-updates?env=1'), cookies: {}, request: new Request('http://dockhand', { method: 'POST', headers: { Accept: 'application/json' } }) } as any);
+		const body = await response.json();
+		assert.ok(Array.isArray(body.results) && body.results.length > 0, JSON.stringify(body));
+		assert.ok(body.results.every((r: any) => r.hasUpdate === false), JSON.stringify(body));
+	} else if (phase === 'env-watch-off') {
+		const { runEnvUpdateCheckJob } = await import(root + 'scheduler/tasks/env-update-check');
+		await runEnvUpdateCheckJob(1, 'cron');
+		assert.equal(pendingUpdates.length, 0, JSON.stringify(pendingUpdates));
+	} else {
+		const { runContainerUpdate } = await import(root + 'scheduler/tasks/container-update');
+		await runContainerUpdate(1, 'app', 1, 'cron');
+		assert.ok(executions.some(e => e.status === 'skipped' && e.details?.reason === 'Skipped by dockhand.watch.digest=false label'), JSON.stringify(executions));
+		assert.equal(pullReferences.length, 0);
+	}
+	assert.equal(calls.filter(call => /\/v2\//.test(call)).length, 0, 'No registry request with digest watching off: ' + calls.join(', '));
+} else if (phase.startsWith('multiarch-')) {
+	// HEAD returns a digest no local digest matches, so the index read decides.
+	const result = await docker.checkImageUpdateAvailable(image, old, 1);
+	// The index is read by the digest HEAD returned, not by the moving tag.
+	const indexReads = () => calls.filter(call => call === 'GET /v2/team/app/manifests/' + digest).length;
+	if (phase === 'multiarch-unknown') {
+		assert.equal(result.hasUpdate, false, JSON.stringify(result));
+		assert.match(result.error ?? '', /Could not confirm whether the multi-arch image is current: Registry server error \(502\)/);
+		assert.equal(result.registryDigest, digest);
+		assert.equal(indexReads(), 2, 'A transient index failure is read once more before it is reported');
+	} else if (phase === 'multiarch-different') {
+		// The current index plus each of the two local digests (both 404: not an index) is
+		// read once. The cached sign-in serves the HEAD and all three index reads.
+		const manifestGets = () => calls.filter(call => call.startsWith('GET /v2/team/app/manifests/')).length;
+		const challenges = () => calls.filter(call => call === 'GET /v2/').length;
+		assert.equal(result.hasUpdate, true, JSON.stringify(result));
+		assert.equal(result.error, undefined);
+		assert.equal(manifestGets(), 3);
+		assert.equal(challenges(), 1, 'One sign-in serves the HEAD and every index read of a check');
+		// Repeated: every read by digest, the 404s included, is reused, and so is the sign-in.
+		const again = await docker.checkImageUpdateAvailable(image, old, 1);
+		assert.equal(again.hasUpdate, true, JSON.stringify(again));
+		assert.equal(manifestGets(), 3, 'A repeated check must reuse every read by digest');
+		assert.equal(challenges(), 1, 'A repeated check within the token lifetime must not sign in again');
+	} else {
+		assert.equal(result.hasUpdate, false, JSON.stringify(result));
+		assert.equal(result.error, undefined);
+		assert.equal(indexReads(), 1);
+		// An index read by digest never changes: checking again costs no manifest GET.
+		const again = await docker.checkImageUpdateAvailable(image, old, 1);
+		assert.equal(again.hasUpdate, false, JSON.stringify(again));
+		assert.equal(indexReads(), 1, 'A repeated check must reuse the index read by digest');
+	}
 } else if (phase.startsWith('check-')) {
 	const youngResult = await docker.checkImageUpdateAvailable(image, old, 1);
 	assert.equal(youngResult.hasUpdate, false, JSON.stringify(youngResult));
@@ -255,8 +380,19 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(matureResult.releaseAgeRemainingHours, undefined);
 	assert.equal(ageChecks, 2, 'Mature re-check must run the same age gate');
 	assert.equal(pullReferences.length, 0, 'Checking only must not pull');
+} else if (phase === 'skip-cooldown') {
+	// Within the cooldown (remainingMs > 0). Without the skip flag the update is held;
+	// dockhand.skip.cooldown=true passes skipCooldown=true and the update applies now.
+	const held = await docker.checkImageUpdateAvailable(image, old, 1, true, false);
+	assert.equal(held.hasUpdate, false, JSON.stringify(held));
+	assert.equal(held.releaseAgeRemainingHours, 2, 'Default path must still report the held hours');
+	const skipped = await docker.checkImageUpdateAvailable(image, old, 1, true, true);
+	assert.equal(skipped.hasUpdate, true, JSON.stringify(skipped));
+	assert.equal(skipped.releaseAgeRemainingHours, undefined, 'A skipped cooldown must not report held hours');
+	assert.equal(skipped.registryDigest, digest);
+	assert.equal(pullReferences.length, 0, 'Checking only must not pull');
 } else if (phase === 'young') {
-	await assert.rejects(docker.pullImage(image, undefined, 1, true), /cooldown/);
+	await assert.rejects(docker.pullImage(image, undefined, 1, 'enforce'), /cooldown/);
 	assert.equal(pullReferences.length, 0, 'Ineligible images must not be pulled');
 } else if (phase === 'warning-json') {
 	const { POST } = await import('../../src/routes/api/containers/batch-update/+server');
@@ -336,17 +472,23 @@ if (phase === 'metadata-info-failure') {
 		assert.ok(executions.some(e => e.status === 'success'), JSON.stringify(executions));
 		if (phase.startsWith('env')) assert.equal(pendingUpdates.length, 1, 'Mature update must be surfaced to the environment UI');
 	} else {
-		assert.ok(createBody, JSON.stringify(executions));
-		assert.equal(createBody.Image, phase.includes('disabled') ? image : approved, 'Recreation must use the verified image despite tag movement');
-		assert.equal(createBody.Env[0], phase.includes('disabled') ? 'VERSION=other' : 'VERSION=approved', 'Rebase must use the verified image too');
+		// A skipped cooldown still pulls the verified digest; only without one does it fall back to the tag.
+		const unverified = phase.includes('disabled') || noDigest;
+		assert.ok(createBody, JSON.stringify({ executions, logs }));
+		if (skipLabel) {
+			assert.equal(ageChecks, 1, 'The pull must not re-run the age gate the label skips');
+			assert.equal(advisories, 0, 'A scheduled pull must not report a manual-pull advisory');
+		}
+		assert.equal(createBody.Image, unverified ? image : approved, 'Recreation must use the verified image despite tag movement');
+		assert.equal(createBody.Env[0], unverified ? 'VERSION=other' : 'VERSION=approved', 'Rebase must use the verified image too');
 		assert.equal(trackedImageReference(createBody.Image, createBody.Labels), image, 'Future update checks retain the source tag');
-		assert.equal(pullReferences[0], phase.includes('disabled') ? image.split(':')[0] : image.split(':')[0] + '@' + digest);
-		if (!phase.includes('disabled')) assert.equal(portableImageReference(createBody.Image, createBody.Labels), image.split(':')[0] + '@' + digest);
+		assert.equal(pullReferences[0], unverified ? image.split(':')[0] : image.split(':')[0] + '@' + digest);
+		if (!unverified) assert.equal(portableImageReference(createBody.Image, createBody.Labels), image.split(':')[0] + '@' + digest);
 		if (scanning) assert.deepEqual(scans, [approved], 'Scan the same image that will be created');
 		assert.ok(executions.some(e => e.status === 'success'), JSON.stringify(executions));
 		if (phase.includes('portable')) await assertPortableRoundTrip(image.split(':')[0] + '@' + digest);
 	}
 }
-if (phase.includes('disabled')) assert.ok(!calls.some(call => call.startsWith('GET /distribution/')), 'Disabled cooldown must retain the direct registry check without an extra daemon round trip');
+assert.ok(!calls.some(call => call.startsWith('GET /distribution/')), 'The registry digest is read by Dockhand directly, never through the daemon');
 metadataDatabase?.close();
 process.exit(0);

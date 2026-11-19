@@ -5,19 +5,19 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings, getImagePruneSettings, setImagePruneSettings, getBackupConfig, updateBackupConfig, getBackupDestination, updateBackupDestination } from '$lib/server/db';
-import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
+import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getScheduledContainerActionById, setScheduledContainerActionEnabled, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings, getImagePruneSettings, setImagePruneSettings, getBackupConfig, updateBackupConfig, getBackupDestination, updateBackupDestination } from '$lib/server/db';
+import { registerSchedule, unregisterSchedule, registerContainerActionSchedules, unregisterContainerActionSchedules } from '$lib/server/scheduler';
 import { authorize } from '$lib/server/authorize';
 import { auditBackup, auditBackupDestination } from '$lib/server/audit';
 
 /**
  * @openapi
  * summary: Toggle a schedule's enabled/disabled state (registers/unregisters the croner job accordingly)
- * path: type:string! Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup, deploy_log_reconcile)
+ * path: type:string! Schedule type (container_update, container_start, container_stop (toggles both of the container's times), git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup, deploy_log_reconcile)
  * path: id:integer! Schedule id (semantics depend on type) (from GET /api/schedules)
  * resp-200: {success:boolean!, enabled:boolean!}
  * resp-400: Invalid schedule id, unsupported type, or system_cleanup/deploy_log_reconcile (cannot be paused)
- * resp-403: Permission denied
+ * resp-403: Permission denied (switching a container start/stop on also needs containers start and stop)
  * resp-404: Schedule, backup config, or backup destination not found
  * resp-500: Unexpected error while toggling the schedule
  */
@@ -55,6 +55,27 @@ export const POST: RequestHandler = async (event) => {
 			} else {
 				unregisterSchedule(scheduleId, 'container_update');
 			}
+
+			return json({ success: true, enabled: newEnabled });
+		} else if (type === 'container_start' || type === 'container_stop') {
+			// One switch for the container's start and stop together.
+			const row = await getScheduledContainerActionById(scheduleId);
+			if (!row) {
+				return json({ error: 'Schedule not found' }, { status: 404 });
+			}
+			const envDenied = await auth.requireEnvAccess(row.environmentId);
+			if (envDenied) return envDenied;
+
+			const newEnabled = !row.enabled;
+			// Switching it on schedules starts and stops, so it needs what setting it needs.
+			const denied =
+				(await auth.requirePermission('schedules', 'edit', row.environmentId)) ??
+				(newEnabled ? await auth.requirePermission('containers', 'start', row.environmentId) : null) ??
+				(newEnabled ? await auth.requirePermission('containers', 'stop', row.environmentId) : null);
+			if (denied) return denied;
+			await setScheduledContainerActionEnabled(scheduleId, newEnabled);
+			if (newEnabled) await registerContainerActionSchedules(scheduleId, row.environmentId);
+			else unregisterContainerActionSchedules(scheduleId);
 
 			return json({ success: true, enabled: newEnabled });
 		} else if (type === 'git_stack_sync') {

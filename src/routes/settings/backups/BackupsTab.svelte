@@ -26,7 +26,7 @@
 	import { shouldSaveBackupImage, syncBackupImageFromStore } from '$lib/utils/backup-image';
 	import { summarizeTestResults, formatTestSummary, type TestOutcome } from '$lib/utils/backup-test-summary';
 	import SnapshotBrowser from '../../containers/SnapshotBrowser.svelte';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { canAccess } from '$lib/stores/auth';
 	import DestinationModal from './DestinationModal.svelte';
@@ -86,18 +86,16 @@
 	let rotateDestName = $state('');
 	let repoStats = $state<Map<number, { totalSize: number; totalFiles: number; snapshots: number }>>(new Map());
 	let loadingStats = $state<Set<number>>(new Set());
-	let fetchingAllStats = $state(false);
 
 	async function fetchRepoStats(destId: number) {
 		const s = new Set(loadingStats); s.add(destId); loadingStats = s;
 		try {
+			// Polled as a job: stats on a large repo outlast a reverse proxy's read timeout.
 			const res = await fetch(`/api/backup/destinations/${destId}/task`, {
-				// Accept: json makes the job endpoint run the read synchronously and return
-				// {success, stats} instead of {jobId} (which this call doesn't poll).
-				method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+				method: 'POST', headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ task: 'stats' })
 			});
-			const data = await res.json();
+			const data = await readJobResponse(res) as { success?: boolean; error?: string; stats?: any };
 			if (data.success && data.stats) {
 				const m = new Map(repoStats);
 				m.set(destId, data.stats);
@@ -106,14 +104,6 @@
 		} catch {} finally {
 			const s2 = new Set(loadingStats); s2.delete(destId); loadingStats = s2;
 		}
-	}
-
-	async function fetchAllStats() {
-		fetchingAllStats = true;
-		// Skip destinations that aren't initialized (failed, needs_init, or never tested)
-		const healthy = destinations.filter(d => d.lastTestStatus === 'success');
-		await Promise.all(healthy.map(d => fetchRepoStats(d.id)));
-		fetchingAllStats = false;
 	}
 
 	async function testAllDestinations() {
@@ -219,10 +209,9 @@
 		if (task === 'stats') {
 			try {
 				const res = await fetch(`/api/backup/destinations/${destId}/task`, {
-					// Accept: json runs the read synchronously so we get {success, stats}, not {jobId}.
-					method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ task })
+					method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task })
 				});
-				const data = await res.json();
+				const data = await readJobResponse(res) as { success?: boolean; error?: string; stats?: any };
 				if (data.success && data.stats) {
 					const m = new Map(repoStats);
 					m.set(destId, data.stats);
@@ -649,7 +638,7 @@
 		<p class="text-muted-foreground text-sm">{m.settings_backups_loading()}</p>
 	{:else if destinations.length === 0}
 		<EmptyState
-			icon={Archive as unknown as Component}
+			icon={Archive as unknown as IconComponent}
 			title={m.settings_backups_empty_title()}
 			description={m.settings_backups_empty_description()}
 		/>

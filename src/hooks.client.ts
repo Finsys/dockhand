@@ -11,7 +11,7 @@
  * is only the wiring.
  */
 import { overwriteGetLocale } from '$lib/paraglide/runtime';
-import { LOCALE_STORAGE_KEY, makeLocaleGetter } from '$lib/i18n/locale-preference';
+import { LOCALE_STORAGE_KEY, makeLocaleGetter, restoreServerLocale } from '$lib/i18n/locale-preference';
 
 const getLocale = makeLocaleGetter(
 	() => localStorage.getItem(LOCALE_STORAGE_KEY),
@@ -19,3 +19,14 @@ const getLocale = makeLocaleGetter(
 );
 
 overwriteGetLocale(getLocale as never);
+
+/** Before the app starts: bring back the language the server keeps for this user or install. */
+export async function init() {
+	let store: Storage;
+	try {
+		store = localStorage;
+	} catch {
+		return; // A blocked store: the browser's language decides.
+	}
+	await restoreServerLocale(fetch, store);
+}

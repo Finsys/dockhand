@@ -3,6 +3,7 @@ import {
 	macDerivedFromIp,
 	isGeneratedEndpointMac,
 	configuredMacAddress,
+	endpointForRecreate,
 	endpointWithoutGeneratedMac
 } from '../src/lib/server/endpoint-mac-core';
 
@@ -136,5 +137,24 @@ describe('configuredMacAddress - what the edit form may show as a setting', () =
 	test('no endpoint and no Config value', () => {
 		expect(configuredMacAddress({ Config: {} })).toBeNull();
 		expect(configuredMacAddress(undefined)).toBeNull();
+	});
+});
+
+describe('endpointForRecreate', () => {
+	test('a MAC derived from the IP the endpoint pins stays (the reported compose)', () => {
+		// ipv4_address 192.168.1.50 + mac_address 02:42:c0:a8:01:32: Docker 29 would hand out a random MAC.
+		const endpoint = { MacAddress: '02:42:c0:a8:01:32', IPAddress: '192.168.1.50', IPAMConfig: { IPv4Address: '192.168.1.50' } };
+		expect(endpointForRecreate(endpoint).MacAddress).toBe('02:42:c0:a8:01:32');
+	});
+
+	test('without that pin it is the generated MAC and goes, as with endpointWithoutGeneratedMac', () => {
+		expect('MacAddress' in endpointForRecreate({ MacAddress: AUTO_MAC, IPAddress: AUTO_IP })).toBe(false);
+		expect('MacAddress' in endpointForRecreate({ MacAddress: AUTO_MAC, IPAddress: AUTO_IP, IPAMConfig: { IPv4Address: '' } })).toBe(false);
+		// Pinned to .5, MAC derived from .4: a near miss on the last octet.
+		expect('MacAddress' in endpointForRecreate({ MacAddress: AUTO_MAC, IPAddress: AUTO_IP, IPAMConfig: { IPv4Address: '172.17.0.5' } })).toBe(false);
+	});
+
+	test('a MAC that is not derived passes unchanged', () => {
+		expect(endpointForRecreate({ MacAddress: USER_MAC, IPAddress: AUTO_IP }).MacAddress).toBe(USER_MAC);
 	});
 });

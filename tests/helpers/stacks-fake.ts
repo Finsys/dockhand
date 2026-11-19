@@ -28,7 +28,8 @@ const KNOWN_EXPORTS = [
 	'requireComposeFile',
 	'deployStack',
 	'getStackPathHints',
-	'getStackDir'
+	'getStackDir',
+	'notifyStackDeploy'
 ] as const;
 
 const impls: Record<string, AnyFn> = {};

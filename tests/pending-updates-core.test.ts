@@ -9,7 +9,7 @@
  * land the latest: per-service pull failure, build:, pull_policy:never).
  */
 import { describe, test, expect } from 'bun:test';
-import { pendingRowsToClear, countLivePending, type PendingRow, type LiveContainer } from '../src/lib/server/pending-updates-core';
+import { pendingRowsToClear, countLivePending, countImageUpdates, isImageUpdateRow, countLivePinnedDigest, countPinnedDigest, isPinnedDigestRow, countLiveNewerVersion, countNewerVersion, isNewerVersionRow, type PendingRow, type LiveContainer } from '../src/lib/server/pending-updates-core';
 
 const STACK = 'shop';
 const LATEST = 'sha256:newnewnew';
@@ -149,5 +149,92 @@ describe('countLivePending (#1006 dashboard tile)', () => {
 	// real updates). The handler falls back to the raw count when containers.length === 0.
 	test('empty live list -> 0 (guard must handle the timeout case at the call-site)', () => {
 		expect(countLivePending([p('a'), p('b')], [])).toBe(0);
+	});
+});
+
+describe('image-update counting ignores non-applicable rows (#1755)', () => {
+	// The dashboard up-arrow tile is an IMAGE-update count. A row kept for a
+	// newer-version suggestion, a cooldown, or a pinned-but-unapplied digest has
+	// hasImageUpdate=false and must NOT be counted, or an environment of pinned
+	// containers reads as "all out of date".
+	const upd = (id: string) => ({ containerId: id, hasImageUpdate: true });
+	const nonUpd = (id: string) => ({ containerId: id, hasImageUpdate: false });
+
+	test('countLivePending counts only live rows with a real image update', () => {
+		expect(countLivePending([upd('a'), nonUpd('b'), upd('c')], ['a', 'b', 'c'])).toBe(2);
+	});
+
+	test('a pinned/newer/cooldown row (hasImageUpdate=false) is not counted', () => {
+		// The near miss: it IS a live row, so only the hasImageUpdate flag excludes it.
+		expect(countLivePending([nonUpd('a')], ['a'])).toBe(0);
+	});
+
+	test('a row from before the flag existed (undefined) still counts', () => {
+		// Back-compat: an old row with no hasImageUpdate must not be silently dropped.
+		expect(countLivePending([{ containerId: 'a' }], ['a'])).toBe(1);
+		expect(isImageUpdateRow({})).toBe(true);
+	});
+
+	test('countImageUpdates (seed, no live-match) also excludes non-updates', () => {
+		expect(countImageUpdates([upd('a'), nonUpd('b'), nonUpd('c')])).toBe(1);
+		expect(countImageUpdates([nonUpd('a')])).toBe(0);
+		expect(countImageUpdates([{ hasImageUpdate: true }, {}])).toBe(2);
+	});
+});
+
+describe('pinned-digest counting is separate from image updates (#1755)', () => {
+	// A pinned-digest move is reported on its OWN tile - no bulk update can clear it,
+	// so it must never mix into the applicable image-update count, and vice versa.
+	const pinned = (id: string) => ({ containerId: id, pinnedToDigest: true });
+	const upd = (id: string) => ({ containerId: id, hasImageUpdate: true, pinnedToDigest: false });
+	const plain = (id: string) => ({ containerId: id });
+
+	test('counts only rows flagged pinnedToDigest', () => {
+		expect(countLivePinnedDigest([pinned('a'), upd('b'), plain('c')], ['a', 'b', 'c'])).toBe(1);
+		expect(countPinnedDigest([pinned('a'), upd('b'), plain('c')])).toBe(1);
+	});
+
+	test('a near miss: an applicable image update is NOT a pinned-digest move', () => {
+		expect(countLivePinnedDigest([upd('a')], ['a'])).toBe(0);
+		expect(isPinnedDigestRow({ hasImageUpdate: true })).toBe(false);
+	});
+
+	test('absent flag is not pinned (back-compat, unlike hasImageUpdate)', () => {
+		// pinnedToDigest defaults false, so an old row is never spuriously pinned.
+		expect(isPinnedDigestRow({})).toBe(false);
+		expect(countPinnedDigest([plain('a')])).toBe(0);
+	});
+
+	test('live-match drops a pinned row whose container is gone', () => {
+		expect(countLivePinnedDigest([pinned('a')], [])).toBe(0);
+		expect(countLivePinnedDigest([pinned('a')], ['a'])).toBe(1);
+	});
+});
+
+describe('newer-version counting is separate from image updates (#1755 follow-up)', () => {
+	// A newer-version-tag suggestion is advisory, never auto-applied, so it has its own
+	// dashboard tile - it must not mix into the applicable image-update count.
+	const newer = (id: string) => ({ containerId: id, newerVersion: { tag: 'v2.0.0', bump: 'major' } });
+	const upd = (id: string) => ({ containerId: id, hasImageUpdate: true, newerVersion: null });
+	const plain = (id: string) => ({ containerId: id });
+
+	test('counts only rows carrying a newerVersion blob', () => {
+		expect(countLiveNewerVersion([newer('a'), upd('b'), plain('c')], ['a', 'b', 'c'])).toBe(1);
+		expect(countNewerVersion([newer('a'), upd('b'), plain('c')])).toBe(1);
+	});
+
+	test('a near miss: an applicable image update with no newerVersion is NOT counted', () => {
+		expect(countLiveNewerVersion([upd('a')], ['a'])).toBe(0);
+		expect(isNewerVersionRow({ hasImageUpdate: true, newerVersion: null })).toBe(false);
+	});
+
+	test('absent newerVersion is not counted', () => {
+		expect(isNewerVersionRow({})).toBe(false);
+		expect(countNewerVersion([plain('a')])).toBe(0);
+	});
+
+	test('live-match drops a newer-version row whose container is gone', () => {
+		expect(countLiveNewerVersion([newer('a')], [])).toBe(0);
+		expect(countLiveNewerVersion([newer('a')], ['a'])).toBe(1);
 	});
 });

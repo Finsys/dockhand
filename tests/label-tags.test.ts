@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+	containerTags,
 	labelTagNames,
 	labelTagSpecs,
 	labelTagId,
@@ -503,20 +504,146 @@ describe('a container showing its stack tags', () => {
 		expect(src.inherited).toBeUndefined();
 	});
 
-	test('does not cross-contaminate labels between containers of the same stack (#1740)', () => {
-		// Container A has tag1, Container B has tag2.
-		// A container's own tags must only reflect its own labels and stack assignments,
-		// never neighboring container labels.
-		const containerATags = mergeLabelTags([], { 'dockhand.tags': 'tag1' }, CATALOG);
-		const containerBTags = mergeLabelTags([], { 'dockhand.tags': 'tag2' }, CATALOG);
-		const stackTags = [PROD];
+	test('does not cross-contaminate labels between containers of the same stack', () => {
+		// Container A has tag1, container B has tag2, both in one compose project. A
+		// container's tags must reflect its own label and its stack's assignments, never a
+		// neighbour's label. Resolved through containerTags, which is where that is decided.
+		const options = {
+			assignedTagIds: {},
+			stackTagIds: { prod: [PROD.id] },
+			tagById: new Map([[PROD.id, PROD]]),
+			catalog: CATALOG,
+			inheritStackTags: true
+		};
+		const containerA = { name: 'a', labels: { 'com.docker.compose.project': 'prod', 'dockhand.tags': 'tag1' } };
+		const containerB = { name: 'b', labels: { 'com.docker.compose.project': 'prod', 'dockhand.tags': 'tag2' } };
 
-		const resolvedA = withStackTags(containerATags, stackTags);
-		const resolvedB = withStackTags(containerBTags, stackTags);
+		const resolvedA = containerTags(containerA, options);
+		const resolvedB = containerTags(containerB, options);
 
 		expect(resolvedA.map((t) => t.name)).toEqual(['tag1', 'prod']);
 		expect(resolvedB.map((t) => t.name)).toEqual(['tag2', 'prod']);
 		expect(resolvedA.some((t) => t.name === 'tag2')).toBe(false);
 		expect(resolvedB.some((t) => t.name === 'tag1')).toBe(false);
 	});
+
+	test('a label is a container\'s own tag, so a stack cannot hand it to a sibling', () => {
+		// What a container inherits is the tags ASSIGNED to its stack. A stack also carries
+		// the union of its services' labels - that is what gives a stack row its tags, since
+		// compose stamps no label of its own on a stack - but passing that union back down
+		// lands every service's label on every other service.
+		const services: Array<{ name: string; labels: Record<string, string> }> = [
+			{ name: 'web', labels: { 'com.docker.compose.project': 'media', 'dockhand.tags': 'frontend' } },
+			{ name: 'db', labels: { 'com.docker.compose.project': 'media', 'dockhand.tags': 'database' } },
+			{ name: 'worker', labels: { 'com.docker.compose.project': 'media' } }
+		];
+		const options = {
+			assignedTagIds: {},
+			stackTagIds: { media: [PROD.id] },
+			tagById: new Map([[PROD.id, PROD]]),
+			catalog: CATALOG,
+			inheritStackTags: true
+		};
+
+		expect(services.map((c) => containerTags(c, options).map((t) => t.name))).toEqual([
+			['frontend', 'prod'],
+			['database', 'prod'],
+			['prod']
+		]);
+
+		// The stack row keeps showing the union - that half is what a stack's tags are.
+		expect(stackLabelTags(services.map((c) => c.labels)).map((spec) => spec.name)).toEqual([
+			'frontend',
+			'database'
+		]);
+	});
+
+	test('a tag assigned in Dockhand shows beside the label the container names', () => {
+		const container = {
+			name: 'web',
+			labels: { 'com.docker.compose.project': 'media', 'dockhand.tags': 'frontend' }
+		};
+		expect(
+			containerTags(container, {
+				assignedTagIds: { web: [MEDIA.id] },
+				stackTagIds: {},
+				tagById: new Map([[MEDIA.id, MEDIA]]),
+				catalog: CATALOG,
+				inheritStackTags: true
+			}).map((t) => t.name)
+		).toEqual(['media', 'frontend']);
+	});
+
+	test('the inherit toggle only withholds the stack\'s tags, never the container\'s own', () => {
+		const container = {
+			name: 'web',
+			labels: { 'com.docker.compose.project': 'media', 'dockhand.tags': 'frontend' }
+		};
+		const options = {
+			assignedTagIds: {},
+			stackTagIds: { media: [PROD.id] },
+			tagById: new Map([[PROD.id, PROD]]),
+			catalog: CATALOG,
+			inheritStackTags: false
+		};
+		expect(containerTags(container, options).map((t) => t.name)).toEqual(['frontend']);
+	});
+
+	test('it is handed no neighbour, so a label cannot travel between containers', () => {
+		// The strongest form of the guarantee: the inherited half is resolved from
+		// stackTagIds - ids assigned in Dockhand - and nothing in the call carries another
+		// container's labels. A sibling's label is not withheld by a rule that could be
+		// relaxed; it is absent from the inputs.
+		const options = {
+			assignedTagIds: {},
+			stackTagIds: { media: [PROD.id] },
+			tagById: new Map([[PROD.id, PROD]]),
+			catalog: CATALOG,
+			inheritStackTags: true
+		};
+		const web = { name: 'web', labels: { 'com.docker.compose.project': 'media', 'dockhand.tags': 'frontend' } };
+		const db = { name: 'db', labels: { 'com.docker.compose.project': 'media', 'dockhand.tags': 'database' } };
+
+		// Every key the call is given, and the only label among them is the container's own.
+		expect(Object.keys(options).sort()).toEqual([
+			'assignedTagIds',
+			'catalog',
+			'inheritStackTags',
+			'stackTagIds',
+			'tagById'
+		]);
+		expect(containerTags(web, options).some((t) => t.name === 'database')).toBe(false);
+		expect(containerTags(db, options).some((t) => t.name === 'frontend')).toBe(false);
+	});
+
+	test('an id the catalogue no longer has is dropped, not rendered as a hole', () => {
+		// A tag deleted while the page is open leaves its id behind in the assignment map.
+		const container = { name: 'web', labels: {} };
+		const tags = containerTags(container, {
+			assignedTagIds: { web: [MEDIA.id, 999] },
+			stackTagIds: {},
+			tagById: new Map([[MEDIA.id, MEDIA]]),
+			catalog: CATALOG,
+			inheritStackTags: true
+		});
+		// toEqual treats a trailing undefined as absent, so the length is what catches a
+		// hole left in the list - and a hole is what renders as a chip with no name.
+		expect(tags.length).toBe(1);
+		expect(tags.every((t) => !!t)).toBe(true);
+		expect(tags[0]).toEqual(MEDIA);
+	});
+
+	test('a container outside any stack keeps its own tags', () => {
+		const container = { name: 'loose', labels: { 'dockhand.tags': 'standalone' } };
+		expect(
+			containerTags(container, {
+				assignedTagIds: {},
+				stackTagIds: { media: [PROD.id] },
+				tagById: new Map([[PROD.id, PROD]]),
+				catalog: CATALOG,
+				inheritStackTags: true
+			}).map((t) => t.name)
+		).toEqual(['standalone']);
+	});
+
 });

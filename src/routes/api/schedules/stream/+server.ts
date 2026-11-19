@@ -23,6 +23,8 @@ import { getNextRun, getSystemSchedules } from '$lib/server/scheduler';
 import { getGlobalScannerDefaults, getScannerSettingsWithDefaults } from '$lib/server/scanner';
 import { authorize } from '$lib/server/authorize';
 import type { ScheduleInfo } from '../+server';
+import { filterByAccessibleEnv } from '$lib/server/env-scope-filter';
+import { containerActionScheduleRows } from '$lib/server/scheduled-actions-list';
 
 async function getSchedulesData(): Promise<ScheduleInfo[]> {
 	const schedules: ScheduleInfo[] = [];
@@ -65,6 +67,7 @@ async function getSchedulesData(): Promise<ScheduleInfo[]> {
 		})
 	);
 	schedules.push(...containerSchedules);
+	schedules.push(...(await containerActionScheduleRows()));
 
 	// Get git stack auto-sync schedules
 	const gitStacks = await getAllAutoUpdateGitStacks();
@@ -391,7 +394,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 			while (!initialDataSent && retryCount <= maxRetries && !controllerClosed) {
 				try {
-					const schedules = await getSchedulesData();
+					// The same per-environment scoping as GET /api/schedules, re-read on every poll.
+					const schedules = filterByAccessibleEnv(await getSchedulesData(), await auth.getAccessibleEnvironmentIds());
 
 					// Check if still connected before sending
 					if (controllerClosed) {
@@ -440,7 +444,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 				isPolling = true;
 				try {
-					const schedules = await getSchedulesData();
+					// The same per-environment scoping as GET /api/schedules, re-read on every poll.
+					const schedules = filterByAccessibleEnv(await getSchedulesData(), await auth.getAccessibleEnvironmentIds());
 					safeEnqueue(`event: schedules\ndata: ${JSON.stringify({ schedules })}\n\n`);
 				} catch (error) {
 					console.error('[Schedules Stream] Failed to get schedules during poll:', error);

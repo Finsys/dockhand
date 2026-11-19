@@ -11,7 +11,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser, Filter, GripHorizontal, Terminal, ArrowDown, ArrowRight, Clock, Tag, Hash } from 'lucide-svelte';
+	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Radio, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser, Filter, GripHorizontal, Terminal, ArrowDown, ArrowRight, Clock, Tag, Hash } from 'lucide-svelte';
 	import LogTimeRangeFilter from './LogTimeRangeFilter.svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { containerDisplayName } from '$lib/utils/container-display-name';
@@ -24,7 +24,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
-	import { parseLines, renderLineHtml, sortByTimestampStable, type LogEntry } from '$lib/utils/log-entry';
+	import { parseLines, parseSnapshot, renderLineHtml, sortByTimestampStable, type LogEntry } from '$lib/utils/log-entry';
 	import { m } from '$lib/paraglide/messages.js';
 
 	function renderTimestamp(ts: string | undefined): string {
@@ -913,8 +913,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			const until = getUntilParam();
 			const response = await fetch(appendEnvParam(`/api/containers/${selectedContainer.id}/logs?tail=${t}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId));
 			const data = await response.json();
-			const { entries } = parseLines(data.logs || '', '');
-			logs = entries;
+			logs = parseSnapshot(data.logs || '');
 			scrollToBottom(true);
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
@@ -1026,7 +1025,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 				groupedContainerInfo = new Map([...groupedContainerInfo, [containerId, { name: containerName, color }]]);
 
 				if (data.logs) {
-					const { entries } = parseLines(data.logs, '', { containerId, containerName, color });
+					const entries = parseSnapshot(data.logs, { containerId, containerName, color });
 					// Stopped logs are historical: sort the merged buffer by timestamp so
 					// each container's block interleaves into one timeline instead of being
 					// appended as a separate per-container chunk (#1406).
@@ -2055,13 +2054,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								class="flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors {streamingEnabled ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'}"
 								title={streamingEnabled ? m.logs_pause_live_streaming() : m.logs_resume_live_streaming()}
 							>
-								{#if streamingEnabled}
-									<Pause class="w-3 h-3" />
-									<span>{m.containers_list_pause()}</span>
-								{:else}
-									<Play class="w-3 h-3" />
-									<span>{m.logs_stream()}</span>
-								{/if}
+								<Radio class="w-3 h-3" />
+								<span>{m.logspanel_status_live()}</span>
 							</button>
 							<button
 								onclick={() => { autoScroll = !autoScroll; saveState(); }}
@@ -2275,13 +2269,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						class="flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors {streamingEnabled ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'}"
 						title={streamingEnabled ? m.logs_pause_live_streaming() : m.logs_resume_live_streaming()}
 					>
-						{#if streamingEnabled}
-							<Pause class="w-3 h-3" />
-							<span>{m.containers_list_pause()}</span>
-						{:else}
-							<Play class="w-3 h-3" />
-							<span>{m.logs_stream()}</span>
-						{/if}
+						<Radio class="w-3 h-3" />
+						<span>{m.logspanel_status_live()}</span>
 					</button>
 					<button
 						onclick={() => { autoScroll = !autoScroll; saveState(); }}

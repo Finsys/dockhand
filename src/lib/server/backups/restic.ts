@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runContainerWithStreaming, inspectImage, pullInternalImage, putContainerArchive } from '../docker';
 import { buildTar } from './tar';
+import { runProcess } from './process-core';
 import type { MetadataFile } from './backup-script';
 import { getInstanceId } from './identity';
 import { decryptBackupDestination, getSetting } from '../db';
@@ -166,7 +167,9 @@ export class Restic {
 		/** Opt-in live output callbacks (chunk-level). restic writes `check`/`prune`
 		 * progress to stderr; without these the output only arrives buffered after
 		 * exit. */
-		stream?: { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void }
+		stream?: { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void },
+		/** Kills restic when it fires; the run then resolves as a failure. */
+		signal?: AbortSignal
 	): Promise<ResticRun> {
 		const decrypted = decryptBackupDestination(destination);
 		const env = buildResticEnv(process.env, {
@@ -184,25 +187,7 @@ export class Restic {
 					...args,
 					...backupFlagsForCommand(destination, args[0])
 				];
-				return withTlsCertFiles({ cacert: decrypted.decryptedCacert, clientCert: decrypted.decryptedTlsClientCert }, env, (tlsEnv) => withGcsCredFile(tlsEnv, (runEnv) => new Promise<ResticRun>((resolve) => {
-					let stdout = '';
-					let stderr = '';
-					let settled = false;
-					const done = (run: ResticRun) => { if (!settled) { settled = true; resolve(run); } };
-
-					const proc = spawn('restic', fullArgs, { env: runEnv, timeout: TIMEOUTS[tier] });
-					proc.stdout.on('data', (d) => { const s = String(d); stdout += s; stream?.onStdout?.(s); });
-					proc.stderr.on('data', (d) => { const s = String(d); stderr += s; stream?.onStderr?.(s); });
-					proc.on('close', (code, signal) => {
-						const { exitCode, stderr: stderrOut } = classifyProcClose(code, signal, stderr);
-						done({ exitCode, stdout, stderr: stderrOut });
-					});
-					proc.on('error', (err) => {
-						// restic missing / not spawnable - a real failure, surfaced as data.
-						const { exitCode, stderr: stderrOut } = classifyProcError(err, stderr);
-						done({ exitCode, stdout, stderr: stderrOut });
-					});
-				})));
+				return withTlsCertFiles({ cacert: decrypted.decryptedCacert, clientCert: decrypted.decryptedTlsClientCert }, env, (tlsEnv) => withGcsCredFile(tlsEnv, (runEnv) => runProcess('restic', fullArgs, { env: runEnv, timeout: TIMEOUTS[tier], signal }, stream)));
 			}
 		);
 	}

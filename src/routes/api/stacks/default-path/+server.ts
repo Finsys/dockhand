@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { join } from 'path';
 import { getStackDir } from '$lib/server/stacks';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { getEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
@@ -37,6 +38,12 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 	if (!stackName) {
 		return json({ error: 'Stack name is required' }, { status: 400 });
+	}
+
+	// The name is joined into a path (including under a caller-supplied location), so it
+	// must be a plain stack name - no traversal, no separator.
+	if (!isValidStackName(stackName)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
 	}
 
 	let stackDir: string;

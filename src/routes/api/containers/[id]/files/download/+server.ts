@@ -17,7 +17,7 @@ import type { RequestHandler } from './$types';
  * query: format:string Archive format, "tar" (default) or "tar.gz"
  * resp-200: Archive stream (application/x-tar or application/gzip) as a file attachment
  * resp-400: Path is missing
- * resp-403: Permission denied to access the path
+ * resp-403: Permission denied (requires containers:exec, like reading a file)
  * resp-404: File not found
  * resp-500: Failed to download the file
  */
@@ -31,8 +31,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
-	// Permission check with environment context
-	if (auth.authEnabled && !await auth.can('containers', 'view', envIdNum)) {
+	// The download hands over a file's bytes, the same as reading it, so it needs exec like
+	// the other file-browser routes: a metadata-only view grant must not reach /etc/shadow or
+	// mounted credentials through the archive API instead.
+	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return new Response(JSON.stringify({ error: 'Permission denied' }), {
 			status: 403,
 			headers: { 'Content-Type': 'application/json' }

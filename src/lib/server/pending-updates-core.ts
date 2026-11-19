@@ -70,13 +70,91 @@ export function pendingRowsToClear(
  * hides a real update (a live container with a pending row is still counted).
  */
 export function countLivePending(
-	pending: Array<{ containerId: string }>,
+	pending: Array<{ containerId: string; hasImageUpdate?: boolean }>,
 	liveContainerIds: Iterable<string>
 ): number {
 	const live = liveContainerIds instanceof Set ? liveContainerIds : new Set(liveContainerIds);
 	let n = 0;
 	for (const row of pending ?? []) {
-		if (row?.containerId && live.has(row.containerId)) n++;
+		if (row?.containerId && live.has(row.containerId) && isImageUpdateRow(row)) n++;
 	}
+	return n;
+}
+
+/**
+ * The dashboard "pending updates" count is an IMAGE-update count (the up-arrow tile), so
+ * only a row whose digest actually moved counts. A row kept for a newer-version-tag
+ * suggestion, a cooldown, or a pinned-but-unapplied digest is NOT an applicable update and
+ * must not inflate the tile - otherwise an environment of pinned containers reads as "all
+ * out of date". `hasImageUpdate` is absent on rows from before it was stored; treat that
+ * as an update so an old row is never silently dropped.
+ */
+export function isImageUpdateRow(row: { hasImageUpdate?: boolean }): boolean {
+	return row.hasImageUpdate !== false;
+}
+
+/** The image-update count without live-matching, for a seed before the container list. */
+export function countImageUpdates(pending: Array<{ hasImageUpdate?: boolean }>): number {
+	let n = 0;
+	for (const row of pending ?? []) if (isImageUpdateRow(row)) n++;
+	return n;
+}
+
+/**
+ * A pinned-digest move: the tag's digest advanced but the image pins the old one, so it
+ * is reported, never applied. Counted on its OWN tile, separate from the applicable
+ * image-update count, because no bulk update can clear it - the fix is an edit to the
+ * compose file.
+ */
+export function isPinnedDigestRow(row: { pinnedToDigest?: boolean; containerId?: string; hasImageUpdate?: boolean }): boolean {
+	return row.pinnedToDigest === true;
+}
+
+/** Live-matched pinned-digest count (dashboard tile). */
+export function countLivePinnedDigest(
+	pending: Array<{ containerId: string; pinnedToDigest?: boolean }>,
+	liveContainerIds: Iterable<string>
+): number {
+	const live = liveContainerIds instanceof Set ? liveContainerIds : new Set(liveContainerIds);
+	let n = 0;
+	for (const row of pending ?? []) {
+		if (row?.containerId && live.has(row.containerId) && isPinnedDigestRow(row)) n++;
+	}
+	return n;
+}
+
+/** Pinned-digest count without live-matching, for a seed before the container list. */
+export function countPinnedDigest(pending: Array<{ pinnedToDigest?: boolean; containerId?: string; hasImageUpdate?: boolean }>): number {
+	let n = 0;
+	for (const row of pending ?? []) if (isPinnedDigestRow(row)) n++;
+	return n;
+}
+
+/**
+ * A newer-version-tag (semver) suggestion: a higher version tag than the one running.
+ * Advisory and never auto-applied, so it is counted on its OWN tile, separate from the
+ * applicable image-update count. Keyed on the stored `newerVersion` blob being present.
+ */
+export function isNewerVersionRow(row: { newerVersion?: unknown | null; containerId?: string; hasImageUpdate?: boolean }): boolean {
+	return row.newerVersion != null;
+}
+
+/** Live-matched newer-version count (dashboard tile). */
+export function countLiveNewerVersion(
+	pending: Array<{ containerId: string; newerVersion?: unknown | null }>,
+	liveContainerIds: Iterable<string>
+): number {
+	const live = liveContainerIds instanceof Set ? liveContainerIds : new Set(liveContainerIds);
+	let n = 0;
+	for (const row of pending ?? []) {
+		if (row?.containerId && live.has(row.containerId) && isNewerVersionRow(row)) n++;
+	}
+	return n;
+}
+
+/** Newer-version count without live-matching, for a seed before the container list. */
+export function countNewerVersion(pending: Array<{ newerVersion?: unknown | null; containerId?: string; hasImageUpdate?: boolean }>): number {
+	let n = 0;
+	for (const row of pending ?? []) if (isNewerVersionRow(row)) n++;
 	return n;
 }

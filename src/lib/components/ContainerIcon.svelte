@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import { Box } from 'lucide-svelte';
 	import { appSettings } from '$lib/stores/settings';
 	import { selfhstMatcher, ensureSelfhstMatcher } from '$lib/stores/selfhst-refs';
@@ -29,7 +29,7 @@
 		/** Extra classes for the generic-box fallback (e.g. a running/stopped state colour). */
 		fallbackClass?: string;
 		/** Lucide component to render instead of the generic Box when there is no logo. */
-		fallbackIcon?: Component;
+		fallbackIcon?: IconComponent;
 		/**
 		 * When the app-logo toggle is OFF, render the generic box anyway (used by places
 		 * that already showed a box, e.g. the logs/terminal pickers, so they keep their

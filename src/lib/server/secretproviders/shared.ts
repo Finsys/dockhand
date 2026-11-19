@@ -36,6 +36,7 @@ export type SecretProviderType =
 	| 'azure-kv'
 	| 'keepass'
 	| 'psono'
+	| 'sops'
 	// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 	| (string & {});
 
@@ -251,6 +252,14 @@ export interface PsonoConfig {
 	apiKeySecretKey: string;
 }
 
+/**
+ * SOPS: one or more age identities (`AGE-SECRET-KEY-1...`, or a whole `keys.txt`)
+ * that are recipients of the stack's SOPS-encrypted env file.
+ */
+export interface SopsConfig {
+	ageKey: string;
+}
+
 export type SecretProviderConfig =
 	| ServiceAccountConfig
 	| ConnectConfig
@@ -261,7 +270,8 @@ export type SecretProviderConfig =
 	| ProtonConfig
 	| AzureKvConfig
 	| KeePassConfig
-	| PsonoConfig;
+	| PsonoConfig
+	| SopsConfig;
 
 /**
  * Config keys that hold a SECRET across every provider type. Only these are stripped
@@ -270,7 +280,7 @@ export type SecretProviderConfig =
  * a non-secret coordinate the user needs to see and edit. Keep in sync with the
  * `type: 'password'` fields in ProviderModal.svelte's PROVIDER_FIELDS.
  */
-export const SECRET_CONFIG_KEYS = new Set(['token', 'clientSecret', 'password', 'apiKeySecretKey']);
+export const SECRET_CONFIG_KEYS = new Set(['token', 'clientSecret', 'password', 'apiKeySecretKey', 'ageKey']);
 
 /**
  * Every user-overridable connection-destination field across all provider types. If a
@@ -463,4 +473,13 @@ export interface SecretProvider<C extends SecretProviderConfig = SecretProviderC
 		refs: string[],
 		logPrefix?: string
 	): Promise<{ bulk: Record<string, string>; refs: Map<string, string> }>;
+
+	/**
+	 * Optional: decrypts a stack's whole env file (e.g. a SOPS-encrypted dotenv
+	 * committed to a Git stack) into a flat key/value map. Only called for content
+	 * the provider's backend encrypted - the caller checks the format first.
+	 * A failure to decrypt throws, so a stack bound to the provider never deploys
+	 * with ciphertext in place of its secrets.
+	 */
+	decryptEnvFile?(config: C, content: string, logPrefix?: string): Promise<Record<string, string>>;
 }

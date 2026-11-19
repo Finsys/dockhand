@@ -1,5 +1,4 @@
-<script lang="ts">
-	import { TogglePill } from '$lib/components/ui/toggle-pill';
+<script module lang="ts">
 	import {
 		Box,
 		RefreshCw,
@@ -11,7 +10,6 @@
 		ChevronDown,
 		ChevronRight
 	} from 'lucide-svelte';
-	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface EventType {
@@ -28,27 +26,8 @@
 		events: EventType[];
 	}
 
-	interface Props {
-		selectedEventTypes: string[];
-		onchange: (eventTypes: string[]) => void;
-		disabled?: boolean;
-	}
-
-	let { selectedEventTypes, onchange, disabled = false }: Props = $props();
-
-	// Track collapsed state for groups
-	let collapsedGroups = $state<Set<string>>(new Set());
-
-	function toggleGroup(groupId: string) {
-		if (collapsedGroups.has(groupId)) {
-			collapsedGroups = new Set([...collapsedGroups].filter(id => id !== groupId));
-		} else {
-			collapsedGroups = new Set([...collapsedGroups, groupId]);
-		}
-	}
-
 	// Notification event types - grouped by category with icons
-	const NOTIFICATION_EVENT_GROUPS: EventGroup[] = [
+	export const NOTIFICATION_EVENT_GROUPS: EventGroup[] = [
 		{
 			id: 'container',
 			label: m.settings_envs_event_group_container,
@@ -61,7 +40,10 @@
 				{ id: 'container_unhealthy', label: m.settings_envs_event_container_unhealthy, description: m.settings_envs_event_container_unhealthy_desc },
 				{ id: 'container_healthy', label: m.settings_envs_event_container_healthy, description: m.settings_envs_event_container_healthy_desc },
 				{ id: 'container_oom', label: m.settings_envs_event_container_oom, description: m.settings_envs_event_container_oom_desc },
-				{ id: 'container_updated', label: m.settings_envs_event_container_updated, description: m.settings_envs_event_container_updated_desc }
+				{ id: 'container_updated', label: m.settings_envs_event_container_updated, description: m.settings_envs_event_container_updated_desc },
+				{ id: 'container_scheduled_start', label: m.settings_envs_event_container_scheduled_start, description: m.settings_envs_event_container_scheduled_start_desc },
+				{ id: 'container_scheduled_stop', label: m.settings_envs_event_container_scheduled_stop, description: m.settings_envs_event_container_scheduled_stop_desc },
+				{ id: 'container_scheduled_failed', label: m.settings_envs_event_container_scheduled_failed, description: m.settings_envs_event_container_scheduled_failed_desc }
 			]
 		},
 		{
@@ -133,6 +115,36 @@
 			]
 		}
 	];
+
+	/** Every event a channel on an environment can subscribe to: the default for a new channel. */
+	export const ENVIRONMENT_EVENT_IDS: string[] = NOTIFICATION_EVENT_GROUPS.flatMap((g) => g.events.map((e) => e.id));
+
+	export { shownEventCount } from '$lib/utils/shown-event-count';
+</script>
+
+<script lang="ts">
+	import { TogglePill } from '$lib/components/ui/toggle-pill';
+	import { page } from '$app/stores'; // BETA GATE: backups feature flag
+
+	interface Props {
+		selectedEventTypes: string[];
+		onchange: (eventTypes: string[]) => void;
+		disabled?: boolean;
+	}
+
+	let { selectedEventTypes, onchange, disabled = false }: Props = $props();
+
+	// Track collapsed state for groups
+	let collapsedGroups = $state<Set<string>>(new Set());
+
+	function toggleGroup(groupId: string) {
+		if (collapsedGroups.has(groupId)) {
+			collapsedGroups = new Set([...collapsedGroups].filter(id => id !== groupId));
+		} else {
+			collapsedGroups = new Set([...collapsedGroups, groupId]);
+		}
+	}
+
 
 	function toggleEvent(eventId: string) {
 		if (disabled) return;

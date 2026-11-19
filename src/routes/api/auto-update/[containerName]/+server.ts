@@ -26,7 +26,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	if (permDenied) return permDenied;
 
 	try {
-		const containerName = decodeURIComponent(params.containerName);
+		// Used as-is; the container name keys a database lookup, not a path.
+		const containerName = params.containerName;
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
 
@@ -76,7 +77,8 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 	if (permDenied) return permDenied;
 
 	try {
-		const containerName = decodeURIComponent(params.containerName);
+		// Used as-is; the container name keys a database lookup, not a path.
+		const containerName = params.containerName;
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
 
@@ -157,7 +159,8 @@ export const DELETE: RequestHandler = async ({ params, url, cookies }) => {
 	if (permDenied) return permDenied;
 
 	try {
-		const containerName = decodeURIComponent(params.containerName);
+		// Used as-is; the container name keys a database lookup, not a path.
+		const containerName = params.containerName;
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
 

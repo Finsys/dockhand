@@ -91,7 +91,7 @@ export interface BackupPorts {
 	/** Serialize on a destination; runs fn behind the per-destination queue. */
 	serializeDestination<T>(destinationId: number, fn: () => Promise<T>): Promise<T>;
 	/** Open the operation record; returns handles to update + close it. */
-	openOperation(entityName: string, scheduleId: number, environmentId: number | null, triggeredBy: 'cron' | 'manual' | 'webhook', onProgress?: (s: string, m: string) => void):
+	openOperation(entityName: string, scheduleId: number, environmentId: number | null, triggeredBy: 'cron' | 'manual' | 'webhook', onProgress?: (s: string, m: string) => void, destinationId?: number):
 		Promise<OperationHandle>;
 	/** Fire a notification (non-fatal — never changes the backup outcome). */
 	notify(event: 'backup_success' | 'backup_failed', payload: Record<string, unknown>, envId: number | null | undefined): Promise<void>;
@@ -236,7 +236,7 @@ export class BackupService {
 		releaseLiveTarget: () => void,
 	): Promise<BackupResult> {
 		const envId = job.environmentId;
-		const op = await this.ports.openOperation(job.targetName, job.configId, envId, triggeredBy);
+		const op = await this.ports.openOperation(job.targetName, job.configId, envId, triggeredBy, undefined, job.destinationId);
 		let restart: (() => Promise<{ failed: Array<{ name: string; error: string }> }>) | null = null;
 		let restarted = false;
 
@@ -630,7 +630,7 @@ export class BackupService {
 
 		let executionId: number | undefined;
 		try {
-			const op = await this.ports.openOperation(job.targetName, job.configId, job.environmentId, triggeredBy);
+			const op = await this.ports.openOperation(job.targetName, job.configId, job.environmentId, triggeredBy, undefined, job.destinationId);
 			executionId = op.id;
 			await op.close({ kind: 'error', code: 'VALIDATION', message: reason });
 		} catch { /* the row is best-effort; the failure is still reported below */ }

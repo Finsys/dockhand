@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { pruneImages } from '$lib/server/docker';
+import { invalidateDiskUsage } from '$lib/server/disk-usage-cache';
+import { prunedImageCount } from '$lib/utils/pruned-image-count';
 import { authorize } from '$lib/server/authorize';
 import { audit } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
@@ -31,7 +33,9 @@ export const POST: RequestHandler = async (event) => {
 
 	return createJobResponse(async (send) => {
 		try {
-			const result = await pruneImages(danglingOnly, envIdNum);
+			const result = await pruneImages(danglingOnly, envIdNum).finally(() => invalidateDiskUsage(envIdNum));
+			const space = result?.SpaceReclaimed === undefined ? 'space freed not known' : `${result.SpaceReclaimed} bytes freed`;
+			console.log(`[Prune] env ${envIdNum ?? 'local'}: manual ${danglingOnly ? 'dangling' : 'all unused'} image prune removed ${prunedImageCount(result?.ImagesDeleted)} images, ${space}`);
 
 			// Audit log
 			await audit(event, 'prune', 'image', {
@@ -42,7 +46,7 @@ export const POST: RequestHandler = async (event) => {
 
 			send('result', { success: true, result });
 		} catch (error) {
-			console.error('Error pruning images:', error);
+			console.error(`[Prune] env ${envIdNum ?? 'local'}: manual image prune failed:`, error);
 			send('result', { success: false, error: 'Failed to prune images' });
 		}
 	}, event.request);

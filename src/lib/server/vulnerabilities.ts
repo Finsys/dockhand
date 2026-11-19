@@ -6,7 +6,8 @@
  * Used by both GET /api/vulnerabilities (grid) and GET /api/vulnerabilities/export.
  */
 import { getAllLatestScans, getScannedImageIds } from '$lib/server/scan-queries';
-import { countFindings, listScannedImageNames, EMPTY_COUNTS } from '$lib/server/vuln-summary';
+import { countFindings, countFindingsByImage, listScannedImageNames, EMPTY_COUNTS } from '$lib/server/vuln-summary';
+import { groupVulnerabilityCounts, type VulnGroup, type VulnGroupBy } from '$lib/server/vulnerability-groups-core';
 import { listImages, listContainers, DockerConnectionError, EnvironmentNotFoundError } from '$lib/server/docker';
 import { flattenScansToFindings, filterFindings, sortFindings } from '$lib/utils/vulnerability';
 import { pickScanDisplayName } from '$lib/server/scanner-output-core';
@@ -460,4 +461,27 @@ async function buildMeta(envIdNum: number): Promise<VulnerabilitiesMeta> {
 			stacks: Array.from(stacks).sort((a, b) => a.localeCompare(b))
 		}
 	};
+}
+
+/**
+ * Severity counts per container, image or stack (GET /api/vulnerabilities/count
+ * with groupBy), most severe first. Counted per image in the database, as the
+ * header counts are, so nothing parses a findings document.
+ */
+export async function getVulnerabilityGroups(envIdNum: number, by: VulnGroupBy): Promise<VulnGroup[]> {
+	const live = await liveImageState(envIdNum);
+	const [byImage, scanNames] = await Promise.all([
+		countFindingsByImage(envIdNum, live.scannedIds),
+		listScannedImageNames(envIdNum, live.scannedIds)
+	]);
+	// The live name first, then the one the scan recorded, as the filter dropdown does.
+	const imageNames = new Map(scanNames.map((r) => [r.imageId, r.imageName]));
+	for (const [id, name] of live.namesByImage) imageNames.set(id, name);
+	return groupVulnerabilityCounts(by, {
+		scannedIds: live.scannedIds,
+		byImage,
+		containersByImage: live.containersByImage,
+		stacksByImage: live.stacksByImage,
+		imageNames
+	});
 }

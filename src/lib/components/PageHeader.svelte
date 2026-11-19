@@ -4,10 +4,10 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Wifi } from 'lucide-svelte';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 
 	interface Props {
-		icon: Component;
+		icon: IconComponent;
 		title: string;
 		count?: number | string;
 		total?: number;

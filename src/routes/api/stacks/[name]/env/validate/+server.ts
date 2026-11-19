@@ -1,7 +1,9 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { getStackEnvVars } from '$lib/server/db';
 import { getStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { extractEnvPlaceholderReferences } from '$lib/server/env-parser';
 import type { RequestHandler } from './$types';
 
 interface ValidationResult {
@@ -96,7 +98,7 @@ function extractComposeVars(yaml: string): { required: string[]; optional: strin
  * summary: Validate a stack's defined environment variables against the variables required/optional by its compose file (compose content and the defined variable list may be supplied in the body, otherwise loaded from the saved file/DB)
  * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
- * body: {compose:string, variables:array<string>}
+ * body: {compose:string, variables:array<string>, envValues:object}
  * body-example: {"compose":"services:\n  web:\n    image: ${IMAGE}","variables":["IMAGE"]}
  * resp-200: {valid:boolean!, required:array<string>!, optional:array<string>!, defined:array<string>!, missing:array<string>!, unused:array<string>!}
  * resp-200-example: {"valid":false,"required":["IMAGE"],"optional":[],"defined":[],"missing":["IMAGE"],"unused":[]}
@@ -120,9 +122,14 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 	}
 
 	try {
-		const stackName = decodeURIComponent(params.name);
+		// Validate the name shape before it is used in a filesystem path.
+		const stackName = params.name;
+		if (!isValidStackName(stackName)) {
+			return json({ error: 'Invalid stack name' }, { status: 400 });
+		}
 		let composeContent: string | null = null;
 		let providedVariables: string[] | null = null;
+		let providedEnvValues: Record<string, string> | null = null;
 
 		// Check if compose content and/or variables are provided in body
 		const contentType = request.headers.get('content-type');
@@ -135,6 +142,9 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 				// Accept variables from UI for validation (overrides DB lookup)
 				if (Array.isArray(body.variables)) {
 					providedVariables = body.variables.filter((v: unknown) => typeof v === 'string');
+				}
+				if (body.envValues && typeof body.envValues === 'object' && !Array.isArray(body.envValues)) {
+					providedEnvValues = body.envValues as Record<string, string>;
 				}
 			} catch {
 				// Ignore JSON parse errors - will try to load from file
@@ -171,8 +181,22 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 
 		// Calculate missing and unused. Built-in Docker/Compose vars are provided implicitly
 		// by the runtime, so they're never "missing" even if not in the user's env panel.
+		// Variables referenced as placeholders within other env values are also treated as used.
+		const placeholderRefs = new Set<string>();
+		if (providedEnvValues) {
+			for (const val of Object.values(providedEnvValues)) {
+				if (typeof val === 'string') {
+					for (const ref of extractEnvPlaceholderReferences(val)) {
+						placeholderRefs.add(ref);
+					}
+				}
+			}
+		}
+
 		const missing = required.filter(v => !defined.includes(v) && !DOCKER_COMPOSE_BUILTIN_VARS.has(v));
-		const unused = defined.filter(v => !required.includes(v) && !optional.includes(v) && !DOCKER_COMPOSE_BUILTIN_VARS.has(v));
+		const unused = defined.filter(
+			v => !required.includes(v) && !optional.includes(v) && !placeholderRefs.has(v) && !DOCKER_COMPOSE_BUILTIN_VARS.has(v)
+		);
 
 		const result: ValidationResult = {
 			valid: missing.length === 0,

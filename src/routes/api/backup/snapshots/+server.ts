@@ -4,8 +4,29 @@ import { authorize } from '$lib/server/authorize';
 import { requireBackups } from '$lib/server/backups/route-guards';
 import { getBackupConfig, getBackupDestinations } from '$lib/server/db';
 import { listSnapshots } from '$lib/server/backups';
+import { withAbortTimeout } from '$lib/server/backups/helpers';
 import { filterSnapshotsByEnvAccess } from '$lib/server/backups/route-guards';
 import { jobResult } from '$lib/server/sse';
+import { redactUrlCredentials } from '$lib/utils/rest-repository';
+
+// Bounds one destination's listing so a slow or unreachable repo can't stall a
+// response for minutes (restic keeps retrying); a timed-out destination is a failed one
+// and its restic is killed.
+const PER_DEST_MS = Number(process.env.SNAPSHOT_LIST_TIMEOUT_MS ?? 30_000);
+const listWithTimeout = (destinationId: number, configId?: number) =>
+	logListingFailure(destinationId, configId, () =>
+		withAbortTimeout((signal) => listSnapshots(destinationId, configId, signal), PER_DEST_MS, `timed out after ${PER_DEST_MS}ms`));
+
+/** A listing that fails reaches only the browser otherwise; the server log gets it too. */
+async function logListingFailure<T>(destinationId: number, configId: number | undefined, list: () => Promise<T>): Promise<T> {
+	try {
+		return await list();
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`[Backup] snapshots dest=${destinationId}${configId != null ? ` config=${configId}` : ''}: listing failed: ${redactUrlCredentials(msg)}`);
+		throw err;
+	}
+}
 
 /**
  * @openapi
@@ -49,17 +70,8 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
 			// old X-Incomplete-Destinations header is now log-only.
 			return jobResult(request, async () => {
 				const destinations = await getBackupDestinations();
-				// Bound each destination's listing so one slow or unreachable repo
-				// can't stall the whole response for minutes (restic's own timeout is
-				// several minutes). A timed-out destination is treated as a failed one.
-				const PER_DEST_MS = Number(process.env.SNAPSHOT_LIST_TIMEOUT_MS ?? 30_000);
-				const withTimeout = <T>(p: Promise<T>, name: string): Promise<T> =>
-					Promise.race([
-						p,
-						new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${PER_DEST_MS}ms`)), PER_DEST_MS)),
-					]);
 				const results = await Promise.allSettled(
-					destinations.map(dest => withTimeout(listSnapshots(dest.id, config.id), dest.name).then(snaps =>
+					destinations.map(dest => listWithTimeout(dest.id, config.id).then(snaps =>
 						snaps.map(s => ({ ...s, _destinationId: dest.id, _destinationName: dest.name }))
 					))
 				);
@@ -84,14 +96,14 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
 				});
 				allSnapshots.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
 				if (failed.length > 0) {
-					console.warn(`[Backup] Snapshot search incomplete — ${failed.length} destination(s) failed: ${failed.join('; ')}`);
+					console.warn(`[Backup] Snapshot search for config ${config.id} incomplete - ${results.length - failed.length} of ${results.length} destination(s) listed; failed: ${redactUrlCredentials(failed.join('; '))}`);
 				}
 				return allSnapshots;
 			});
 		}
 
 		// Default: only search the config's current destination.
-		return jobResult(request, () => listSnapshots(config.destinationId, config.id));
+		return jobResult(request, () => logListingFailure(config.destinationId, config.id, () => listSnapshots(config.destinationId, config.id)));
 	} else if (destIdParam) {
 		const destinationId = parseInt(destIdParam);
 		if (isNaN(destinationId)) return json({ error: 'Invalid destinationId' }, { status: 400 });
@@ -103,7 +115,7 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
 		return jobResult(request, async () => {
 			// No target filter — return all snapshots in this destination (incl. snapshots
 			// from OTHER Dockhand instances sharing/copied into the repo).
-			const snapshots = await listSnapshots(destinationId);
+			const snapshots = await listWithTimeout(destinationId);
 			// (HIGH #8) On enterprise, a non-admin must not see snapshots belonging to
 			// environments they can't access — the ids/paths alone are disclosure. Drop
 			// any snapshot whose owning env (from its dockhand:env tag) isn't accessible.

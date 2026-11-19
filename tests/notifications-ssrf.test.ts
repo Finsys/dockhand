@@ -11,7 +11,11 @@
 import { describe, test, expect } from 'bun:test';
 import { isSafeNotificationUrl } from '../src/lib/server/url-safety';
 import { validateRepositoryForSave } from '../src/lib/server/backups/helpers';
-import { notificationFetch } from '../src/lib/server/notifications/shared';
+import { notificationFetch, resolvedHostReason } from '../src/lib/server/notifications/shared';
+import { ipCategory } from '../src/lib/server/url-safety';
+import { smtpHostReason } from '../src/lib/server/notifications/smtp-core';
+import { sendMqtt } from '../src/lib/server/notifications/mqtt';
+import { sendSmtpNotification } from '../src/lib/server/notifications/smtp';
 
 describe('isSafeNotificationUrl — notification endpoint guard', () => {
 	test('blocks loopback and cloud-metadata hosts', () => {
@@ -154,5 +158,77 @@ describe('notificationFetch — blocks before making a request', () => {
 		await expect(
 			notificationFetch(new URL('http://127.0.0.1/hook'))
 		).rejects.toThrow(/Notification endpoint rejected/);
+	});
+});
+
+describe('resolvedHostReason - where a notification host name points', () => {
+	const dns = (table: Record<string, string[]>) => async (h: string) => {
+		if (!(h in table)) throw new Error(`getaddrinfo ENOTFOUND ${h}`);
+		return table[h];
+	};
+	const lookupAll = dns({
+		'loop.example': ['127.0.0.1'],
+		'loop6.example': ['::1'],
+		'mapped.example': ['::ffff:127.0.0.1'],
+		'meta.example': ['169.254.169.254'],
+		'ecs.example': ['169.254.170.2'],
+		'meta6.example': ['fd00:ec2::254'],
+		'mixed.example': ['203.0.113.7', '127.0.0.1'],
+		'meta-mapped.example': ['::ffff:169.254.169.254'],
+		'any6.example': ['::'],
+		'podman.example': ['169.254.1.2'],
+		'ntfy.lan': ['192.168.1.20'],
+		'relay.ts.net': ['100.101.102.103'],
+		'ula.lan': ['fd12::20'],
+		'public.example': ['203.0.113.7', '2001:db8::7']
+	});
+
+	test('a name that points at loopback or a cloud metadata endpoint is refused', async () => {
+		for (const h of ['loop.example', 'loop6.example', 'mapped.example', 'meta.example', 'ecs.example', 'meta6.example', 'mixed.example', 'meta-mapped.example', 'any6.example']) {
+			expect(await resolvedHostReason(h, lookupAll)).toContain('resolves to a blocked address');
+		}
+	});
+
+	test('LAN, Tailscale, ULA, public and other link-local names stay allowed', async () => {
+		// Podman maps host.containers.internal into 169.254/16; only the metadata endpoints are blocked there.
+		for (const h of ['ntfy.lan', 'relay.ts.net', 'ula.lan', 'public.example', 'podman.example']) {
+			expect(await resolvedHostReason(h, lookupAll)).toBeNull();
+		}
+	});
+
+	test('allowLoopback lets loopback through and nothing else', async () => {
+		const opt = { allowLoopback: true };
+		expect(await resolvedHostReason('loop.example', lookupAll, opt)).toBeNull();
+		expect(await resolvedHostReason('loop6.example', lookupAll, opt)).toBeNull();
+		for (const h of ['meta.example', 'ecs.example', 'meta6.example', 'meta-mapped.example', 'any6.example']) {
+			expect(await resolvedHostReason(h, lookupAll, opt)).toContain('resolves to a blocked address');
+		}
+	});
+
+	test('IP literals and names that do not resolve are left to the other checks', async () => {
+		const never = async () => { throw new Error('looked up'); };
+		expect(await resolvedHostReason('127.0.0.1', never)).toBeNull();
+		expect(await resolvedHostReason('[::1]', never)).toBeNull();
+		expect(await resolvedHostReason('::1%lo0', never)).toBeNull();
+		expect(await resolvedHostReason('missing.example', lookupAll)).toBeNull();
+	});
+
+	test('fetch and MQTT refuse a name that resolves to loopback before connecting; SMTP allows it', async () => {
+		// localhost resolves offline, so this exercises the real resolver and the wiring.
+		await expect(notificationFetch('http://localhost.:8080/hook')).rejects.toThrow(/resolves to a blocked address/);
+		const payload = { title: 't', message: 'm' } as any;
+		expect((await sendMqtt('mqtt://localhost.:1883/t', payload)).error).toMatch(/resolves to a blocked address/);
+		// SMTP is the exception: a relay on the same host is allowed, so the guard lets it through.
+		const smtp = { host: 'localhost.', port: 1, secure: false, from_email: 'a@b.c', to_emails: ['a@b.c'] } as any;
+		expect((await sendSmtpNotification(smtp, payload)).error).not.toMatch(/blocked/);
+	});
+});
+
+describe('IPv6 zone ids', () => {
+	test('a zone id does not hide a loopback address', () => {
+		expect(ipCategory('::1%lo0')).toBe('loopback');
+		expect(ipCategory('[::1%1]')).toBe('loopback');
+		expect(smtpHostReason('::ffff:169.254.169.254')).toContain('metadata');
+		expect(ipCategory('fe80::1%eth0')).toBe('private');
 	});
 });

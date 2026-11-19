@@ -15,12 +15,11 @@ import {
 	listImages,
 	listNetworks,
 	getContainerStats,
-	getDiskUsage,
 	dockerPing,
 	DockerConnectionError
 } from '$lib/server/docker';
 import { listComposeStacks } from '$lib/server/stacks';
-import { countLivePending } from '$lib/server/pending-updates-core';
+import { countLivePending, countImageUpdates, countLivePinnedDigest, countPinnedDigest, countLiveNewerVersion, countNewerVersion } from '$lib/server/pending-updates-core';
 import { authorize } from '$lib/server/authorize';
 import { prefersJSON, sseToJSON } from '$lib/server/sse';
 import type { EnvironmentStats } from '../+server';
@@ -29,10 +28,9 @@ import { isEdgeConnected } from '$lib/server/hawser';
 import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 import { calculateCpuPercent, calculateMemoryUsage, calculateMemoryLimit } from '$lib/server/stats-calc-core';
 import { containerDisplayName } from '$lib/utils/container-display-name';
+import { getCachedDiskUsage, SKIP_DF_COLLECTION } from '$lib/server/disk-usage-cache';
 
 
-// Skip disk usage collection (Synology NAS performance fix)
-const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
 
 // Helper to add timeout to promises
 // IMPORTANT: Clears the timeout to prevent memory leaks from accumulated timer closures
@@ -44,61 +42,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 	return Promise.race([promise, timeoutPromise]).finally(() => {
 		if (timeoutId !== null) clearTimeout(timeoutId);
 	});
-}
-
-// Disk usage cache - getDiskUsage() is very slow (30s timeout) but data changes rarely
-// Cache per environment with 5-minute TTL
-// DISABLED when SKIP_DF_COLLECTION is set (kills Synology NAS devices)
-interface DiskUsageCache {
-	data: any;
-	timestamp: number;
-}
-const diskUsageCache: Map<number, DiskUsageCache> = new Map();
-const DISK_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_CACHE_SIZE = 100; // Maximum environments to cache
-
-// Cleanup expired cache entries periodically to prevent unbounded growth
-// Also limits cache size for environments that were deleted
-setInterval(() => {
-	const now = Date.now();
-	// Remove expired entries
-	for (const [envId, cached] of diskUsageCache.entries()) {
-		if (now - cached.timestamp > DISK_CACHE_TTL_MS * 2) {
-			diskUsageCache.delete(envId);
-		}
-	}
-	// Enforce max size by removing oldest entries
-	if (diskUsageCache.size > MAX_CACHE_SIZE) {
-		const entries = Array.from(diskUsageCache.entries())
-			.sort((a, b) => a[1].timestamp - b[1].timestamp);
-		const toRemove = entries.slice(0, entries.length - MAX_CACHE_SIZE);
-		for (const [envId] of toRemove) {
-			diskUsageCache.delete(envId);
-		}
-	}
-}, 10 * 60 * 1000); // Every 10 minutes
-
-// Register cache reporter for memory monitoring
-
-
-async function getCachedDiskUsage(envId: number): Promise<any> {
-	const cached = diskUsageCache.get(envId);
-	const now = Date.now();
-
-	// Return cached data if still valid
-	if (cached && (now - cached.timestamp) < DISK_CACHE_TTL_MS) {
-		return cached.data;
-	}
-
-	// Fetch fresh data with timeout
-	const data = await withTimeout(getDiskUsage(envId).catch(() => null), 30000, null);
-
-	// Only cache successful results - if fetch failed, retry on next request
-	if (data !== null) {
-		diskUsageCache.set(envId, { data, timestamp: now });
-	}
-
-	return data;
 }
 
 // Limit for per-container stats (reduced from 15 to improve performance)
@@ -130,7 +73,7 @@ async function getEnvironmentStatsProgressive(
 		labels: parseLabels(env.labels),
 		connectionType: (env.connectionType as 'socket' | 'direct' | 'hawser-standard' | 'hawser-edge') || 'socket',
 		online: false,
-		containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 },
+		containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0, pinnedDigest: 0 , newerVersion: 0 },
 		images: { total: 0, totalSize: 0 },
 		volumes: { total: 0, totalSize: 0 },
 		containersSize: 0,
@@ -194,7 +137,9 @@ async function getEnvironmentStatsProgressive(
 
 		// pendingUpdates is live-matched below once the container list is fetched (#1006);
 		// seed to the raw count so a container-list timeout still shows something.
-		envStats.containers.pendingUpdates = pendingUpdates.length;
+		envStats.containers.pendingUpdates = countImageUpdates(pendingUpdates);
+		envStats.containers.pinnedDigest = countPinnedDigest(pendingUpdates);
+		envStats.containers.newerVersion = countNewerVersion(pendingUpdates);
 
 		if (recentEventsResult.events.length > 0) {
 			envStats.recentEvents = recentEventsResult.events.map(e => ({
@@ -288,6 +233,8 @@ async function getEnvironmentStatsProgressive(
 				// guaranteed real here (the null-guard above threw on a timeout), so no
 				// empty-list fallback needed - unlike the non-stream twin.
 				envStats.containers.pendingUpdates = countLivePending(pendingUpdates, containers.map((c: any) => c.id));
+				envStats.containers.pinnedDigest = countLivePinnedDigest(pendingUpdates, containers.map((c: any) => c.id));
+				envStats.containers.newerVersion = countLiveNewerVersion(pendingUpdates, containers.map((c: any) => c.id));
 				envStats.loading!.containers = false;
 
 				onPartialUpdate({
@@ -402,7 +349,7 @@ async function getEnvironmentStatsProgressive(
 				});
 				return null;
 			})
-			: getCachedDiskUsage(env.id)
+			: getCachedDiskUsage(env.id, 30000)
 				.then((diskUsage) => {
 					if (diskUsage) {
 						// Update images with Docker's deduplicated aggregate size

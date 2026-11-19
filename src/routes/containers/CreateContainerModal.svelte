@@ -13,8 +13,7 @@
 	import { parseHostPort, expandPortBindings } from '$lib/utils/port-parse';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 
-	// Parse shell command respecting quotes
-	import { parseShellCommand } from '$lib/utils/shell';
+	import { parseCommandText } from '$lib/utils/command-field';
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface ConfigSet {
@@ -342,8 +341,8 @@
 					labelsObj[l.key] = l.value;
 				});
 
-			const cmd = command.trim() ? parseShellCommand(command.trim()) : undefined;
-			const entrypointArr = entrypoint.trim() ? parseShellCommand(entrypoint.trim()) : undefined;
+			const cmd = command.trim() ? parseCommandText(command) : undefined;
+			const entrypointArr = entrypoint.trim() ? parseCommandText(entrypoint) : undefined;
 
 			let healthcheck: any = undefined;
 			if (healthcheckEnabled && healthcheckCommand.trim()) {

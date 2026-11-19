@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { filterByAccessibleEnv } from '$lib/server/env-scope-filter';
 import {
 	getGitRepository,
 	updateGitRepository,
@@ -16,7 +17,8 @@ import { computeAuditDiff } from '$lib/utils/diff';
  * @openapi
  * summary: Get a single git repository by ID
  * path: id:integer! Git repository ID (from GET /api/git/repositories)
- * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
+ * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer, hasWebhookSecret:boolean!, stacksUsing:array<object>!}
+ * resp-200-desc: stacksUsing lists the git stacks bound to this repository, each {stackName, environmentId}, filtered to the caller's accessible environments (plus null-env stacks) on enterprise.
  * resp-400: The id path segment is not a valid integer
  * resp-403: Caller lacks the git:view permission
  * resp-404: No repository exists with that ID
@@ -41,11 +43,11 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 
 		const allStacksUsing = await getGitStacksByRepositoryId(id);
 		const accessibleEnvIds = await auth.getAccessibleEnvironmentIds();
-		const stacksUsing = accessibleEnvIds === null
-			? allStacksUsing
-			: allStacksUsing.filter((s) => s.environmentId === null || accessibleEnvIds.includes(s.environmentId));
+		const stacksUsing = filterByAccessibleEnv(allStacksUsing, accessibleEnvIds);
 
-		return json({ ...repository, stacksUsing });
+		// Withhold the webhook secret; expose only whether one is set.
+		const { webhookSecret, ...safeRepo } = repository;
+		return json({ ...safeRepo, hasWebhookSecret: !!webhookSecret, stacksUsing });
 	} catch (error) {
 		console.error('Failed to get git repository:', error);
 		return json({ error: 'Failed to get git repository' }, { status: 500 });
@@ -59,7 +61,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * path: id:integer! Git repository ID (from GET /api/git/repositories)
  * body: {name:string, url:string, branch:string, credentialId:integer}
  * body-example: {"name":"homelab","url":"https://github.com/example/homelab.git","branch":"production","credentialId":2}
- * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
+ * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer, hasWebhookSecret:boolean!}
  * resp-400: Invalid id, an invalid credentialId, or a duplicate repository name
  * resp-403: Caller lacks the git:edit permission
  * resp-404: No repository exists with that ID
@@ -113,7 +115,8 @@ export const PUT: RequestHandler = async (event) => {
 		// Audit log
 		await auditGitRepository(event, 'update', repository.id, repository.name, diff);
 
-		return json(repository);
+		const { webhookSecret, ...safeRepo } = repository;
+		return json({ ...safeRepo, hasWebhookSecret: !!webhookSecret });
 	} catch (error: any) {
 		console.error('Failed to update git repository:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {

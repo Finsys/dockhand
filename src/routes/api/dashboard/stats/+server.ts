@@ -13,17 +13,14 @@ import {
 	listImages,
 	listVolumes,
 	listNetworks,
-	getDockerInfo,
-	getDiskUsage
+	getDockerInfo
 } from '$lib/server/docker';
+import { getCachedDiskUsage } from '$lib/server/disk-usage-cache';
 import { listComposeStacks } from '$lib/server/stacks';
-import { countLivePending } from '$lib/server/pending-updates-core';
+import { countLivePending, countImageUpdates, countLivePinnedDigest, countPinnedDigest, countLiveNewerVersion, countNewerVersion } from '$lib/server/pending-updates-core';
 import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 import { authorize } from '$lib/server/authorize';
 import { parseLabels } from '$lib/utils/label-colors';
-
-// Skip disk usage collection (Synology NAS performance fix)
-const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
 
 // Helper to add timeout to promises
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -68,6 +65,8 @@ export interface EnvironmentStats {
 		restarting: number;
 		unhealthy: number;
 		pendingUpdates: number;
+		pinnedDigest: number;
+		newerVersion: number;
 	};
 	images: {
 		total: number;
@@ -186,7 +185,7 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				labels: parseLabels(env.labels),
 				connectionType: (env.connectionType as 'socket' | 'direct' | 'hawser-standard' | 'hawser-edge') || 'socket',
 				online: false,
-				containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 },
+				containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 , pinnedDigest: 0 , newerVersion: 0 },
 				images: { total: 0, totalSize: 0 },
 				volumes: { total: 0, totalSize: 0 },
 				containersSize: 0,
@@ -219,14 +218,15 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				envStats.online = true;
 
 				// Fetch all data in parallel (with 10 second timeout per operation)
-				// Disk usage can be disabled with SKIP_DF_COLLECTION for Synology NAS devices
+				// Disk usage comes from the shared cache (one /system/df per env, 5 min TTL);
+				// it returns null when SKIP_DF_COLLECTION is set
 				const [containers, images, volumes, networks, stacks, diskUsage] = await Promise.all([
 					withTimeout(listContainers(true, env.id).catch(() => []), 10000, []),
 					withTimeout(listImages(env.id).catch(() => []), 10000, []),
 					withTimeout(listVolumes(env.id).catch(() => []), 10000, []),
 					withTimeout(listNetworks(env.id).catch(() => []), 10000, []),
 					withTimeout(listComposeStacks(env.id).catch(() => []), 10000, []),
-					SKIP_DF_COLLECTION ? Promise.resolve(null) : withTimeout(getDiskUsage(env.id).catch(() => null), 10000, null)
+					getCachedDiskUsage(env.id, 10000)
 				]);
 
 				// Process containers
@@ -317,7 +317,13 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				// hide real updates (over-count is annoying; under-count hides updates).
 				envStats.containers.pendingUpdates = containers.length > 0
 					? countLivePending(pendingUpdates, containers.map((c: any) => c.id))
-					: pendingUpdates.length;
+					: countImageUpdates(pendingUpdates);
+				envStats.containers.pinnedDigest = containers.length > 0
+					? countLivePinnedDigest(pendingUpdates, containers.map((c: any) => c.id))
+					: countPinnedDigest(pendingUpdates);
+				envStats.containers.newerVersion = containers.length > 0
+					? countLiveNewerVersion(pendingUpdates, containers.map((c: any) => c.id))
+					: countNewerVersion(pendingUpdates);
 
 			} catch (error) {
 				// Convert technical error messages to user-friendly ones

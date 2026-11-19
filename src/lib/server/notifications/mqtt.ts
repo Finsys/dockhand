@@ -7,7 +7,7 @@
  *   ?qos=0|1|2 (default 0), ?retain=true|false (default false)
  */
 import mqtt from 'mqtt';
-import type { NotificationPayload, NotificationResult } from './shared';
+import { resolvedHostReason, type NotificationPayload, type NotificationResult } from './shared';
 import { parseMqttUrl, buildMqttMessage } from './mqtt-core';
 
 /** Timeout for the connect+publish round-trip, overridable like the HTTP channels. */
@@ -21,6 +21,8 @@ export async function sendMqtt(url: string, payload: NotificationPayload): Promi
 	const parsed = parseMqttUrl(url);
 	if (!parsed.ok) return { success: false, error: `Invalid MQTT URL: ${parsed.reason}` };
 	const t = parsed.target;
+	const hostReason = await resolvedHostReason(t.host);
+	if (hostReason) return { success: false, error: `MQTT connection failed: ${hostReason}` };
 
 	return new Promise<NotificationResult>((resolve) => {
 		let settled = false;

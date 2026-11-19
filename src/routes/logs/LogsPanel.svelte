@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { onMount, onDestroy, tick } from 'svelte';
-	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play, Eraser, Filter, Clock, Tag, Hash } from 'lucide-svelte';
+	import { onMount, onDestroy, tick, untrack } from 'svelte';
+	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Radio, Eraser, Filter, Clock, Tag, Hash } from 'lucide-svelte';
 	import LogTimeRangeFilter from './LogTimeRangeFilter.svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
-	import { parseLines, renderLineHtml, type LogEntry } from '$lib/utils/log-entry';
+	import { parseLines, parseSnapshot, renderLineHtml, type LogEntry } from '$lib/utils/log-entry';
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -103,6 +103,9 @@
 		return getTimestamp(untilDate, untilTime, '23:59:59');
 	}
 
+	// Bumped by every snapshot fetch and stream start; only the latest one may write logs.
+	let fetchSeq = 0;
+
 	function reloadLogs() {
 		logs = [];
 		pendingEntries = [];
@@ -165,6 +168,8 @@
 			}
 		}
 	}
+	// Before the effects below run, so a saved pause is known before any stream starts.
+	loadSettings();
 
 	// Save settings to localStorage
 	function saveSettings() {
@@ -293,6 +298,7 @@
 	// Start SSE streaming for logs
 	function startStreaming() {
 		if (!containerId || !streamingEnabled) return;
+		fetchSeq++;
 		stopStreaming(false); // Don't reset reconnect attempts
 
 		connectionError = null;
@@ -505,6 +511,7 @@
 	// can show them outside the LogEntry stream.
 	async function fetchLogs() {
 		if (!containerId) return;
+		const seq = ++fetchSeq;
 		loading = true;
 		connectionError = null;
 		try {
@@ -512,20 +519,22 @@
 			const until = getUntilParam();
 			const response = await fetch(appendEnvParam(`/api/containers/${containerId}/logs?tail=${tailCount}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId));
 			const data = await response.json();
+			// A newer fetch, a stream or a container switch started while this one was in flight.
+			if (seq !== fetchSeq) return;
 			if (!response.ok) {
 				connectionError = m.logspanel_fetch_failed({ error: data.error || response.statusText });
 				logs = [];
 				return;
 			}
-			const { entries } = parseLines(data.logs || '');
-			logs = entries;
+			logs = parseSnapshot(data.logs || '');
 			scrollToBottom();
 		} catch (error) {
+			if (seq !== fetchSeq) return;
 			console.error('Failed to fetch logs:', error);
 			connectionError = m.logspanel_fetch_failed({ error: error instanceof Error ? error.message : m.logspanel_unknown_error() });
 			logs = [];
 		} finally {
-			loading = false;
+			if (seq === fetchSeq) loading = false;
 		}
 	}
 
@@ -689,6 +698,21 @@
 		}
 	});
 
+	// A paused panel still loads the container it is switched to. Only the container and
+	// visibility are tracked, so pausing or resuming does not reload the view.
+	$effect(() => {
+		const id = containerId;
+		const shown = visible;
+		untrack(() => {
+			if (id && shown && !streamingEnabled) {
+				logs = [];
+				pendingEntries = [];
+				streamCarryover = '';
+				fetchLogs();
+			}
+		});
+	});
+
 	// Clean up when not visible
 	$effect(() => {
 		if (!visible) {
@@ -697,7 +721,6 @@
 	});
 
 	onMount(() => {
-		loadSettings();
 		// Listen for tab visibility changes to reconnect when user returns
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		// Chrome 77+ Page Lifecycle API - fires when frozen tab is resumed
@@ -784,11 +807,7 @@
 				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {streamingEnabled ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-300'}"
 				title={streamingEnabled ? m.logspanel_pause_live_streaming() : m.logspanel_resume_live_streaming()}
 			>
-				{#if streamingEnabled}
-					<Pause class="w-3 h-3" />
-				{:else}
-					<Play class="w-3 h-3" />
-				{/if}
+				<Radio class="w-3 h-3" />
 			</button>
 			<!-- Tail lines selector -->
 			<Select.Root type="single" value={tailCount} onValueChange={(v) => { tailCount = v; saveSettings(); reloadLogs(); }}>

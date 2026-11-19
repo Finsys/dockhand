@@ -50,11 +50,17 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * body-example: {"hideSystemJobs":true}
  * resp-200: {success:boolean!, hideSystemJobs:boolean}
  * resp-400: hideSystemJobs is not a boolean
+ * resp-401: Not authenticated
  * resp-500: Unexpected error while saving the setting
  */
 export const PUT: RequestHandler = async ({ request, cookies }) => {
 	try {
 		const auth = await authorize(cookies);
+		// This setting is per-user; an unauthenticated write has no personal bucket and would
+		// fall through to the shared global key, so reject it when auth is enabled.
+		if (auth.authEnabled && !auth.isAuthenticated) {
+			return json({ error: 'Not authenticated' }, { status: 401 });
+		}
 		const userId = auth.isAuthenticated ? auth.user?.id : undefined;
 
 		const body = await request.json();

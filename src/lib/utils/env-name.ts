@@ -37,6 +37,9 @@ export function validateEnvName(name: unknown): ValidationResult {
 	if (name.length > ENV_NAME_MAX_LENGTH) {
 		return { ok: false, reason: `Name must be ${ENV_NAME_MAX_LENGTH} characters or fewer` };
 	}
+	// "." passes the pattern (a single char skips the last-char rule) but joins to the parent
+	// directory itself: stacks/. is stacks/, which holds every environment's stacks.
+	if (name === '.') return { ok: false, reason: 'Name can\'t be a single dot' };
 	if (!ENV_NAME_RE.test(name)) {
 		return {
 			ok: false,

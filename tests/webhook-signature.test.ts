@@ -10,7 +10,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import crypto from 'node:crypto';
-import { verifyWebhookSignature } from '../src/lib/server/webhook-signature';
+import { verifyWebhookSignature, timingSafeStringEqual } from '../src/lib/server/webhook-signature';
 
 const SECRET = 'super-secret-value-123';
 const PAYLOAD = JSON.stringify({ ref: 'refs/heads/main', repository: { name: 'demo' } });
@@ -77,5 +77,22 @@ describe('verifyWebhookSignature - missing signature', () => {
 
 	test('empty signature fails', () => {
 		expect(verifyWebhookSignature(PAYLOAD, '', SECRET)).toBe(false);
+	});
+});
+
+describe('timingSafeStringEqual', () => {
+	test('equal strings match', () => {
+		expect(timingSafeStringEqual('a-secret-value', 'a-secret-value')).toBe(true);
+	});
+	test('different strings of equal length do not match', () => {
+		expect(timingSafeStringEqual('a-secret-value', 'a-secret-valuX')).toBe(false);
+	});
+	test('a length mismatch does not match (and does not throw)', () => {
+		expect(timingSafeStringEqual('short', 'a-much-longer-secret')).toBe(false);
+		expect(timingSafeStringEqual('a-much-longer-secret', 'short')).toBe(false);
+	});
+	test('empty vs non-empty does not match', () => {
+		expect(timingSafeStringEqual('', 'x')).toBe(false);
+		expect(timingSafeStringEqual('', '')).toBe(true);
 	});
 });

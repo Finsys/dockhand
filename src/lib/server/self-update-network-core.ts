@@ -1,3 +1,5 @@
+import { endpointForRecreate, type EndpointLike } from './endpoint-mac-core';
+
 /**
  * Which network names and options the update sidecar may be told about.
  *
@@ -73,4 +75,45 @@ export function planNetworkEnvVars(
 
 	if (names.length === 0) return { envVars: [], skipped };
 	return { envVars: [`NETWORKS=${names.join(' ')}`, ...optionLines], skipped };
+}
+
+interface SelfInspectLike {
+	HostConfig?: { NetworkMode?: string | null } | null;
+	NetworkSettings?: { Networks?: Record<string, EndpointLike> | null } | null;
+}
+
+/**
+ * Puts the primary network on `createConfig` when its endpoint pins an IP, and returns
+ * the sidecar's reconnect plan for the other networks. Without a pinned IP nothing
+ * changes and every network stays with the sidecar.
+ *
+ * `docker network connect` does not apply `--ip` on the network already named in
+ * HostConfig.NetworkMode and has no MAC option, so both only survive when given at
+ * create. The daemon reserves a static IP at start, and the sidecar starts the new
+ * container after removing the old one.
+ */
+export function applySelfUpdateNetworks(
+	createConfig: Record<string, unknown>,
+	inspect: SelfInspectLike | null | undefined
+): { primary: string | null; reconnect: NetworkEnvPlan } {
+	const networks: Record<string, EndpointLike> = { ...inspect?.NetworkSettings?.Networks };
+	const mode = inspect?.HostConfig?.NetworkMode;
+	const shared = !mode || mode === 'host' || mode === 'none' || mode.startsWith('container:') || mode.startsWith('service:');
+	let primary: string | null = null;
+	if (!shared) primary = mode === 'default' ? 'bridge' : mode;
+	const endpoint = primary ? networks[primary] : undefined;
+	const ipam = endpoint?.IPAMConfig;
+	if (!primary || !endpoint || (!ipam?.IPv4Address && !ipam?.IPv6Address)) {
+		return { primary: null, reconnect: planNetworkEnvVars(networks) };
+	}
+
+	const settings: Record<string, unknown> = { IPAMConfig: ipam };
+	if (Array.isArray(endpoint.Aliases) && endpoint.Aliases.length > 0) settings.Aliases = endpoint.Aliases;
+	if (Array.isArray(endpoint.Links) && endpoint.Links.length > 0) settings.Links = endpoint.Links;
+	const mac = endpointForRecreate(endpoint).MacAddress;
+	if (mac) settings.MacAddress = mac;
+	createConfig.NetworkingConfig = { EndpointsConfig: { [primary]: settings } };
+
+	delete networks[primary];
+	return { primary, reconnect: planNetworkEnvVars(networks) };
 }

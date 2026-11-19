@@ -232,7 +232,9 @@
 	<!-- Behind this is the identity-provider configuration, which /api/auth/oidc holds
 	     to settings:view. Without the tab, a refused read renders as an empty list that
 	     reads like "nothing is configured" - a confident wrong answer. -->
-	{#if $canAccess('settings', 'view')}
+	<!-- /api/auth/oidc is admin-only (adminClaim decides who becomes admin on login), so
+	     this tab follows that, like LDAP - a settings:view non-admin would get an empty list. -->
+	{#if $isAdmin}
 		<button
 			class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-all {authSubTab ===
 			'sso'
@@ -392,7 +394,7 @@
 {/if}
 
 <!-- SSO / OIDC Subtab -->
-{#if authSubTab === 'sso' && $canAccess('settings', 'view')}
+{#if authSubTab === 'sso' && $isAdmin}
 	<div class="flex-1 min-h-0 overflow-y-auto">
 		<SsoSubTab {roles} />
 	</div>

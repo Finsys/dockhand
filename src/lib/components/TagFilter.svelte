@@ -11,7 +11,7 @@
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import { ToggleSwitch } from '$lib/components/ui/toggle-pill';
-	import type { Tag, TagFilterMode } from '$lib/utils/tags-core';
+	import { UNTAGGED_TAG_ID, type Tag, type TagFilterMode } from '$lib/utils/tags-core';
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -66,7 +66,13 @@
 		selected = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
 	}
 	const label = $derived(
-		selected.length === 0 ? m.tags_filter_all() : selected.length === 1 ? (tags.find((t) => t.id === selected[0])?.name ?? m.tags_filter_count({ count: 1 })) : m.tags_filter_count({ count: selected.length })
+		selected.length === 0
+			? m.tags_filter_all()
+			: selected.length === 1
+				? selected[0] === UNTAGGED_TAG_ID
+					? m.tags_filter_untagged()
+					: (tags.find((t) => t.id === selected[0])?.name ?? m.tags_filter_count({ count: 1 }))
+				: m.tags_filter_count({ count: selected.length })
 	);
 </script>
 
@@ -181,6 +187,18 @@
 						{#if isSel}<Check class="ml-auto h-3.5 w-3.5 text-primary shrink-0" />{/if}
 					</button>
 				{/each}
+				{#if !reorderMode}
+					{@const isUntaggedSel = selected.includes(UNTAGGED_TAG_ID)}
+					<button
+						type="button"
+						class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted text-muted-foreground"
+						onclick={() => toggle(UNTAGGED_TAG_ID)}
+					>
+						<TagIcon class="h-3.5 w-3.5 shrink-0 opacity-50" />
+						<span class="min-w-0 flex-1 truncate text-left" title={m.tags_filter_untagged()}>{m.tags_filter_untagged()}</span>
+						{#if isUntaggedSel}<Check class="ml-auto h-3.5 w-3.5 text-primary shrink-0" />{/if}
+					</button>
+				{/if}
 			</div>
 			{#if selected.length > 0 && !reorderMode}
 				<button type="button" class="mt-1 w-full rounded px-2 py-1 text-2xs text-muted-foreground hover:bg-muted" onclick={() => (selected = [])}>

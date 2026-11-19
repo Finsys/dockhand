@@ -1,4 +1,4 @@
-import type { Component } from 'svelte';
+import type { IconComponent } from '$lib/types';
 import { KeyRound } from 'lucide-svelte';
 import OnePassword from './OnePassword.svelte';
 import Infisical from './Infisical.svelte';
@@ -11,7 +11,7 @@ import KeePassXC from './KeePassXC.svelte';
 import Psono from './Psono.svelte';
 
 /** Brand icon for a secret-provider type. Falls back to a generic key icon. */
-export function getProviderIcon(type: string): Component {
+export function getProviderIcon(type: string): IconComponent {
 	switch (type) {
 		case 'op-service-account':
 		case 'op-connect':

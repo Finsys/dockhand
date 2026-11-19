@@ -59,8 +59,9 @@ async function makeOperationHandle(
 	environmentId: number | null,
 	triggeredBy: 'cron' | 'manual' | 'webhook',
 	onProgress?: (s: string, m: string) => void,
+	destinationId?: number,
 ): Promise<OperationHandle> {
-	const op = await openOperation({ kind, scheduleId, environmentId, entityName, triggeredBy }, onProgress);
+	const op = await openOperation({ kind, scheduleId, environmentId, entityName, triggeredBy, destinationId }, onProgress);
 	return {
 		id: op.id,
 		progress: (status, message) => op.progress(status, message),
@@ -297,11 +298,13 @@ async function planStackDirVolume(
 		: excludableBindDirs(bindDirs, hostPath, capturedVolumeSources);
 	const kept = bindDirs.filter((rel) => !droppable.includes(rel));
 	const excludePaths = droppable.map((rel) => `/volumes/${STACKDIR_VOLUME_KEY}/${rel}`);
+	// The picker plans without captured volumes; only a real backup passes them.
+	const phase = capturedVolumeSources === undefined ? 'preview' : 'backup';
 	if (excludePaths.length > 0) {
-		console.log(`[Backup] stackdir "${targetName}": excluding ${excludePaths.length} compose bind dir(s) from the stackdir volume (captured separately as their own volumes): [${droppable.join(', ')}]`);
+		console.log(`[Backup] stackdir "${targetName}" (${phase}): excluding ${excludePaths.length} compose bind dir(s) from the stackdir volume (captured separately as their own volumes): [${droppable.join(', ')}]`);
 	}
 	if (kept.length > 0) {
-		console.log(`[Backup] stackdir "${targetName}": keeping ${kept.length} compose bind dir(s) IN the stackdir capture - no captured volume covers them: [${kept.join(', ')}]`);
+		console.log(`[Backup] stackdir "${targetName}" (${phase}): keeping ${kept.length} compose bind dir(s) IN the stackdir capture - no captured volume covers them: [${kept.join(', ')}]`);
 	}
 
 	// User deselections from the "Stack files on the host" picker: exclude each named top-level
@@ -310,15 +313,19 @@ async function planStackDirVolume(
 	if (excludedStackFiles && excludedStackFiles.length > 0) {
 		const { isLoadBearingStackFile } = await import('./stackfile-filter');
 		const dropped: string[] = [];
+		const refused: string[] = [];
 		for (const name of excludedStackFiles) {
 			// Only a plain top-level entry name (no path separators / traversal) is honored.
-			if (!name || name.includes('/') || name === '.' || name === '..') continue;
-			if (isLoadBearingStackFile(name)) continue; // never exclude compose/.env
+			if (!name || name.includes('/') || name === '.' || name === '..') { refused.push(name); continue; }
+			if (isLoadBearingStackFile(name)) { refused.push(name); continue; } // never exclude compose/.env
 			const p = `/volumes/${STACKDIR_VOLUME_KEY}/${name}`;
 			if (!excludePaths.includes(p)) { excludePaths.push(p); dropped.push(name); }
 		}
 		if (dropped.length > 0) {
-			console.log(`[Backup] stackdir "${targetName}": user deselected ${dropped.length} stack file(s) from the capture: [${dropped.join(', ')}]`);
+			console.log(`[Backup] stackdir "${targetName}" (${phase}): user deselected ${dropped.length} stack file(s) from the capture: [${dropped.join(', ')}]`);
+		}
+		if (refused.length > 0) {
+			console.log(`[Backup] stackdir "${targetName}" (${phase}): ignored ${refused.length} deselection(s) the server never excludes (compose/.env, or not a plain name): [${refused.join(', ')}]`);
 		}
 	}
 
@@ -438,10 +445,10 @@ export async function probeStackDir(
 		if (entries.length === 0) {
 			return { kind: 'unknown', reason: `The stack folder at ${hostPath} is empty or does not exist on the Docker host. Set the environment's stack path and re-configure.` };
 		}
-		// Tag entries that are ALSO a bind mount so the picker shows them as non-deselectable
-		// (captured via the Volumes section, not here). Two sources: daemon bind sources (runtime,
-		// only for a RUNNING stack) AND the compose bind-dir names (always available) — the latter
-		// so a stopped stack's `./memos` bind still shows as captured-by-bind, not a plain file.
+		// Tag entries that are ALSO a bind mount so the picker labels them ("also a bind below").
+		// Two sources: daemon bind sources (runtime, only for a RUNNING stack) AND the compose
+		// bind-dir names (always available) - the latter so a stopped stack's `./memos` bind still
+		// shows as captured-by-bind, not a plain file.
 		const bindDirNames = plan.excludePaths
 			.map((p) => p.replace(`/volumes/${STACKDIR_VOLUME_KEY}/`, '').split('/')[0])
 			.filter(Boolean);
@@ -449,19 +456,6 @@ export async function probeStackDir(
 	} catch (e) {
 		return { kind: 'unknown', reason: `Could not read the stack folder at ${hostPath} on the host: ${e instanceof Error ? e.message : String(e)}` };
 	}
-}
-
-/** The busybox list-script for a data-presence probe: print the missing sentinel if the mount
- * point does not exist, otherwise emit one `<type>\t<size>\t<name>` line per top-level entry. */
-function probeListScript(missingSentinel: string): string {
-	return (
-		`if [ ! -e /probe ]; then printf '%s' '${missingSentinel}'; exit 0; fi; ` +
-		`cd /probe 2>/dev/null || { printf '%s' '${missingSentinel}'; exit 0; }; ` +
-		`for f in * .*; do ` +
-		`[ "$f" = "." ] || [ "$f" = ".." ] && continue; [ -e "$f" ] || continue; ` +
-		`if [ -d "$f" ]; then t=d; else t=f; fi; s=$(stat -c %s "$f" 2>/dev/null || echo 0); ` +
-		`printf '%s\\t%s\\t%s\\n' "$t" "$s" "$f"; done`
-	);
 }
 
 /**
@@ -488,7 +482,7 @@ export async function probeHostPath(
 	hostPath: string,
 	envId: number | null | undefined,
 ): Promise<{ kind: import('./stackdir-plan').ProbeDataKind; reason?: string }> {
-	const { classifyProbeListing, PROBE_MISSING_SENTINEL } = await import('./stackdir-plan');
+	const { classifyProbeListing, PROBE_MISSING_SENTINEL, probeListScript } = await import('./stackdir-plan');
 	const { runContainerWithStreaming } = await import('../docker');
 	const { ensureHelperImage } = await import('./restic');
 	const { INSTANCE_LABEL } = await import('./reap-core');
@@ -523,7 +517,7 @@ export async function probeVolumeData(
 	volumeName: string,
 	envId: number | null | undefined,
 ): Promise<{ kind: import('./stackdir-plan').ProbeDataKind; reason?: string }> {
-	const { classifyProbeListing, PROBE_MISSING_SENTINEL } = await import('./stackdir-plan');
+	const { classifyProbeListing, PROBE_MISSING_SENTINEL, probeListScript } = await import('./stackdir-plan');
 	const { runContainerWithStreaming, inspectVolume } = await import('../docker');
 	const { ensureHelperImage } = await import('./restic');
 	const { INSTANCE_LABEL } = await import('./reap-core');
@@ -718,8 +712,8 @@ function backupPorts(destination: any, onProgress?: (status: string, message: st
 		serializeDestination: (id, fn) => serializeByRepo(id, fn),
 		// Forward the run's live-progress callback into the operation record so the
 		// SSE route streams it (the record also throttles the durable log writes).
-		openOperation: (entityName, scheduleId, environmentId, triggeredBy, cb) =>
-			makeOperationHandle('backup', entityName, scheduleId, environmentId, triggeredBy, cb ?? onProgress),
+		openOperation: (entityName, scheduleId, environmentId, triggeredBy, cb, destinationId) =>
+			makeOperationHandle('backup', entityName, scheduleId, environmentId, triggeredBy, cb ?? onProgress, destinationId),
 		notify: (event, payload, envId) => notify(event, payload, envId),
 		fireWebhook: (url, payload) => { void fireWebhook(url, payload, { log: (m) => onProgress?.('webhook', m) }); },
 		setConfigStatus: async (configId, status) => { await updateBackupConfig(configId, { lastBackupStatus: status, lastBackupAt: new Date().toISOString() }); },
@@ -866,6 +860,7 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 			await guardSnapshotAccess(reader(), destination, instanceId, snapshotId, access);
 		},
 		listSnapshotVolumes: async (_destinationId, snapshotId) => listSnapshotVolumes(destination, snapshotId),
+		listSnapshotFileVolumes: async (_destinationId, snapshotId) => (await readSnapshotVolumes(destination, snapshotId)).files,
 		resolveTargets: async (targetName, envId, type) => resolveTargets(type ?? 'container', targetName, envId),
 		stopBeforeRestore: async (containers, envId) => {
 			const running = containers.filter((c) => c.state === 'running');
@@ -955,7 +950,7 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 		// override files, and sibling configs referenced by relative paths resolve, and the
 		// file keeps its real name (e.g. immich.yaml). The backup always captures the full dir
 		// plus the recorded compose filename, so there is no normalized-compose.yaml fallback.
-		redeployStack: async (name, envId, destId, snapId, restoreSecrets) => {
+		redeployStack: async (name, envId, destId, snapId, restoreSecrets, restoredBinds) => {
 			const { redeployStackFromDir, getStackDir } = await import('../stacks');
 			const { existsSync } = await import('fs');
 			const { join } = await import('path');
@@ -1016,7 +1011,14 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 					// into. A backup restore's redeploy could get its own recorder the same
 					// way -- there is nothing structural stopping it -- it just hasn't been
 					// done yet.
-					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined);
+					// The binds the in-place swap just wrote on the host, as stack-dir paths.
+					const { readFileSync } = await import('fs');
+					const { relativeBindsRestored } = await import('./stackfile-filter');
+					const keepOnHost = restoredBinds?.length
+						? relativeBindsRestored(readFileSync(composePath, 'utf8'), stackDir, restoredBinds)
+						: [];
+					if (keepOnHost.length) log(`leaving the restored bind(s) as they are on the host: [${keepOnHost.join(', ')}]`);
+					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined, keepOnHost);
 					if (!r.success) throw new Error(r.error || 'docker compose up failed');
 				}
 			});
@@ -1069,8 +1071,8 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 /** A ResticReader adapter over the shared Restic instance (for snapshots.ts). */
 function reader() {
 	return {
-		runLocal: (dest: any, args: string[], tier?: 'interactive' | 'data', stream?: { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void }) =>
-			restic.runLocal(dest, args, tier, stream)
+		runLocal: (dest: any, args: string[], tier?: 'interactive' | 'data', stream?: { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void }, signal?: AbortSignal) =>
+			restic.runLocal(dest, args, tier, stream, signal)
 	};
 }
 
@@ -1079,7 +1081,13 @@ function reader() {
  * is NOT a user data volume, so it must never reach the restore volume picker, "restore
  * all", or the in-place swap. The stack dir is restored only via the redeploy path. */
 async function listSnapshotVolumes(destination: any, snapshotId: string): Promise<string[]> {
+	return (await readSnapshotVolumes(destination, snapshotId)).names;
+}
+
+/** The snapshot's volume keys, and which of them is a single file. */
+async function readSnapshotVolumes(destination: any, snapshotId: string): Promise<{ names: string[]; files: string[] }> {
 	const { isReservedVolumeKey } = await import('./stackdir-plan');
+	const { snapshotVolumeNodes } = await import('./snapshot-volumes-core');
 	const run = await restic.runLocal(destination, ['ls', '--json', '--no-lock', snapshotId, '/volumes/']);
 	// A FAILED `ls` (timeout / killed / slow remote backend) is NOT "the snapshot has no
 	// volumes" - returning [] there makes restore report a MISLEADING "not found in snapshot,
@@ -1087,19 +1095,7 @@ async function listSnapshotVolumes(destination: any, snapshotId: string): Promis
 	if (run.exitCode !== 0) {
 		throw new BackupError('RESTIC', `could not list the snapshot's volumes: ${run.stderr.trim() || 'restic ls failed'}`, { exitCode: run.exitCode });
 	}
-	const names = new Set<string>();
-	for (const line of run.stdout.split('\n')) {
-		try {
-			const e = JSON.parse(line.trim());
-			// Accept EITHER node discriminator: message_type (current restic) or struct_type
-			// (deprecated) - a restic bump that drops the old field must not silently return [].
-			if ((e?.message_type === 'node' || e?.struct_type === 'node') && typeof e.path === 'string' && e.path.startsWith('/volumes/')) {
-				const parts = e.path.split('/');
-				if (parts.length >= 3 && parts[2] && !isReservedVolumeKey(parts[2])) names.add(parts[2]);
-			}
-		} catch { /* skip non-JSON */ }
-	}
-	return [...names];
+	return snapshotVolumeNodes(run.stdout, isReservedVolumeKey);
 }
 
 async function notify(event: string, payload: Record<string, unknown>, envId: number | null | undefined): Promise<void> {
@@ -1288,12 +1284,12 @@ async function serializeByRepo<T>(destinationId: number, fn: () => Promise<T>): 
 }
 
 /** List a config's (or a destination's) snapshots, newest first. Instance-owned. */
-export async function listSnapshots(destinationId: number, configId?: number): Promise<ReturnType<typeof parseSnapshots>> {
+export async function listSnapshots(destinationId: number, configId?: number, signal?: AbortSignal): Promise<ReturnType<typeof parseSnapshots>> {
 	const destination = await loadDest(destinationId);
 	const instanceId = await getInstanceId();
 	// No per-env filtering here — the route already gated env access; pass a
 	// permissive access ctx (instance scoping still applies).
-	return listSnapshotsCore(reader(), destination, instanceId, { isEnterprise: false, canAccessEnvironment: async () => true }, configId);
+	return listSnapshotsCore(reader(), destination, instanceId, { isEnterprise: false, canAccessEnvironment: async () => true }, configId, signal);
 }
 
 /** Browse a snapshot's file tree at a path (restic ls). */

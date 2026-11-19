@@ -43,6 +43,22 @@ const useHttps = HTTPS_MODE === 'on';
 // passthrough, which calls `handler` directly and so never reaches that listener.
 let hstsHeader = null;
 
+// Framing/sniffing protection on EVERY response, including static files that
+// adapter-node's sirv serves before the SvelteKit hook runs (so the hook's own
+// headers never reach them). X-Frame-Options and nosniff are overwritten with the same
+// value by the hook on page/API responses; CSP frame-ancestors is left to the hook so a
+// route's own CSP (e.g. the icon proxy's sandbox) is not clobbered. Framing is on by
+// default; DISABLE_FRAME_PROTECTION opts out (for embedding in a trusted parent page).
+// Inline mirror of frame-protection-core.ts frameProtectionEnabled (server.js has no $lib).
+const frameProtectionOn = !(process.env.DISABLE_FRAME_PROTECTION === 'true' || process.env.DISABLE_FRAME_PROTECTION === '1');
+function setFramingHeaders(res) {
+	if (frameProtectionOn && !res.getHeader('X-Frame-Options')) res.setHeader('X-Frame-Options', 'DENY');
+	if (!res.getHeader('X-Content-Type-Options')) res.setHeader('X-Content-Type-Options', 'nosniff');
+	// Mirror the hook: do not leak internal paths via Referer, and deny unused device APIs.
+	if (!res.getHeader('Referrer-Policy')) res.setHeader('Referrer-Policy', 'no-referrer');
+	if (!res.getHeader('Permissions-Policy')) res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+}
+
 let server;
 if (useHttps) {
 	const certPath = process.env.HTTPS_CERT_PATH;
@@ -124,11 +140,13 @@ if (useHttps) {
 
 	server = createHttpsServer(tlsOptions, (req, res) => {
 		if (hstsHeader) res.setHeader('Strict-Transport-Security', hstsHeader);
+		setFramingHeaders(res);
 		handler(req, res);
 	});
 } else {
 	console.log(`[HTTPS] mode=off (set HTTPS_MODE=on to enable native TLS)`);
 	server = createHttpServer((req, res) => {
+		setFramingHeaders(res);
 		handler(req, res);
 	});
 }
@@ -245,6 +263,7 @@ server.on('upgrade', async (req, socket, head) => {
 		res.setHeader('Connection', 'close');
 		// Set per response by the HTTPS listener, which this path does not go through.
 		if (hstsHeader) res.setHeader('Strict-Transport-Security', hstsHeader);
+		setFramingHeaders(res);
 		handler(req, res);
 		return;
 	}

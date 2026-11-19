@@ -5,6 +5,7 @@ import { authorize } from '$lib/server/authorize';
 import { auditRegistry } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 import { parseRegistryUrl, DOCKER_HUB_HOSTS } from '$lib/server/docker';
+import { isSafeRegistryHost } from '$lib/server/registry-auth';
 
 /**
  * @openapi
@@ -49,7 +50,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * body: {name:string, url:string, username:string, password:string, isDefault:boolean}
  * body-example: {"name":"GHCR","url":"https://ghcr.io","username":"deploy","password":"***","isDefault":true}
  * resp-200: {id:integer!, name:string!, url:string!, isDefault:boolean, hasCredentials:boolean!}
- * resp-400: Invalid id, or a duplicate registry name
+ * resp-400: Invalid id, a duplicate registry name, or a URL pointing at loopback/cloud-metadata (SSRF)
  * resp-403: Caller lacks the registries:edit permission
  * resp-404: No registry exists with that ID
  * resp-500: The update failed
@@ -83,6 +84,13 @@ export const PUT: RequestHandler = async (event) => {
 		const userLen = typeof trimmedUsername === 'string' ? trimmedUsername.length : 0;
 		const pwLen = typeof trimmedPassword === 'string' ? trimmedPassword.length : 0;
 		const { host: normalizedHost } = parseRegistryUrl(data.url);
+		// Mirror the create guard: a stored registry URL is fetched server-side when
+		// browsing, so an update must not be allowed to point it at loopback or cloud
+		// metadata either. A LAN host stays allowed.
+		const urlSafety = isSafeRegistryHost(normalizedHost);
+		if (!urlSafety.ok) {
+			return json({ error: `Registry URL is not allowed: ${urlSafety.reason}` }, { status: 400 });
+		}
 		const hubTag = DOCKER_HUB_HOSTS.has(normalizedHost) ? ' (docker-hub)' : '';
 		console.log(`[Registry] update id=${id}: url=${data.url} normalized=${normalizedHost}${hubTag} user(len=${userLen}) pw(len=${pwLen})`);
 		const registry = await updateRegistry(id, {

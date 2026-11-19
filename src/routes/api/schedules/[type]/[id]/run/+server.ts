@@ -4,28 +4,28 @@
  * POST /api/schedules/[type]/[id]/run - Trigger a manual execution
  *
  * Path params:
- *   - type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'deploy_log_reconcile'
+ *   - type: 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'deploy_log_reconcile'
  *   - id: schedule ID
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { triggerContainerUpdate, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune, triggerDeployLogReconcile } from '$lib/server/scheduler';
+import { triggerContainerUpdate, triggerScheduledContainerAction, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune, triggerDeployLogReconcile } from '$lib/server/scheduler';
 import { getBackupConfig, getBackupDestination } from '$lib/server/db';
 import { runScheduledBackup } from '$lib/server/scheduler/tasks/backup';
 import { runRepoPrune, runRepoCheck, runRepoVerify } from '$lib/server/scheduler/tasks/repo-maintenance';
 import { authorize } from '$lib/server/authorize';
-import { getAutoUpdateSettingById, getGitStack } from '$lib/server/db';
+import { getAutoUpdateSettingById, getGitStack, getScheduledContainerActionById } from '$lib/server/db';
 import { BACKUPS_ENABLED } from '$lib/server/features';
 
 /**
  * @openapi
  * summary: Manually trigger a single run of a schedule (outside its cron), by type and id
- * path: type:string! Schedule type (container_update, git_stack_sync, system_cleanup, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, deploy_log_reconcile)
+ * path: type:string! Schedule type (container_update, container_start, container_stop, git_stack_sync, system_cleanup, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, deploy_log_reconcile)
  * path: id:integer! Schedule id (semantics depend on type) (from GET /api/schedules)
  * resp-200: {success:boolean!, message:string!}
  * resp-400: Invalid schedule id/type, or the triggered task itself reported failure
- * resp-403: Permission denied
+ * resp-403: Permission denied (container_start/container_stop also need containers start/stop)
  * resp-404: Schedule, backup config, or backup destination not found (or backup feature disabled)
  * resp-500: Unexpected error while triggering the schedule
  */
@@ -66,6 +66,18 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 				const setting = await getAutoUpdateSettingById(scheduleId);
 				if (!setting) return json({ error: 'Schedule not found' }, { status: 404 });
 				scheduleEnvId = setting.environmentId;
+				break;
+			}
+			case 'container_start':
+			case 'container_stop': {
+				const row = await getScheduledContainerActionById(scheduleId);
+				if (!row) return json({ error: 'Schedule not found' }, { status: 404 });
+				scheduleEnvId = row.environmentId;
+				// Running it starts or stops the container, which needs that right too.
+				const actionDenied =
+					(await auth.requirePermission('schedules', 'run', row.environmentId)) ??
+					(await auth.requirePermission('containers', type === 'container_start' ? 'start' : 'stop', row.environmentId));
+				if (actionDenied) return actionDenied;
 				break;
 			}
 			case 'git_stack_sync': {
@@ -112,6 +124,10 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 		switch (type) {
 			case 'container_update':
 				result = await triggerContainerUpdate(scheduleId);
+				break;
+			case 'container_start':
+			case 'container_stop':
+				result = await triggerScheduledContainerAction(scheduleId, type === 'container_start' ? 'start' : 'stop');
 				break;
 			case 'git_stack_sync':
 				result = await triggerGitStackSync(scheduleId);

@@ -22,7 +22,9 @@ import {
 	getVersionPatternOverride,
 	DOCKHAND_LABELS,
 	isDigestWatchDisabledByLabel,
-	digestUpdateVisible
+	isCooldownSkippedByLabel,
+	digestUpdateVisible,
+	pinnedDigestReportVisible
 } from '../src/lib/server/container-labels';
 
 // ---------------------------------------------------------------------------
@@ -538,5 +540,53 @@ describe('compareContainerOrder', () => {
 
 	test('treats an unparseable value as unlabelled', () => {
 		expect(order([c('x', 'abc'), c('y', '1')])).toEqual(['y', 'x']);
+	});
+});
+
+describe('pinnedDigestReportVisible (#1780 - per-container label wins over the global setting)', () => {
+	test('no label falls through to the global setting', () => {
+		expect(pinnedDigestReportVisible(true, {})).toBe(true);
+		expect(pinnedDigestReportVisible(false, {})).toBe(false);
+		expect(pinnedDigestReportVisible(true, null)).toBe(true);
+		expect(pinnedDigestReportVisible(false, undefined)).toBe(false);
+	});
+
+	test('dockhand.pin.report=false silences the container even when global is ON', () => {
+		expect(pinnedDigestReportVisible(true, { 'dockhand.pin.report': 'false' })).toBe(false);
+	});
+
+	test('dockhand.pin.report=true re-enables the container even when global is OFF', () => {
+		expect(pinnedDigestReportVisible(false, { 'dockhand.pin.report': 'true' })).toBe(true);
+	});
+
+	test('an unparseable label value is ignored and the global decides', () => {
+		// parseLabelBool returns undefined for junk, so neither branch of the label wins.
+		expect(pinnedDigestReportVisible(true, { 'dockhand.pin.report': 'maybe' })).toBe(true);
+		expect(pinnedDigestReportVisible(false, { 'dockhand.pin.report': 'maybe' })).toBe(false);
+	});
+});
+
+describe('isCooldownSkippedByLabel (dockhand.skip.cooldown=true exempts from the minimum image age)', () => {
+	test('absent, empty, or missing labels keep the cooldown (safe default)', () => {
+		expect(isCooldownSkippedByLabel(undefined)).toBe(false);
+		expect(isCooldownSkippedByLabel(null)).toBe(false);
+		expect(isCooldownSkippedByLabel({})).toBe(false);
+	});
+
+	test('only an explicit true skips the cooldown', () => {
+		for (const value of ['true', 'TRUE', 'yes', '1']) {
+			expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': value })).toBe(true);
+		}
+	});
+
+	test('a falsey value does NOT skip (the cooldown stays on)', () => {
+		for (const value of ['false', 'no', '0']) {
+			expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': value })).toBe(false);
+		}
+	});
+
+	test('an unparseable value keeps the cooldown', () => {
+		expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': 'maybe' })).toBe(false);
+		expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': '' })).toBe(false);
 	});
 });

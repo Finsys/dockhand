@@ -31,7 +31,7 @@ import { KeyedSerializer, QueueTimeoutError } from '../keyed-serializer';
 import type { ProtonConfig, SecretProvider, TestConnectionResult } from './shared';
 import { stripSurroundingQuotes } from './shared';
 import { cliTimeoutMs, cliTimeoutMessage, MAX_TIMER_MS } from './cli-timeout-core';
-import { protonTokenFormatError, passCliFailureReason } from './proton-token-core';
+import { protonTokenFormatError, passCliFailureReason, loginStderrForLog } from './proton-token-core';
 
 const DEFAULT_PASS_CLI_PATH = '/usr/local/bin/pass-cli';
 // Read per call rather than at import, so a test (and an operator restarting the
@@ -237,6 +237,11 @@ async function executePassCli(
 					return;
 				}
 				if (code !== 0) {
+					if (limits.phase === 'login') {
+						// A cut tail starts mid-line, maybe mid-token, where the redaction cannot match: drop that line.
+						const tail = stderrBytes > STDERR_TAIL_CHARS ? stderrTail.slice(stderrTail.indexOf('\n') + 1) : stderrTail;
+						console.warn(`[ProtonPass] pass-cli login exited with code ${code}: ${loginStderrForLog(tail, limits.accessToken) || '(no stderr)'}`);
+					}
 					const reason = passCliFailureReason(stderrTail);
 					reject(
 						new PassCliError(

@@ -12,6 +12,7 @@
 	import MainContent from '$lib/components/main-content.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import WhatsNewModal from '$lib/components/WhatsNewModal.svelte';
+	import SecurityExposureModal from '$lib/components/SecurityExposureModal.svelte';
 	import { SidebarProvider, SidebarTrigger } from '$lib/components/ui/sidebar';
 	import { connectSSE, disconnectSSE } from '$lib/stores/events';
 	import { currentEnvironment, environments } from '$lib/stores/environment';
@@ -26,6 +27,7 @@
 	import { shouldShowWhatsNew } from '$lib/utils/version';
 	import { AlertTriangle, Search } from 'lucide-svelte';
 	import { getLocale } from '$lib/paraglide/runtime.js';
+	import { applySignedInLocale, signedInUserToCheck } from '$lib/i18n/locale-preference';
 	import { m } from '$lib/paraglide/messages.js';
 
 	// Check if current route is login page (no sidebar needed)
@@ -57,6 +59,7 @@
 
 	// What's New modal state
 	let showWhatsNewModal = $state(false);
+	let showExposureModal = $state(false);
 	let changelog = $state<Array<{ version: string; date: string; changes: Array<{ type: string; text: string }> }>>([]);
 	let lastSeenVersion = $state<string | null>(null);
 
@@ -79,6 +82,19 @@
 			// Use user-specific preferences if authenticated, otherwise global settings
 			const userId = $authStore.authEnabled && $authStore.user ? $authStore.user.id : undefined;
 			themeStore.init(userId);
+		}
+	});
+
+	// The language the signed-in user chose, applied with one reload when it differs from the rendered one
+	let languageCheckedFor: number | undefined;
+	$effect(() => {
+		const userId = signedInUserToCheck($authStore, languageCheckedFor);
+		if (userId === undefined) return;
+		languageCheckedFor = userId;
+		try {
+			applySignedInLocale(fetch, getLocale(), localStorage, () => location.reload());
+		} catch {
+			// A blocked store: nothing to apply.
 		}
 	});
 
@@ -114,6 +130,9 @@
 
 		// Check auth status
 		authStore.check();
+
+		// Warn if this instance is unsecured and publicly bound (server decides)
+		checkExposure();
 
 		// Redirect to the login page when the session expires mid-use (#1577): once auth is
 		// enabled, a stale session makes every /api/* call return 401, but the UI otherwise
@@ -182,6 +201,26 @@
 		showWhatsNewModal = false;
 		if (browser && currentVersion) {
 			localStorage.setItem('dockhand-whats-new-version', currentVersion);
+		}
+	}
+
+	// Warn once when this instance is listening beyond localhost with auth off and the
+	// Docker socket writable - the server decides, this only renders what it reports.
+	async function checkExposure() {
+		try {
+			const res = await fetch('/api/exposure-status');
+			if (!res.ok) return;
+			const { warn, dismissed } = await res.json();
+			if (warn && !dismissed) showExposureModal = true;
+		} catch {
+			// best-effort: a failed check never blocks the UI
+		}
+	}
+
+	function dismissExposure(dontShowAgain: boolean) {
+		showExposureModal = false;
+		if (dontShowAgain) {
+			fetch('/api/exposure-status', { method: 'POST' }).catch(() => {});
 		}
 	}
 
@@ -272,4 +311,8 @@
 		{changelog}
 		onDismiss={dismissWhatsNew}
 	/>
+{/if}
+
+{#if showExposureModal}
+	<SecurityExposureModal bind:open={showExposureModal} onDismiss={dismissExposure} />
 {/if}

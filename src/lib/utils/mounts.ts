@@ -282,3 +282,22 @@ export function standaloneContainers(
 		}))
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
+
+/**
+ * Keys of the binds whose host source is a single FILE in the stack folder, read from the
+ * host probe listing. Docker's inspect does not say file or directory; the probe does, but
+ * only for entries directly in the stack folder, so a bind elsewhere is not marked.
+ */
+export function fileBindKeys(
+	volumes: Array<{ key: string; mountType?: string; source?: string }>,
+	listing: { hostPath: string; entries: Array<{ name: string; type: string }> } | null | undefined
+): Set<string> {
+	const keys = new Set<string>();
+	if (!listing) return keys;
+	const dir = listing.hostPath.replace(/\/+$/, '');
+	const files = new Set(listing.entries.filter((e) => e.type === 'file').map((e) => `${dir}/${e.name}`));
+	for (const v of volumes) {
+		if (v.mountType === 'bind' && v.source && files.has(v.source.replace(/\/+$/, ''))) keys.add(v.key);
+	}
+	return keys;
+}

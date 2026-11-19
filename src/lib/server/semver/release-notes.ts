@@ -5,7 +5,7 @@
  * failure, so the modal always renders (it falls back to a plain link).
  */
 
-import { parseTag, compareParts } from './tag-parser';
+import { parseTag } from './tag-parser';
 import type { ReleaseSource } from './release-source';
 import { resolveReleaseSourceCandidates } from './release-source';
 import { isSafeNotificationUrl } from '../url-safety';
@@ -41,6 +41,13 @@ interface GithubRelease {
  * is the list of image tags (target + skipped). Flavor/prefix noise is ignored —
  * only the numeric tuple has to match, so `v16.4` matches `16.4-alpine`.
  */
+/** Two version tuples are the same number, trailing-zero tolerant (16.4 == 16.4.0). */
+function sameNumericVersion(a: number[], b: number[]): boolean {
+	const n = Math.max(a.length, b.length);
+	for (let i = 0; i < n; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return false;
+	return true;
+}
+
 export function matchReleasesToVersions(
 	releases: Pick<GithubRelease, 'tag_name' | 'name' | 'body' | 'published_at' | 'html_url'>[],
 	wanted: string[]
@@ -51,7 +58,11 @@ export function matchReleasesToVersions(
 		if (!parsedWanted) continue;
 		const match = releases.find((r) => {
 			const parsedRelease = parseTag(r.tag_name);
-			return parsedRelease && compareParts(parsedRelease, parsedWanted) === 0;
+			// Match on the NUMERIC version only: a release (`v16.4`) carries no build
+			// flavor, so `16.4-alpine` must still find it. Suffix ordering is for
+			// ranking two tags of one image, not for pairing a container tag to its
+			// release notes.
+			return parsedRelease && sameNumericVersion(parsedRelease.parts, parsedWanted.parts);
 		});
 		if (match) {
 			notes.push({
