@@ -18,7 +18,7 @@ function safeParse(json: string): unknown {
  * @openapi
  * summary: List the containers in an environment that have a pending image update recorded (requires the 'view' permission)
  * query: env:integer! The target environment ID (required) (from GET /api/environments)
- * resp-200: {environmentId:integer!, minimumReleaseAgeHours:integer!, pendingUpdates:array<{containerId:string!, containerName:string!, currentImage:string!, checkedAt:string!, hasImageUpdate:boolean!, pinnedToDigest:boolean!, newerVersion:object, releaseAgeRemainingHours:integer}>!}
+ * resp-200: {environmentId:integer!, minimumReleaseAgeHours:integer!, pendingUpdates:array<{containerId:string!, containerName:string!, currentImage:string!, checkedAt:string!, hasImageUpdate:boolean!, pinnedToDigest:boolean!, newerVersion:object, releaseAgeRemainingHours:integer, newImageVersion:string}>!}
  * resp-400: Environment ID is required
  * resp-403: Permission denied
  * resp-500: Failed to get the pending updates
@@ -60,7 +60,10 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				// from the env overview and the dashboard count.
 				pinnedToDigest: u.pinnedToDigest,
 				newerVersion: u.newerVersion ? safeParse(u.newerVersion) : null,
-				releaseAgeRemainingHours: u.releaseAgeRemainingHours ?? null
+				releaseAgeRemainingHours: u.releaseAgeRemainingHours ?? null,
+				// The version the digest update installs, from the new image's
+				// org.opencontainers.image.version label; null without one (#1501).
+				newImageVersion: u.newImageVersion ?? null
 			}))
 		});
 	} catch (error: any) {

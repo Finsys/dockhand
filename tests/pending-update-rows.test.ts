@@ -319,13 +319,13 @@ describe('withPreviousOnError (a failed check keeps what was known)', () => {
 	});
 	const fresh = (id: string, options: Partial<PersistableRow['options']>): PersistableRow => ({
 		containerId: id, containerName: id, imageName: 'img',
-		options: { hasImageUpdate: false, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, ...options }
+		options: { hasImageUpdate: false, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null, newImageVersionDigest: null, ...options }
 	});
 
 	test('an errored container keeps its known update', () => {
 		const rows = withPreviousOnError([], [prev({ hasImageUpdate: true })], new Set(['a']));
 		expect(rows).toEqual([{ containerId: 'a', containerName: 'app', imageName: 'nginx:latest',
-			options: { hasImageUpdate: true, releaseAgeRemainingHours: null, pinnedToDigest: false, newerVersion: null } }]);
+			options: { hasImageUpdate: true, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null, newImageVersionDigest: null, newerVersion: null } }]);
 	});
 
 	test('a container whose check succeeded gets exactly the fresh result, the old row is dropped', () => {
@@ -341,7 +341,7 @@ describe('withPreviousOnError (a failed check keeps what was known)', () => {
 			new Set(['a'])
 		);
 		expect(r).toHaveLength(1);
-		expect(r[0].options).toEqual({ hasImageUpdate: true, newerVersion: { tag: '3.0' }, releaseAgeRemainingHours: null, pinnedToDigest: false });
+		expect(r[0].options).toEqual({ hasImageUpdate: true, newerVersion: { tag: '3.0' }, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: null, newImageVersionDigest: null });
 	});
 
 	test('a kept pin and a kept hold stay what they were', () => {
@@ -363,5 +363,49 @@ describe('withPreviousOnError (a failed check keeps what was known)', () => {
 		const input = [fresh('a', {})];
 		withPreviousOnError(input, [prev({ hasImageUpdate: true })], new Set(['a']));
 		expect(input[0].options.hasImageUpdate).toBe(false);
+	});
+});
+
+describe('the version a floating-tag update installs (#1501)', () => {
+	const result = (over: Record<string, unknown> = {}) => ({
+		containerId: 'a', containerName: 'web', imageName: 'lissy93/dashy:latest', ...over
+	});
+
+	const digest = 'sha256:' + 'f'.repeat(64);
+
+	test('is recorded with the digest update it belongs to, and the digest it was read for', () => {
+		const rows = rowsToPersist([result({ hasUpdate: true, newImageVersion: '3.1.1', newImageVersionDigest: digest })]);
+		expect(rows[0].options).toMatchObject({ newImageVersion: '3.1.1', newImageVersionDigest: digest });
+	});
+
+	test('a read without a label is recorded too, so it is not read again', () => {
+		const rows = rowsToPersist([result({ hasUpdate: true, newImageVersionDigest: digest })]);
+		expect(rows[0].options).toMatchObject({ hasImageUpdate: true, newImageVersion: null, newImageVersionDigest: digest });
+	});
+
+	test('a read that failed records no digest, so the next check tries again', () => {
+		const rows = rowsToPersist([result({ hasUpdate: true })]);
+		expect(rows[0].options).toMatchObject({ hasImageUpdate: true, newImageVersion: null, newImageVersionDigest: null });
+	});
+
+	test('is not recorded for a container without a digest update', () => {
+		const rows = rowsToPersist([result({ hasUpdate: false, newerVersion: { tag: '2.0.0' }, newImageVersion: '3.1.1', newImageVersionDigest: digest })]);
+		expect(rows[0].options).toMatchObject({ newImageVersion: null, newImageVersionDigest: null });
+	});
+
+	test('survives a failed check with the rest of the digest half', () => {
+		const rows = withPreviousOnError([], [{
+			containerId: 'a', containerName: 'web', currentImage: 'lissy93/dashy:latest', hasImageUpdate: true,
+			newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: '3.1.1', newImageVersionDigest: digest
+		}], new Set(['a']));
+		expect(rows[0].options).toMatchObject({ newImageVersion: '3.1.1', newImageVersionDigest: digest });
+	});
+
+	test('reaches the UI keyed by container', () => {
+		const split = splitPendingUpdates({ pendingUpdates: [
+			{ containerId: 'a', hasImageUpdate: true, newImageVersion: '3.1.1' },
+			{ containerId: 'b', hasImageUpdate: true, newImageVersion: null }
+		] });
+		expect([...split.newImageVersions]).toEqual([['a', '3.1.1']]);
 	});
 });

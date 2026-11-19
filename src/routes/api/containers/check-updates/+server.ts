@@ -36,6 +36,13 @@ export interface UpdateCheckResult {
 	 * digest lives in the user's compose and replacing it is their edit to make.
 	 */
 	pinnedToDigest?: boolean;
+	/**
+	 * The new image's `org.opencontainers.image.version`, when the update found sets it:
+	 * for a floating tag, the version the update installs (#1501).
+	 */
+	newImageVersion?: string;
+	/** The digest that label was read for, recorded so later checks don't read it again. */
+	newImageVersionDigest?: string;
 }
 
 /**
@@ -227,7 +234,9 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					systemContainer,
 					updateDisabled,
 					newerVersion: newerVersion ?? undefined,
-					pinnedToDigest: result.pinnedToDigest
+					pinnedToDigest: result.pinnedToDigest,
+					newImageVersion: digestUpdate ? result.newImageVersion : undefined,
+					newImageVersionDigest: digestUpdate ? result.newImageVersionDigest : undefined
 				};
 			} catch (error: any) {
 				return {
