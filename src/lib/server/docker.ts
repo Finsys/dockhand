@@ -32,6 +32,7 @@ import { cancelReaderOnAbort } from './reader-abort-core';
 import { configuredMacAddress, endpointForRecreate } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
 import { mapContainerNetworks } from '$lib/utils/network-identity';
+import { endpointConfigForNetwork, primaryNetworkKey } from '$lib/utils/network-endpoint-core';
 import type { Environment } from './db';
 import { getSetting } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
@@ -1685,19 +1686,15 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	}
 
 	// Build the single EndpointsConfig entry for the primary (only for non-shared modes).
+	// Docker rejects a static IP and network-scoped aliases on the built-in bridge, so
+	// the helper drops them there even when the caller sends them.
 	if (primaryMode && !isSharedMode) {
-		const endpointConfig: any = {};
-		if (options.networkAliases?.length) {
-			endpointConfig.Aliases = options.networkAliases;
-		}
-		if (options.networkIpv4Address || options.networkIpv6Address) {
-			endpointConfig.IPAMConfig = {};
-			if (options.networkIpv4Address) endpointConfig.IPAMConfig.IPv4Address = options.networkIpv4Address;
-			if (options.networkIpv6Address) endpointConfig.IPAMConfig.IPv6Address = options.networkIpv6Address;
-		}
-		if (options.networkGwPriority !== undefined) {
-			endpointConfig.GwPriority = options.networkGwPriority;
-		}
+		const endpointConfig = endpointConfigForNetwork(primaryMode, {
+			aliases: options.networkAliases,
+			ipv4Address: options.networkIpv4Address,
+			ipv6Address: options.networkIpv6Address,
+			gwPriority: options.networkGwPriority
+		});
 		containerConfig.NetworkingConfig = {
 			EndpointsConfig: {
 				[primaryMode]: endpointConfig
@@ -1710,16 +1707,8 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	if (!isSharedMode && options.additionalNetworks?.length) {
 		for (const netName of options.additionalNetworks) {
 			if (netName === primaryMode) continue;  // primary lives in EndpointsConfig, not here
-			const netCfg = options.networkConfigs?.[netName];
-			const endpointConfig: any = {};
-			if (netCfg) {
-				if (netCfg.aliases?.length) endpointConfig.Aliases = netCfg.aliases;
-				if (netCfg.ipv4Address || netCfg.ipv6Address) {
-					endpointConfig.IPAMConfig = {};
-					if (netCfg.ipv4Address) endpointConfig.IPAMConfig.IPv4Address = netCfg.ipv4Address;
-					if (netCfg.ipv6Address) endpointConfig.IPAMConfig.IPv6Address = netCfg.ipv6Address;
-				}
-			}
+			const netCfg = options.networkConfigs?.[netName] ?? {};
+			const endpointConfig = endpointConfigForNetwork(netName, netCfg);
 			extraNetworks.push({ name: netName, config: endpointConfig });
 		}
 	}
@@ -3135,6 +3124,17 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 				}
 			: options.labels === null ? {} : existingOptions.labels
 	};
+
+	// `NetworkMode` can be a built-in mode while the only attachment is a real network:
+	// Podman names the default bridge "podman" in the inspect but "bridge" in
+	// NetworkMode, and a container whose bridge attachment was disconnected keeps
+	// NetworkMode "bridge" with its remaining network as the sole attachment. Keying the
+	// recreate by the mode would send that network's static IP and aliases for "bridge",
+	// which Docker rejects ("invalid endpoint settings").
+	mergedOptions.networkMode = primaryNetworkKey(
+		mergedOptions.networkMode ?? networkMode,
+		Object.keys(networks)
+	);
 
 	// 1. Stop old container
 	if (wasRunning) {
