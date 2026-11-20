@@ -394,6 +394,22 @@ export function withStackTags(ownTags: Tag[], stackTags: Tag[]): Tag[] {
 }
 
 /**
+ * Add a container's stack name as an inherited tag.
+ *
+ * It resolves through the catalogue like label tags do, so a matching user-defined
+ * tag keeps its configured colour and icon. The inherited marker keeps this
+ * synthetic association read-only in the container tag editor.
+ */
+export function withStackNameTag(
+	ownTags: Tag[],
+	stackName: string | null | undefined,
+	catalog: Tag[]
+): Tag[] {
+	if (!stackName) return ownTags;
+	return withStackTags(ownTags, mergeNamedTags([], [stackName], catalog));
+}
+
+/**
  * Every tag a container row shows: the ones assigned to it in Dockhand, the ones its own
  * `dockhand.tags` label names, and - when the containers page is set to inherit - the ones
  * assigned to its stack.
@@ -411,6 +427,7 @@ export function containerTags(
 		tagById: ReadonlyMap<number, Tag>;
 		catalog: Tag[];
 		inheritStackTags: boolean;
+		useStackAsTag?: boolean;
 		iconKnown?: IconNameCheck;
 	}
 ): Tag[] {
@@ -423,11 +440,14 @@ export function containerTags(
 		options.catalog,
 		options.iconKnown
 	);
-	if (!options.inheritStackTags) return own;
-
 	const stack = container.labels?.['com.docker.compose.project'];
 	if (!stack) return own;
-	return withStackTags(own, resolve(options.stackTagIds[stack]));
+	const inherited = options.inheritStackTags
+		? withStackTags(own, resolve(options.stackTagIds[stack]))
+		: own;
+	return options.useStackAsTag
+		? withStackNameTag(inherited, stack, options.catalog)
+		: inherited;
 }
 
 /**
