@@ -122,6 +122,38 @@ function firstString(obj: Record<string, unknown>, keys: readonly string[]): str
 	return null;
 }
 
+/** The title of a decrypted secret of any type (Environment Variables included), or null. */
+export function secretTitle(decrypted: unknown): string | null {
+	if (!decrypted || typeof decrypted !== 'object' || Array.isArray(decrypted)) return null;
+	return firstString(decrypted as Record<string, unknown>, [
+		...TITLE_FIELDS,
+		'environment_variables_title'
+	]);
+}
+
+/** A selector starting with this narrows a bulk pull to the listed secret titles. */
+const TITLE_SELECTOR_PREFIX = 'title:';
+
+/**
+ * The secret titles a bulk-pull selector narrows the pull to, or null for "every
+ * secret the key grants".
+ *
+ * Only an explicit `title:<name>[,<name>...]` selector narrows the pull. Every other
+ * value keeps pulling everything: the manual has always said the value is ignored
+ * ("any value turns the bulk pull on"), so existing stacks may hold any text there.
+ * An empty list after the prefix (`title:`) yields `[]` so the caller can reject it
+ * instead of silently pulling everything.
+ */
+export function bulkTitleFilter(selector: string | undefined | null): string[] | null {
+	const s = (selector ?? '').trim();
+	if (!s.toLowerCase().startsWith(TITLE_SELECTOR_PREFIX)) return null;
+	return s
+		.slice(TITLE_SELECTOR_PREFIX.length)
+		.split(',')
+		.map((t) => t.trim())
+		.filter((t) => t !== '');
+}
+
 /**
  * One named value from a decrypted secret, for a bulk pull.
  *
