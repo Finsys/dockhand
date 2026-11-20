@@ -88,6 +88,8 @@
 		mode: 'create' | 'edit';
 		/** Shows an "update available" note by the image field (edit mode only). */
 		hasImageUpdate?: boolean;
+		/** Re-pull the current image and recreate the container (edit mode only). */
+		onRepullImage?: () => void;
 		// Basic settings
 		name: string;
 		image: string;
@@ -179,6 +181,7 @@
 	let {
 		mode,
 		hasImageUpdate = false,
+		onRepullImage,
 		name = $bindable(),
 		image = $bindable(),
 		command = $bindable(),
@@ -900,6 +903,17 @@
 								<CircleArrowUp class="w-3.5 h-3.5" />
 								{m.containers_settings_update_available()}
 							</span>
+						{/if}
+						{#if onRepullImage}
+							<button
+								type="button"
+								class="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+								title={m.containers_settings_repull_image_hint()}
+								onclick={() => onRepullImage?.()}
+							>
+								<RotateCw class="w-3.5 h-3.5" />
+								{m.containers_settings_repull_image()}
+							</button>
 						{/if}
 					</div>
 					<Input

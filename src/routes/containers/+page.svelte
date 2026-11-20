@@ -2858,6 +2858,9 @@
 	onClose={() => { showEditModal = false; loadTags(envId); }}
 	onSuccess={fetchContainers}
 	onIconChanged={() => loadIconOverrides(envId)}
+	onRepullImage={$canAccess('containers', 'create')
+		? (id, name) => updateSingleContainer(id, name)
+		: undefined}
 />
 
 <ContainerInspectModal
