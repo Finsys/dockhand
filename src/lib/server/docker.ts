@@ -31,7 +31,7 @@ import { helperWaitDeadline, helperExitFromState, helperFailureDetail, needsDaem
 import { cancelReaderOnAbort } from './reader-abort-core';
 import { configuredMacAddress, endpointForRecreate } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
-import { mapContainerNetworks } from '$lib/utils/network-identity';
+import { mapContainerNetworks, endpointFromInspectForRecreate } from '$lib/utils/network-identity';
 import type { Environment } from './db';
 import { getSetting } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
@@ -2563,7 +2563,14 @@ export async function recreateContainerFromInspect(
 		// from the IP, the replacement gets a new address and the carried MAC then
 		// collides with whoever inherits the old one (#1618). Only a configured MAC, or one
 		// derived from an IP the endpoint pins, survives; otherwise Docker derives a fresh one.
-		const endpointConfig = endpointForRecreate({ ...initialNetworkConfig });
+		// Restore the compose service aliases and drop the old container's ids, as the
+		// single-update path does (#1928).
+		const endpointConfig = endpointForRecreate(
+			endpointFromInspectForRecreate({ ...initialNetworkConfig }, oldContainerId, {
+				project: config.Labels?.['com.docker.compose.project'],
+				service: config.Labels?.['com.docker.compose.service']
+			})
+		);
 		createConfig.NetworkingConfig = {
 			EndpointsConfig: {
 				[initialNetworkName]: endpointConfig
@@ -2603,7 +2610,7 @@ export async function recreateContainerFromInspect(
 			if (nc.NetworkID) {
 				try {
 					// Same rule as the creation endpoint above.
-					const settings = endpointForRecreate({ ...nc });
+					const settings = endpointForRecreate(endpointFromInspectForRecreate({ ...nc }, oldContainerId));
 					await connectContainerToNetworkRaw(nc.NetworkID, newContainerId, settings, envId);
 				} catch (netError: any) {
 					log?.(`Warning: Failed to connect to network "${netName}": ${netError.message}`);

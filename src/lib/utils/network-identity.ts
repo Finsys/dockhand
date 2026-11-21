@@ -13,21 +13,21 @@
 
 /** A network as the container inspect or the network list reports it. */
 export interface NetworkRef {
-	name: string;
-	/** Absent on older API versions, and on a name-only reference. */
-	id?: string | null;
+  name: string;
+  /** Absent on older API versions, and on a name-only reference. */
+  id?: string | null;
 }
 
 function normalizeId(id: unknown): string | null {
-	return typeof id === 'string' && id.trim() ? id.trim() : null;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
 }
 
 /** True when both refs are the same network, by id when known and by name otherwise. */
 export function isSameNetwork(a: NetworkRef, b: NetworkRef): boolean {
-	const idA = normalizeId(a.id);
-	const idB = normalizeId(b.id);
-	if (idA && idB) return idA === idB;
-	return a.name === b.name;
+  const idA = normalizeId(a.id);
+  const idB = normalizeId(b.id);
+  if (idA && idB) return idA === idB;
+  return a.name === b.name;
 }
 
 /**
@@ -42,20 +42,24 @@ export function isSameNetwork(a: NetworkRef, b: NetworkRef): boolean {
  * to infer from, so only the names are compared.
  */
 export function isPrimaryNetworkName(
-	netName: string,
-	networkMode: string,
-	attachedNames: readonly string[]
+  netName: string,
+  networkMode: string,
+  attachedNames: readonly string[],
 ): boolean {
-	if (netName === networkMode) return true;
-	if (networkMode === 'bridge' && (netName === 'bridge' || netName === 'default')) return true;
-	return attachedNames.length === 1 && attachedNames[0] === netName;
+  if (netName === networkMode) return true;
+  if (
+    networkMode === "bridge" &&
+    (netName === "bridge" || netName === "default")
+  )
+    return true;
+  return attachedNames.length === 1 && attachedNames[0] === netName;
 }
 
 /** The per-network settings a recreate has to carry over for one endpoint. */
 export interface EndpointSettings {
-	aliases?: string[];
-	ipv4Address?: string;
-	ipv6Address?: string;
+  aliases?: string[];
+  ipv4Address?: string;
+  ipv6Address?: string;
 }
 
 /**
@@ -67,19 +71,29 @@ export interface EndpointSettings {
  * empty entries.
  */
 export function endpointSettingsFromInspect(
-	endpoint: { Aliases?: string[] | null; DNSNames?: string[] | null; IPAMConfig?: { IPv4Address?: string; IPv6Address?: string } | null } | null | undefined,
-	containerId: string
+  endpoint:
+    | {
+        Aliases?: string[] | null;
+        DNSNames?: string[] | null;
+        IPAMConfig?: { IPv4Address?: string; IPv6Address?: string } | null;
+      }
+    | null
+    | undefined,
+  containerId: string,
 ): EndpointSettings | null {
-	if (!endpoint) return null;
-	const shortId = containerId.substring(0, 12);
-	const raw = (endpoint.Aliases?.length ? endpoint.Aliases : endpoint.DNSNames) || [];
-	const aliases = raw.filter((a) => a !== containerId && a !== shortId);
+  if (!endpoint) return null;
+  const shortId = containerId.substring(0, 12);
+  const raw =
+    (endpoint.Aliases?.length ? endpoint.Aliases : endpoint.DNSNames) || [];
+  const aliases = raw.filter((a) => a !== containerId && a !== shortId);
 
-	const settings: EndpointSettings = {};
-	if (aliases.length > 0) settings.aliases = aliases;
-	if (endpoint.IPAMConfig?.IPv4Address) settings.ipv4Address = endpoint.IPAMConfig.IPv4Address;
-	if (endpoint.IPAMConfig?.IPv6Address) settings.ipv6Address = endpoint.IPAMConfig.IPv6Address;
-	return Object.keys(settings).length > 0 ? settings : null;
+  const settings: EndpointSettings = {};
+  if (aliases.length > 0) settings.aliases = aliases;
+  if (endpoint.IPAMConfig?.IPv4Address)
+    settings.ipv4Address = endpoint.IPAMConfig.IPv4Address;
+  if (endpoint.IPAMConfig?.IPv6Address)
+    settings.ipv6Address = endpoint.IPAMConfig.IPv6Address;
+  return Object.keys(settings).length > 0 ? settings : null;
 }
 
 /**
@@ -90,38 +104,40 @@ export function endpointSettingsFromInspect(
  * when the caller has it: it supplies the primary's id so a Podman alias still matches.
  */
 export function additionalNetworkNames(
-	attached: NetworkRef[],
-	primaryName: string,
-	known: NetworkRef[] = []
+  attached: NetworkRef[],
+  primaryName: string,
+  known: NetworkRef[] = [],
 ): string[] {
-	const primary: NetworkRef = {
-		name: primaryName,
-		id: known.find((n) => n.name === primaryName)?.id ?? null
-	};
-	return attached.filter((net) => !isSameNetwork(net, primary)).map((net) => net.name);
+  const primary: NetworkRef = {
+    name: primaryName,
+    id: known.find((n) => n.name === primaryName)?.id ?? null,
+  };
+  return attached
+    .filter((net) => !isSameNetwork(net, primary))
+    .map((net) => net.name);
 }
 
 /** Everything a recreate needs to know about a container's network attachments. */
 export interface MappedNetworks {
-	/** The primary endpoint's aliases, or undefined when it has none worth sending. */
-	primaryAliases?: string[];
-	primaryIpv4Address?: string;
-	primaryIpv6Address?: string;
-	primaryGwPriority?: number;
-	/** The endpoint object the primary was read from, for the caller's MAC decision. */
-	primaryEndpoint?: unknown;
-	/** Attachments other than the primary, in inspect order. */
-	additionalNetworks: string[];
-	/** Per-network settings for those extras, keyed by network name. */
-	networkConfigs: Record<string, EndpointSettings>;
+  /** The primary endpoint's aliases, or undefined when it has none worth sending. */
+  primaryAliases?: string[];
+  primaryIpv4Address?: string;
+  primaryIpv6Address?: string;
+  primaryGwPriority?: number;
+  /** The endpoint object the primary was read from, for the caller's MAC decision. */
+  primaryEndpoint?: unknown;
+  /** Attachments other than the primary, in inspect order. */
+  additionalNetworks: string[];
+  /** Per-network settings for those extras, keyed by network name. */
+  networkConfigs: Record<string, EndpointSettings>;
 }
 
 /** One network's entry under NetworkSettings.Networks in a container inspect. */
 type InspectEndpoint = {
-	Aliases?: string[] | null;
-	DNSNames?: string[] | null;
-	IPAMConfig?: { IPv4Address?: string; IPv6Address?: string } | null;
-	GwPriority?: number;
+  Aliases?: string[] | null;
+  DNSNames?: string[] | null;
+  IPAMConfig?: { IPv4Address?: string; IPv6Address?: string } | null;
+  GwPriority?: number;
 } | null;
 
 /**
@@ -136,48 +152,51 @@ type InspectEndpoint = {
  * primary's aliases and IPs with its own.
  */
 export function mapContainerNetworks(
-	networks: Record<string, unknown>,
-	networkMode: string,
-	containerId: string,
-	compose?: { project?: string; service?: string }
+  networks: Record<string, unknown>,
+  networkMode: string,
+  containerId: string,
+  compose?: { project?: string; service?: string },
 ): MappedNetworks {
-	const attachedNames = Object.keys(networks ?? {});
-	const out: MappedNetworks = { additionalNetworks: [], networkConfigs: {} };
-	let primarySeen = false;
+  const attachedNames = Object.keys(networks ?? {});
+  const out: MappedNetworks = { additionalNetworks: [], networkConfigs: {} };
+  let primarySeen = false;
 
-	for (const [netName, netConfig] of Object.entries(networks ?? {})) {
-		const endpoint = netConfig as InspectEndpoint;
+  for (const [netName, netConfig] of Object.entries(networks ?? {})) {
+    const endpoint = netConfig as InspectEndpoint;
 
-		if (primarySeen || !isPrimaryNetworkName(netName, networkMode, attachedNames)) {
-			out.additionalNetworks.push(netName);
-			const settings = endpointSettingsFromInspect(endpoint, containerId);
-			if (settings) out.networkConfigs[netName] = settings;
-			continue;
-		}
+    if (
+      primarySeen ||
+      !isPrimaryNetworkName(netName, networkMode, attachedNames)
+    ) {
+      out.additionalNetworks.push(netName);
+      const settings = endpointSettingsFromInspect(endpoint, containerId);
+      if (settings) out.networkConfigs[netName] = settings;
+      continue;
+    }
 
-		primarySeen = true;
-		assignPrimary(out, endpoint, containerId, compose);
-	}
+    primarySeen = true;
+    assignPrimary(out, endpoint, containerId, compose);
+  }
 
-	return out;
+  return out;
 }
 
 /** Fill in the primary half of the result from its endpoint. */
 function assignPrimary(
-	out: MappedNetworks,
-	endpoint: InspectEndpoint,
-	containerId: string,
-	compose?: { project?: string; service?: string }
+  out: MappedNetworks,
+  endpoint: InspectEndpoint,
+  containerId: string,
+  compose?: { project?: string; service?: string },
 ): void {
-	out.primaryEndpoint = endpoint;
+  out.primaryEndpoint = endpoint;
 
-	const settings = endpointSettingsFromInspect(endpoint, containerId);
-	const aliases = composeAliases(settings?.aliases, compose);
+  const settings = endpointSettingsFromInspect(endpoint, containerId);
+  const aliases = composeAliases(settings?.aliases, compose);
 
-	if (aliases.length > 0) out.primaryAliases = aliases;
-	if (settings?.ipv4Address) out.primaryIpv4Address = settings.ipv4Address;
-	if (settings?.ipv6Address) out.primaryIpv6Address = settings.ipv6Address;
-	if (endpoint?.GwPriority) out.primaryGwPriority = endpoint.GwPriority;
+  if (aliases.length > 0) out.primaryAliases = aliases;
+  if (settings?.ipv4Address) out.primaryIpv4Address = settings.ipv4Address;
+  if (settings?.ipv6Address) out.primaryIpv6Address = settings.ipv6Address;
+  if (endpoint?.GwPriority) out.primaryGwPriority = endpoint.GwPriority;
 }
 
 /**
@@ -185,14 +204,42 @@ function assignPrimary(
  * daemon does not always list both, so make sure a recreate keeps them.
  */
 function composeAliases(
-	existing: string[] | undefined,
-	compose?: { project?: string; service?: string }
+  existing: string[] | undefined,
+  compose?: { project?: string; service?: string },
 ): string[] {
-	const aliases = existing ? [...existing] : [];
-	if (!compose?.project || !compose?.service) return aliases;
+  const aliases = existing ? [...existing] : [];
+  if (!compose?.project || !compose?.service) return aliases;
 
-	for (const alias of [compose.service, `${compose.project}-${compose.service}`]) {
-		if (!aliases.includes(alias)) aliases.push(alias);
-	}
-	return aliases;
+  for (const alias of [
+    compose.service,
+    `${compose.project}-${compose.service}`,
+  ]) {
+    if (!aliases.includes(alias)) aliases.push(alias);
+  }
+  return aliases;
+}
+
+/**
+ * An inspect endpoint made ready to send back when a container is recreated straight
+ * from its inspect (scheduled and batch updates). Like the single-update path, it drops
+ * the old container's ids from the aliases and adds the compose service aliases, so a
+ * service whose alias went missing gets it back (#1928). `DNSNames` is computed by the
+ * daemon and would carry the old container's short id along, so it is not sent.
+ */
+export function endpointFromInspectForRecreate<
+  T extends { Aliases?: string[] | null; DNSNames?: string[] | null },
+>(
+  endpoint: T,
+  containerId: string,
+  compose?: { project?: string; service?: string },
+): T {
+  const out = { ...endpoint };
+  delete out.DNSNames;
+  const aliases = composeAliases(
+    endpointSettingsFromInspect(endpoint, containerId)?.aliases,
+    compose,
+  );
+  if (aliases.length > 0) out.Aliases = aliases;
+  else delete out.Aliases;
+  return out;
 }
