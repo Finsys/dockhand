@@ -28,7 +28,7 @@ describe('credential lookups pass the repo', () => {
 		expect(route.split(decl)).toHaveLength(2);
 		// Taken once, before the containers are listed, not per container.
 		expect(route.indexOf(decl)).toBeLessThan(route.indexOf('const allContainers = await listContainers'));
-		expect(route).toContain('result.localDigests ?? [], staleCheck, listedAfter)');
+		expect(route).toContain('result.localDigests ?? [], runningImage, listedAfter)');
 		expect(src('src/lib/server/scheduler/tasks/env-update-check.ts')).toContain("triggeredBy === 'manual' ? userCheckListedAfter(startTime) : undefined");
 		const scanner = src('src/lib/server/scanner.ts').split('export async function checkScannerNewerVersions')[1];
 		expect(scanner).toContain('const listedAfter = userCheckListedAfter(Date.now());');
