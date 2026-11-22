@@ -5,42 +5,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import { extractEnvPlaceholderReferences } from '../src/lib/server/env-parser';
-
-// Replicate the extractComposeVars function from the validate endpoint
-function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
-	const required: string[] = [];
-	const optional: string[] = [];
-
-	const lines = yaml.split('\n');
-	for (const line of lines) {
-		const trimmedLine = line.trim();
-		if (trimmedLine.startsWith('#')) continue;
-
-		// Match ${VAR_NAME} (required) and ${VAR_NAME:-default} (optional)
-		const regex = /(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-?)[^}]*)?\}/g;
-		let match;
-		while ((match = regex.exec(line)) !== null) {
-			const varName = match[1];
-			const hasDefault = match[2] !== undefined;
-			if (hasDefault) {
-				if (!optional.includes(varName) && !required.includes(varName)) optional.push(varName);
-			} else {
-				const optIdx = optional.indexOf(varName);
-				if (optIdx !== -1) optional.splice(optIdx, 1);
-				if (!required.includes(varName)) required.push(varName);
-			}
-		}
-
-		// Match $VAR_NAME (simple substitution)
-		const simpleRegex = /(?<![A-Za-z0-9\$])\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
-		while ((match = simpleRegex.exec(line)) !== null) {
-			const varName = match[1];
-			if (!required.includes(varName) && !optional.includes(varName)) required.push(varName);
-		}
-	}
-
-	return { required: required.sort(), optional: optional.sort() };
-}
+import { extractComposeVars, REF_START, BARE_REF_START } from '../src/lib/utils/compose-var-ref';
 
 describe('extractComposeVars', () => {
 	describe('${VAR} syntax', () => {
@@ -55,12 +20,9 @@ describe('extractComposeVars', () => {
 			expect(result.required).not.toContain('IMAGE_NAME');
 		});
 
-		test('${VAR-default} without colon is not detected (known limitation)', () => {
-			// Docker Compose supports ${VAR-default} but our regex only handles ${VAR:-default}
-			// This is a known gap — the hyphen-only default syntax is rare
+		test('${VAR-default} without colon is optional', () => {
 			const result = extractComposeVars('image: ${IMAGE_NAME-nginx}');
-			expect(result.required).toHaveLength(0);
-			expect(result.optional).toHaveLength(0);
+			expect(result).toEqual({ required: [], optional: ['IMAGE_NAME'] });
 		});
 
 		test('multiple vars on one line', () => {
@@ -183,20 +145,26 @@ services:
 	});
 
 	describe('gutter marker regex (#1048)', () => {
-		// Simulates the client-side gutter marker pattern from CodeEditor.svelte
+		// The gutter patterns CodeEditor.svelte builds from REF_START / BARE_REF_START
 		function gutterMarkerMatches(line: string, markerName: string): boolean {
 			const varPatterns = [
-				new RegExp(`(?<!\\$)\\$\\{${markerName}\\}`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}:-`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}-`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}:\\?`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}\\?`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}:\\+`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}\\+`),
-				new RegExp(`(?<![A-Za-z0-9\\$])\\$${markerName}(?![a-zA-Z0-9_])`)
+				new RegExp(`${REF_START}\\{${markerName}\\}`),
+				new RegExp(`${REF_START}\\{${markerName}:-`),
+				new RegExp(`${REF_START}\\{${markerName}-`),
+				new RegExp(`${REF_START}\\{${markerName}:\\?`),
+				new RegExp(`${REF_START}\\{${markerName}\\?`),
+				new RegExp(`${REF_START}\\{${markerName}:\\+`),
+				new RegExp(`${REF_START}\\{${markerName}\\+`),
+				new RegExp(`${BARE_REF_START}${markerName}(?![a-zA-Z0-9_])`)
 			];
 			return varPatterns.some((p) => p.test(line));
 		}
+
+		test('a reference after whole $$ pairs matches, an escaped one does not', () => {
+			expect(gutterMarkerMatches('A: $$${abcdef1234}', 'abcdef1234')).toBe(true);
+			expect(gutterMarkerMatches('A: $$$abcdef1234', 'abcdef1234')).toBe(true);
+			expect(gutterMarkerMatches('A: $${abcdef1234}', 'abcdef1234')).toBe(false);
+		});
 
 		test('$VAR at start of value matches', () => {
 			expect(gutterMarkerMatches('PASSWORD: $abcdef1234', 'abcdef1234')).toBe(true);

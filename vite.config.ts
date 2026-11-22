@@ -528,7 +528,7 @@ const wsToEnvId = new Map<any, number>();
 function webSocketPlugin(): Plugin {
 	return {
 		name: 'websocket',
-		async configureServer() {
+		async configureServer(server) {
 			// Install the process crash guard before the dev WS server accepts anything,
 			// so dev matches prod (where it installs before listen via hooks.server.ts).
 			await import('./src/lib/server/crash-guard.js');
@@ -580,7 +580,14 @@ function webSocketPlugin(): Plugin {
 						ws.close(1011, 'service unavailable');
 						return;
 					}
-					const wsAuth = await authFn(req.headers);
+					// The dev page is served on the Vite port and opens this socket on WS_PORT, so its
+					// origin is judged against the page's address.
+					const pagePort = server.config.server.port || 5173;
+					const pageHost = String(req.headers.host || '').replace(new RegExp(`:${WS_PORT}$`), `:${pagePort}`);
+					const devHeaders: Record<string, unknown> = { ...req.headers, host: pageHost };
+					// A browser may mark the port split as same-site; the Origin/Host match decides here.
+					delete devHeaders['sec-fetch-site'];
+					const wsAuth = await authFn(devHeaders);
 					if (!wsAuth) {
 						ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' }));
 						ws.close(1008, 'unauthorized');
@@ -630,6 +637,14 @@ function webSocketPlugin(): Plugin {
 							ws.close(1008, 'exec permission denied');
 							return;
 						}
+					}
+
+					// Dockhand's own container holds its database and keys: administrators only.
+					const ownFn = (globalThis as any).__refusesOwnContainerForUser;
+					if (typeof ownFn === 'function' && await ownFn(wsAuth, decodeURIComponent(containerId), envId)) {
+						ws.send(JSON.stringify({ type: 'error', message: 'Only an administrator can open a terminal in the Dockhand container' }));
+						ws.close(1008, 'own container');
+						return;
 					}
 
 					const target = getDockerTarget(envId);

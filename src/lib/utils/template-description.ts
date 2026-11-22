@@ -26,15 +26,24 @@ export function isSafeLinkUrl(url: string): boolean {
 	return !/^[a-z][a-z0-9+.-]*:/.test(cleaned);
 }
 
-// Convert markdown links [text](url) to HTML <a> tags, strip other HTML.
+// Convert markdown links [text](url) to HTML <a> tags; everything else is escaped text.
+// Escaping (not just tag stripping) is what keeps an unterminated `<img src=x onerror=...`
+// from becoming markup: the tag stripper only removes complete `<...>` pairs.
 export function renderDescription(text: string): string {
-	return text
+	const plain = text
 		.replace(/<a\s+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi, '[$2]($1)') // normalize HTML links to markdown first
-		.replace(/<[^>]+>/g, '') // strip remaining HTML tags
-		.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) => {
-			const safeText = escapeHtml(label);
-			if (!isSafeLinkUrl(url)) return safeText; // drop unsafe scheme, keep the text
-			return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="text-primary hover:underline">${safeText}</a>`;
-		})
-		.trim();
+		.replace(/<[^>]+>/g, ''); // strip remaining HTML tags
+	let out = '';
+	let last = 0;
+	for (const m of plain.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)) {
+		out += escapeHtml(plain.slice(last, m.index));
+		const [, label, url] = m;
+		const safeText = escapeHtml(label);
+		out += isSafeLinkUrl(url)
+			? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="text-primary hover:underline">${safeText}</a>`
+			: safeText; // drop unsafe scheme, keep the text
+		last = m.index + m[0].length;
+	}
+	out += escapeHtml(plain.slice(last));
+	return out.trim();
 }
