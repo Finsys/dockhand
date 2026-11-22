@@ -3,8 +3,10 @@
  *
  * This is deliberately only an adapter around an operator-provided official
  * `bws` executable. Dockhand does not distribute the client and does not
- * implement Bitwarden's API or cryptography. The provider bulk-loads one
- * Project selected by UUID and optionally targets an EU or self-hosted server.
+ * implement Bitwarden's API or cryptography. The provider optionally targets an 
+ * EU or self-hosted server. Two resolution modes:
+ *   - Bulk pull: retrieves all secrets from a selected project at once
+ *   - Inline reference: `bws://UUID` retrieves a single secret by its UUID reference
  */
 
 import { spawn } from 'node:child_process';
@@ -12,7 +14,7 @@ import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { BitwardenConfig, SecretProvider, TestConnectionResult } from './shared';
-import { UnsupportedOperationError, assertSafeProviderHost } from './shared';
+import { assertSafeProviderHost, stripSurroundingQuotes } from './shared';
 
 const DEFAULT_BWS_PATH = '/usr/local/bin/bws';
 const VERSION_TIMEOUT_MS = 5_000;
@@ -23,6 +25,7 @@ const TEST_OUTPUT_LIMIT = 2 * 1024 * 1024;
 const SECRET_OUTPUT_LIMIT = 10 * 1024 * 1024;
 const STDERR_OUTPUT_LIMIT = 64 * 1024;
 
+const BWS_PREFIX = 'bws://';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -164,10 +167,6 @@ async function executeBws(
 					reject(failure);
 					return;
 				}
-				if (code !== 0) {
-					reject(new BwsAdapterError('Bitwarden bws command failed'));
-					return;
-				}
 				resolve(Buffer.concat(stdoutChunks, stdoutBytes));
 			});
 		});
@@ -213,6 +212,9 @@ async function runJsonArray(args: string[], limits: CommandLimits): Promise<unkn
 	let output: Buffer | undefined;
 	try {
 		output = await runBws(args, limits);
+		if (output.length === 0) {
+			throw new BwsAdapterError('Bitwarden bws command failed');
+		}
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(output.toString('utf8'));
@@ -223,6 +225,27 @@ async function runJsonArray(args: string[], limits: CommandLimits): Promise<unkn
 			throw new BwsAdapterError('Bitwarden bws returned an invalid JSON response');
 		}
 		return parsed;
+	} finally {
+		output?.fill(0);
+	}
+}
+
+async function runJsonObject(args: string[], limits: CommandLimits): Promise<Record<string, unknown>> {
+	let output: Buffer | undefined;
+	try {
+		output = await runBws(args, limits);
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(output.toString('utf8'));
+		} catch {
+			// If JSON parsing fails (e.g., 404 with no valid output), return empty object
+			// to allow the caller to handle the missing secret gracefully
+			return {};
+		}
+		if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+			throw new BwsAdapterError('Bitwarden bws returned an invalid JSON response');
+		}
+		return parsed as Record<string, unknown>;
 	} finally {
 		output?.fill(0);
 	}
@@ -322,14 +345,26 @@ function secretRecord(payload: unknown[]): Record<string, string> {
 	return result;
 }
 
+function parseReference(value: string): string {
+	const ref = value.trim()
+	if (!ref.startsWith(BWS_PREFIX)) {
+		throw new BwsAdapterError('Invalid prefix for reference');
+	}
+	const reference = ref.slice(BWS_PREFIX.length);
+	if (!UUID_RE.test(reference)) {
+		throw new BwsAdapterError('Invalid UUID for reference');
+	}
+	return reference;
+}
+
 export const bitwardenProvider: SecretProvider<BitwardenConfig> = {
 	type: 'bitwarden',
 	label: 'Bitwarden Secrets Manager',
-	supportsReferences: false,
+	supportsReferences: true,
 	supportsBulk: true,
 
-	isReference(_value: unknown): _value is string {
-		return false;
+	isReference(value: unknown): value is string {
+		return typeof value === 'string' && stripSurroundingQuotes(value).startsWith(BWS_PREFIX);
 	},
 
 	async testConnection(config: BitwardenConfig): Promise<TestConnectionResult> {
@@ -350,10 +385,44 @@ export const bitwardenProvider: SecretProvider<BitwardenConfig> = {
 		}
 	},
 
-	async resolveSecretReferences(): Promise<Map<string, string>> {
-		throw new UnsupportedOperationError(
-			'Bitwarden Secrets Manager does not support inline references; use a Project bulk selector.'
-		);
+	async resolveSecretReferences(config: BitwardenConfig, refs: string[]): Promise<Map<string, string>> {
+		try {
+			const token = accessToken(config);
+			const server = serverUrl(config);
+			const unique = [...new Set(refs)];
+			const resolved = new Map<string, string>();
+			for (const raw of unique) {
+				let ref: string;
+				try {
+					ref = parseReference(raw);
+				} catch {
+					console.warn(`Failed to parse bitwarden reference "${raw}"`);
+					continue; // malformed reference: leave the literal in place
+				}
+				const payload = await runJsonObject(
+					['secret', 'get', ref, '--output', 'json', '--color', 'no'],
+					{
+						timeoutMs: COMMAND_TIMEOUT_MS,
+						stdoutBytes: SECRET_OUTPUT_LIMIT,
+						stderrBytes: STDERR_OUTPUT_LIMIT,
+						accessToken: token,
+						serverUrl: server
+					}
+				);
+				if (Object.keys(payload).length === 0) {
+					console.warn(`Bitwarden failed to fetch secret for reference "${raw}"`);
+					continue; // secret not found or invalid format
+				}
+				const value = (payload as Record<string, unknown>)['value'];
+				if (typeof value === 'string') {
+					resolved.set(raw, value);
+				}
+			}
+			return resolved;
+		} catch (error: unknown) {
+			if (error instanceof BwsAdapterError) throw error;
+			throw new BwsAdapterError(sanitizedError(error));
+		}
 	},
 
 	async resolveBulk(config: BitwardenConfig, selector: string): Promise<Record<string, string>> {
