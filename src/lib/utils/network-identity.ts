@@ -181,6 +181,39 @@ function assignPrimary(
 }
 
 /**
+ * A raw inspect endpoint with the compose service alias put back, for a recreate that
+ * passes the endpoint through as-is. Other containers of the stack reach this one by its
+ * service name, so a recreate must not carry a missing alias forward.
+ */
+export function withComposeAliases<T extends { Aliases?: string[] | null }>(
+	endpoint: T,
+	labels?: Record<string, string> | null
+): T {
+	const project = labels?.['com.docker.compose.project'];
+	const service = labels?.['com.docker.compose.service'];
+	if (!project || !service) return endpoint;
+	// Only the alias compose itself sets: the update must leave the endpoint as compose made it.
+	const aliases = endpoint.Aliases ? [...endpoint.Aliases] : [];
+	if (!aliases.includes(service)) aliases.push(service);
+	return { ...endpoint, Aliases: aliases };
+}
+
+/**
+ * One endpoint of a recreate: the primary network gets the compose service alias back,
+ * as the single update does; any other network (one connected by hand, a shared one) is
+ * left as it was, so no service alias lands where compose would not put it.
+ */
+export function recreateEndpointAliases<T extends { Aliases?: string[] | null }>(
+	netName: string,
+	endpoint: T,
+	networkMode: string,
+	attachedNames: readonly string[],
+	labels?: Record<string, string> | null
+): T {
+	return isPrimaryNetworkName(netName, networkMode, attachedNames) ? withComposeAliases(endpoint, labels) : endpoint;
+}
+
+/**
  * A compose container is reached by its service name and project-service name; the
  * daemon does not always list both, so make sure a recreate keeps them.
  */
