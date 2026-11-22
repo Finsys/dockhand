@@ -4,6 +4,7 @@ import { authorize } from '$lib/server/authorize';
 import { parseRegistryUrl, getRegistryAuthHeader, DOCKER_HUB_HOSTS } from '$lib/server/docker';
 import { getRegistry } from '$lib/server/db';
 import { isSafeNotificationUrl } from '$lib/server/url-safety';
+import { resolvedHostReason } from '$lib/server/notifications/shared';
 
 /**
  * Test registry connectivity and credentials.
@@ -55,24 +56,39 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	// but an inline url is caller-supplied. A registry legitimately lives on a LAN
 	// (self-hosted Harbor/registry:5000), so allow private ranges but block loopback
 	// + cloud metadata + reserved so this tester can't probe the control plane / IMDS.
-	if (!data.registryId) {
-		const withScheme = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-		const safety = isSafeNotificationUrl(withScheme);
-		if (!safety.ok) {
-			return json({ success: false, connectivity: false, message: `Registry host not allowed: ${safety.reason}` });
-		}
-	}
-
+	// An inline url is judged on apiBase itself, the origin both requests below dial, and
+	// they do not follow a redirect to a host nobody checked. A saved registry keeps the
+	// policy the registry engine applies to it everywhere else.
 	const parsed = parseRegistryUrl(url);
 	const apiBase = `${parsed.protocol}://${parsed.host}`;
+	const inline = !data.registryId;
+	if (inline) {
+		const safety = isSafeNotificationUrl(apiBase);
+		const reason = safety.ok ? await resolvedHostReason(new URL(apiBase).hostname) : safety.reason;
+		if (reason) {
+			return json({ success: false, connectivity: false, message: `Registry host not allowed: ${reason}` });
+		}
+	}
+	const redirect: RequestRedirect = inline ? 'manual' : 'follow';
 
 	try {
 		// Step 1: connectivity — can we reach /v2/ at all?
 		const pingResp = await fetch(`${apiBase}/v2/`, {
 			method: 'GET',
 			headers: { 'User-Agent': 'Dockhand/1.0' },
+			redirect,
 			signal: AbortSignal.timeout(10_000)
 		});
+
+		if (pingResp.status >= 300 && pingResp.status < 400) {
+			let target = '';
+			try { target = ` to ${new URL(pingResp.headers.get('location') ?? '', apiBase).origin}`; } catch {}
+			return json({
+				success: false,
+				connectivity: false,
+				message: `Registry redirects (HTTP ${pingResp.status})${target}`
+			});
+		}
 
 		const hasAuth = pingResp.status === 401;
 		const isOpen = pingResp.ok;
@@ -109,6 +125,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 					'User-Agent': 'Dockhand/1.0',
 					'Authorization': authHeader
 				},
+				redirect,
 				signal: AbortSignal.timeout(10_000)
 			});
 

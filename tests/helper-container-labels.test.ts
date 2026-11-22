@@ -2,7 +2,7 @@
  * Dockhand's own short-lived helpers (image scanners and their version checks,
  * backup/restore helpers, probes) are silent and hidden: GET /api/containers
  * filters dockhand.hidden=true, so a list taken while a scan runs does not show
- * the scanner, to the UI or to an API client (#1911).
+ * the scanner, to the UI or to an API client.
  *
  * Both helper launchers are checked against the real source, since docker.ts
  * cannot be imported here (better-sqlite3 does not load under the test runner).

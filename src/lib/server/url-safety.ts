@@ -204,13 +204,15 @@ export function ipCategory(host: string): IpCategory | null {
 	// IPv6 loopback / unspecified, then link-local / unique-local (private).
 	if (h === '::1') return 'loopback';
 	if (h === '::' || h === '::0') return 'reserved'; // unspecified / all-interfaces
+	const x6 = expandV6(h);
+	// AWS IMDS over IPv6, inside the unique-local range judged private below.
+	if (x6 && x6.join(':') === [0xfd00, 0xec2, 0, 0, 0, 0, 0, 0x254].join(':')) return 'metadata';
 	// Require a colon so real IPv6 unique-local/link-local literals match but public
 	// DNS names starting "fc"/"fd" (fcm.googleapis.com, fdroid.link) do not.
 	if (h.startsWith('fe80:') || /^f[cd][0-9a-f]{0,2}:/.test(h)) return 'private';
 	// NAT64 local prefix 64:ff9b:1::/48 (RFC 8215) embeds its v4 around the u-byte
 	// (RFC 6052 2.2), not in the last 32 bits - awkward to decode and with no
 	// legitimate use as a user-supplied target, so block the whole prefix outright.
-	const x6 = expandV6(h);
 	if (x6 && x6[0] === 0x64 && x6[1] === 0xff9b && x6[2] === 1) return 'reserved';
 	// IPv4-mapped/compatible IPv6 — judge the embedded v4 (see embeddedV4).
 	const v4 = canonicalV4(embeddedV4(h) ?? h);

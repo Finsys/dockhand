@@ -77,7 +77,7 @@
 		// Set dark mode class based on saved preference or system preference
 		// This must happen before applyTheme since applyTheme reads the dark class
 		const savedTheme = localStorage.getItem('theme');
-		const prefersDark = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+		const prefersDark = savedTheme === 'dark' || (savedTheme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 		if (prefersDark) {
 			document.documentElement.classList.add('dark');
 		} else {

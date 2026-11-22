@@ -44,6 +44,8 @@ import {
 import { Client as LdapClient } from 'ldapts';
 import { resolveSessionTimeout, cookieMaxAge } from '$lib/utils/session-timeout';
 import { escapeLdapFilterValue } from './ldap-filter';
+import { ldapTlsOptions } from './ldap-tls';
+import { usableLdapConfig } from './login-provider-core';
 import { isEnterprise, isLicenseLapsed } from './license';
 import { secureRandomBytes } from './crypto-fallback';
 import { invalidateTokenCacheForUser } from './token-cache';
@@ -634,10 +636,7 @@ export async function testLdapConnection(configId: number): Promise<LdapTestResu
 
 	const client = new LdapClient({
 		url: config.serverUrl,
-		tlsOptions: config.tlsEnabled ? {
-			rejectUnauthorized: !config.tlsCa, // If CA provided, validate; otherwise trust
-			ca: config.tlsCa ? [config.tlsCa] : undefined
-		} : undefined
+		tlsOptions: config.tlsEnabled ? ldapTlsOptions(config.tlsCa) : undefined
 	});
 
 	try {
@@ -672,8 +671,9 @@ export async function authenticateLdap(
 	configId?: number
 ): Promise<LoginResult & { providerName?: string }> {
 	// Get LDAP configurations
+	// A config named by id must be enabled too, the same as the ones tried in turn.
 	const configs = configId
-		? [await getLdapConfig(configId)].filter(Boolean) as LdapConfig[]
+		? usableLdapConfig(await getLdapConfig(configId) as LdapConfig | null)
 		: await getEnabledLdapConfigs();
 
 	if (configs.length === 0) {
@@ -706,10 +706,7 @@ async function tryLdapAuth(
 ): Promise<LoginResult> {
 	const client = new LdapClient({
 		url: config.serverUrl,
-		tlsOptions: config.tlsEnabled ? {
-			rejectUnauthorized: !config.tlsCa,
-			ca: config.tlsCa ? [config.tlsCa] : undefined
-		} : undefined
+		tlsOptions: config.tlsEnabled ? ldapTlsOptions(config.tlsCa) : undefined
 	});
 
 	try {
@@ -750,10 +747,7 @@ async function tryLdapAuth(
 		// Create new client and try to bind as the user (authentication)
 		const userClient = new LdapClient({
 			url: config.serverUrl,
-			tlsOptions: config.tlsEnabled ? {
-				rejectUnauthorized: !config.tlsCa,
-				ca: config.tlsCa ? [config.tlsCa] : undefined
-			} : undefined
+			tlsOptions: config.tlsEnabled ? ldapTlsOptions(config.tlsCa) : undefined
 		});
 
 		try {
@@ -881,10 +875,7 @@ async function checkLdapGroupMembership(
 ): Promise<boolean> {
 	const client = new LdapClient({
 		url: config.serverUrl,
-		tlsOptions: config.tlsEnabled ? {
-			rejectUnauthorized: !config.tlsCa,
-			ca: config.tlsCa ? [config.tlsCa] : undefined
-		} : undefined
+		tlsOptions: config.tlsEnabled ? ldapTlsOptions(config.tlsCa) : undefined
 	});
 
 	try {

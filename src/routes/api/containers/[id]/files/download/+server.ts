@@ -5,6 +5,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
 import { extractFirstFileFromTar } from '$lib/server/tar-extract';
 import { attachmentContentDisposition } from '$lib/server/content-disposition';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * GET /api/containers/{id}/files/download - Download a path from a container as an archive
@@ -17,7 +18,7 @@ import type { RequestHandler } from './$types';
  * query: format:string Archive format, "tar" (default) or "tar.gz"
  * resp-200: Archive stream (application/x-tar or application/gzip) as a file attachment
  * resp-400: Path is missing
- * resp-403: Permission denied (requires containers:exec, like reading a file)
+ * resp-403: Permission denied (requires containers:exec, like reading a file), or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: File not found
  * resp-500: Failed to download the file
  */
@@ -39,6 +40,12 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			status: 403,
 			headers: { 'Content-Type': 'application/json' }
 		});
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	if (!path) {
@@ -106,7 +113,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			}
 		}
 
-		return new Response(body, { headers });
+		// A Buffer-backed Uint8Array is a valid body; the DOM lib types only accept an ArrayBuffer-backed one.
+		return new Response(body as BodyInit, { headers });
 	} catch (error: any) {
 		console.error('Error downloading container file:', error?.message || error);
 

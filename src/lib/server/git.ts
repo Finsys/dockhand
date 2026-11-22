@@ -24,7 +24,7 @@ import { createRunRecorder } from './deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from './deploy-run-record-core';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials, incompatibleCredentialReason } from './git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, readRepoFile, stripUrlCredentials, incompatibleCredentialReason } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
 import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX, isConcurrentSyncSkip, SYNC_IN_PROGRESS_ERROR } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
@@ -2300,7 +2300,8 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		// Validate containment now (throws on traversal) before any read; the base .env
 		// path itself is derived via repoBaseEnvPath below.
 		repoFilePath(tempDir, composePath, 'Compose path');
-		const safeEnvFilePath = envFilePath ? repoFilePath(tempDir, envFilePath, 'Env file path') : null;
+		// Early rejection of a traversing path; the read below validates again after the clone.
+		if (envFilePath) repoFilePath(tempDir, envFilePath, 'Env file path');
 		assertSafeGitRef(branch);
 		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredentialData | null);
 
@@ -2349,13 +2350,12 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 			console.log(`${logPrefix} No .env file at ${baseEnvPath}`);
 		}
 
-		// Read additional env file if specified — uses the VALIDATED path
-		// (already checked to be inside the temp dir).
-		if (safeEnvFilePath) {
-			const additionalEnvPath = safeEnvFilePath;
-			if (existsSync(additionalEnvPath)) {
-				console.log(`${logPrefix} Reading additional env file: ${additionalEnvPath}`);
-				const content = readFileSync(additionalEnvPath, 'utf-8');
+		// Read additional env file if specified, re-validated against the clone now on disk:
+		// the check before the clone could not see a committed symlink.
+		if (envFilePath) {
+			const content = readRepoFile(tempDir, envFilePath, 'Env file path');
+			if (content !== null) {
+				console.log(`${logPrefix} Reading additional env file: ${envFilePath}`);
 				const additionalVars = envFileFormVars(content);
 				for (const [key, value] of Object.entries(additionalVars)) {
 					vars[key] = value;
@@ -2363,7 +2363,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 				}
 				console.log(`${logPrefix} Found ${Object.keys(additionalVars).length} vars in ${envFilePath}`);
 			} else {
-				console.log(`${logPrefix} Additional env file not found: ${additionalEnvPath}`);
+				console.log(`${logPrefix} Additional env file not found: ${envFilePath}`);
 			}
 		}
 
