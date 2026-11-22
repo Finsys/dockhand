@@ -74,6 +74,7 @@ import { compareContainerOrder } from './container-labels';
 import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
 import { pendingRowsToClear } from './pending-updates-core';
 import { buildDockhandOverrideFile } from './dockhand-override-file';
+import { withComposeRateLimitRetry } from './pull-retry';
 
 // =============================================================================
 // TYPES
@@ -3496,18 +3497,22 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		console.log(`${logPrefix} Deploy plan: ${deployPlan(build, build && pullBase, noBuildCache, pullPolicy)}`);
 		console.log(`${logPrefix} Calling executeComposeCommand...`);
 		// `--no-cache` and `--pull` are `build` flags that `up` lacks, so either one builds in its own step.
+		// A step the registry rate-limits (GHCR throttles when many stacks pull at once) is
+		// retried with the update check's waits instead of failing the deploy.
+		const retryRateLimited = <T extends StackOperationResult>(operation: string, step: () => Promise<T>) =>
+			withComposeRateLimitRetry(step, { log: warn, label: `stack ${name} (${operation})` });
 		const result = runsSeparateBuild(build, pullBase, noBuildCache)
 			? await pullBuildThenUp(
 					pullPolicy,
 					// The Hawser agent's up has no --no-build and its pull takes no flags.
 					(operation, opts) =>
-						executeComposeCommand(operation, stepOptions(cmdOptions, opts), compose, composeEnvVars, secretVars, onLine),
+						retryRateLimited(operation, () => executeComposeCommand(operation, stepOptions(cmdOptions, opts), compose, composeEnvVars, secretVars, onLine)),
 					warn
 				)
 			: await pullThenUp(
 					pullPolicy,
 					(operation, upPullPolicy) =>
-						executeComposeCommand(operation, { ...cmdOptions, pullPolicy: upPullPolicy }, compose, composeEnvVars, secretVars, onLine),
+						retryRateLimited(operation, () => executeComposeCommand(operation, { ...cmdOptions, pullPolicy: upPullPolicy }, compose, composeEnvVars, secretVars, onLine)),
 					warn
 				);
 		// F4 fix: `secretVars` here is POST-resolveProviderEnvVars (line ~3059 above) --

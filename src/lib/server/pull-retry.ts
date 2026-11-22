@@ -90,6 +90,38 @@ export async function withPullRetry<T>(
 	}
 }
 
+/** A compose step's failed result, carried through withPullRetry as an error. */
+class RateLimitedStep<R> extends Error {
+	constructor(readonly result: R, message: string) {
+		super(message);
+	}
+}
+
+/**
+ * Run one docker compose step (pull or up), retrying it while the registry rate-limits
+ * its image pulls, with the same waits as withPullRetry. Compose reports the refusal in
+ * its result rather than throwing, so a failed result naming `toomanyrequests` is what
+ * retries; any other result, and the last rate-limited one, is returned as it came.
+ */
+export async function withComposeRateLimitRetry<R extends { success: boolean; error?: string; output?: string }>(
+	step: () => Promise<R>,
+	opts: { delays?: number[]; sleep?: (ms: number) => Promise<void>; log?: (message: string) => unknown; label?: string } = {}
+): Promise<R> {
+	try {
+		return await withPullRetry(async () => {
+			const result = await step();
+			const text = `${result.error ?? ''}\n${result.output ?? ''}`;
+			// The registry's own error code only: a build step's output also carries its RUN
+			// lines, where a "429 Too Many Requests" from a package mirror is not a pull refusal.
+			if (!result.success && /toomanyrequests/i.test(text)) throw new RateLimitedStep(result, text);
+			return result;
+		}, opts);
+	} catch (error) {
+		if (error instanceof RateLimitedStep) return error.result as R;
+		throw error;
+	}
+}
+
 /** Whether a registry check failed because the registry rate limited it, also inside a wrapping message. */
 export function isRateLimitedCheck(error: string | null | undefined): boolean {
 	return !!error?.includes(RATE_LIMITED_PREFIX);
