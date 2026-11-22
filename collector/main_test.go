@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"math"
 	"testing"
 	"time"
@@ -130,18 +131,23 @@ func TestPollWindowStartCoversALongIntervalWhole(t *testing.T) {
 	}
 }
 
-func TestPollWindowStartFirstPollReadsOneInterval(t *testing.T) {
+func TestPollWindowStartFirstPollReadsAtMostThirtySeconds(t *testing.T) {
+	// A fresh collector (a restart) must not send again what was recorded just
+	// before it, so the first window is the shorter of the interval and 30s.
 	now := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
-	if got := pollWindowStart(time.Time{}, now, 90*time.Second); !got.Equal(now.Add(-90 * time.Second)) {
-		t.Fatalf("since = %v, want one interval back", got)
+	if got := pollWindowStart(time.Time{}, now, 5*time.Minute); !got.Equal(now.Add(-firstPollLookBack)) {
+		t.Fatalf("since = %v, want %v back", now.Sub(got), firstPollLookBack)
+	}
+	if got := pollWindowStart(time.Time{}, now, 20*time.Second); !got.Equal(now.Add(-20 * time.Second)) {
+		t.Fatalf("since = %v, want the shorter interval back", now.Sub(got))
 	}
 }
 
 func TestPollWindowStartDoesNotReplayALongOutage(t *testing.T) {
 	last := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
 	now := last.Add(maxPollCatchUp + time.Second)
-	if got := pollWindowStart(last, now, 60*time.Second); !got.Equal(now.Add(-60 * time.Second)) {
-		t.Fatalf("since = %v, want one interval back after a long gap", got)
+	if got := pollWindowStart(last, now, 60*time.Second); !got.Equal(now.Add(-firstPollLookBack)) {
+		t.Fatalf("since = %v, want a fresh window after a long gap", got)
 	}
 }
 
@@ -158,5 +164,52 @@ func TestDockerTimestamp(t *testing.T) {
 	ts := time.Unix(1794832642, 5).UTC()
 	if got := dockerTimestamp(ts); got != "1794832642.000000005" {
 		t.Fatalf("dockerTimestamp = %q", got)
+	}
+}
+
+func TestPollUntilSurvivesReconfigureAndIsDroppedOnRemove(t *testing.T) {
+	// configure() rebuilds every environment whenever any one changes; the window end
+	// must outlive that, or the next poll replays what was already sent.
+	m := newManager(json.NewEncoder(io.Discard))
+	// Poll mode: in stream mode the started goroutine rightly drops the entry. Here it
+	// fails to reach the socket and records nothing.
+	m.eventMode = "poll"
+	cfg := InMessage{Type: "configure", EnvID: 7, Name: "t", ConnectionType: "socket",
+		Config: &EnvConfig{Type: "socket", SocketPath: "/nonexistent/docker.sock"}}
+	m.configure(cfg)
+	until := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	m.recordPollEnd(7, until)
+	m.configure(cfg)
+	m.mu.Lock()
+	got := m.pollUntil[7]
+	m.mu.Unlock()
+	if !got.Equal(until) {
+		t.Fatalf("pollUntil = %v after reconfigure, want %v", got, until)
+	}
+	m.remove(7)
+	m.mu.Lock()
+	_, kept := m.pollUntil[7]
+	m.mu.Unlock()
+	if kept {
+		t.Fatal("pollUntil kept for a removed environment")
+	}
+}
+
+func TestRecordPollEndOnlyMovesForwardAndOnlyForAKnownEnvironment(t *testing.T) {
+	m := newManager(json.NewEncoder(io.Discard))
+	m.envs[3] = &environment{id: 3, cancel: func() {}}
+	later := time.Date(2026, 11, 16, 10, 5, 0, 0, time.UTC)
+	m.recordPollEnd(3, later)
+	m.recordPollEnd(3, later.Add(-time.Minute)) // a late, cancelled goroutine
+	if got := m.pollUntil[3]; !got.Equal(later) {
+		t.Fatalf("pollUntil moved back to %v", got)
+	}
+	m.recordPollEnd(3, time.Time{})
+	if got := m.pollUntil[3]; !got.Equal(later) {
+		t.Fatalf("a zero end replaced %v", got)
+	}
+	m.recordPollEnd(4, later) // removed or never configured
+	if _, ok := m.pollUntil[4]; ok {
+		t.Fatal("an end was recorded for an unknown environment")
 	}
 }
