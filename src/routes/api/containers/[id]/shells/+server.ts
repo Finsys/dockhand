@@ -3,6 +3,7 @@ import { execInContainer } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 // Shell paths to check
 const SHELLS_TO_CHECK = [
@@ -22,7 +23,7 @@ const SHELLS_TO_CHECK = [
  * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * resp-200: {shells:array<string>!, defaultShell:string, allShells:array<{path:string!, label:string!, available:boolean!}>!}
  * resp-200-example: {"shells":["/bin/sh"],"defaultShell":"/bin/sh","allShells":[{"path":"/bin/bash","label":"Bash","available":false},{"path":"/bin/sh","label":"Shell (sh)","available":true}]}
- * resp-403: Permission denied, or (enterprise) no access to the requested environment
+ * resp-403: Permission denied, or (enterprise) no access to the requested environment, or the target is Dockhand's own container and the caller is not an administrator
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
@@ -36,6 +37,12 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	// Permission check - need exec permission to detect shells
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	// Environment access check (enterprise only)

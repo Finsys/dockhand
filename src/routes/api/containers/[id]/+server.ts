@@ -10,6 +10,8 @@ import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { unregisterSchedule, forgetScheduledContainerAction } from '$lib/server/scheduler';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { getOwnContainerId } from '$lib/server/host-path';
+import { maskOwnContainerEnv } from '$lib/server/own-container-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -19,7 +21,7 @@ import type { RequestHandler } from './$types';
  * summary: Return the full Docker inspect payload for a single container
  * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
- * resp-200: The raw Docker inspect object for the container
+ * resp-200: The raw Docker inspect object for the container. For a non-admin, the env values of Dockhand's own container are masked
  * resp-403: Permission denied, or (enterprise) no access to the requested environment
  * resp-404: Container not found
  * resp-500: Failed to inspect the container (e.g. it no longer exists or the daemon is unreachable)
@@ -65,6 +67,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 				});
 			}
 		}
+
+		maskOwnContainerEnv(details, getOwnContainerId(), !auth.authEnabled || auth.isAdmin);
 
 		return json(details);
 	} catch (error: any) {

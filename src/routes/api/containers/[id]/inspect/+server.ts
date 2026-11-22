@@ -5,6 +5,8 @@ import { getSecretKeysToMask } from '$lib/server/db';
 import { getStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { getOwnContainerId } from '$lib/server/host-path';
+import { maskOwnContainerEnv } from '$lib/server/own-container-core';
 import {
 	detectImageEnvDivergence,
 	detectImageLabelDivergence
@@ -17,7 +19,7 @@ import {
  * summary: Return the full Docker inspect payload for a container (requires the 'inspect' permission)
  * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
- * resp-200: The raw Docker inspect object for the container
+ * resp-200: The raw Docker inspect object for the container. For a non-admin, the env values of Dockhand's own container are masked
  * resp-403: Permission denied
  * resp-500: Failed to inspect the container
  */
@@ -75,6 +77,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 				});
 			}
 		}
+
+		maskOwnContainerEnv(containerData, getOwnContainerId(), !auth.authEnabled || auth.isAdmin);
 
 		return json({ ...containerData, divergence });
 	} catch (error) {

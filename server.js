@@ -523,6 +523,21 @@ async function handleTerminalConnection(ws, url, connId) {
 		}
 	}
 
+	// Dockhand's own container holds its database and keys: administrators only.
+	if (typeof globalThis.__refusesOwnContainerForUser === 'function') {
+		try {
+			if (await globalThis.__refusesOwnContainerForUser(ws.__auth, decodeURIComponent(containerId), envId)) {
+				ws.send(JSON.stringify({ type: 'error', message: 'Only an administrator can open a terminal in the Dockhand container' }));
+				ws.close(1008, 'own container');
+				return;
+			}
+		} catch (err) {
+			console.error('[WS] own-container check failed:', err);
+			ws.close(1011, 'internal error');
+			return;
+		}
+	}
+
 	try {
 		// Resolve Docker target via SvelteKit app's database
 		let target;

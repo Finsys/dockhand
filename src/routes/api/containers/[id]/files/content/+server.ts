@@ -3,6 +3,7 @@ import { readContainerFile, writeContainerFile } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 // Max file size for reading (1MB)
 const MAX_FILE_SIZE = 1024 * 1024;
@@ -17,7 +18,7 @@ const MAX_FILE_SIZE = 1024 * 1024;
  * query: path:string! Absolute file path inside the container
  * resp-200: {content:string!, path:string!}
  * resp-400: Path is missing, the target is a directory, or the container is not running
- * resp-403: Permission denied to read the file (needs containers:exec)
+ * resp-403: Permission denied to read the file (needs containers:exec), or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: File not found
  * resp-413: File is larger than the 1 MB read limit
  * resp-500: Failed to read the file
@@ -37,6 +38,12 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	// as exec, matching the PUT write path below and the other file-browser routes.
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	try {
@@ -93,7 +100,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * resp-200: {success:boolean!, path:string!}
  * resp-200-example: {"success":true,"path":"/etc/nginx/nginx.conf"}
  * resp-400: Path is missing, content is missing/not a string, or the container is not running
- * resp-403: Permission denied, or the target file system is read-only
+ * resp-403: Permission denied, or the target file system is read-only, or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: Target directory not found
  * resp-413: Content is larger than the 1 MB write limit
  * resp-500: Failed to write the file
@@ -112,6 +119,12 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 	// Permission check with environment context
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	try {

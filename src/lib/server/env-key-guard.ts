@@ -10,9 +10,10 @@
  */
 
 // Exact reserved keys: PATH and the dynamic-loader / shell-startup vars that decide
-// which binary runs, plus the DOCKER_* names Dockhand sets itself to reach the daemon.
+// which binary runs, the DOCKER_* names Dockhand sets itself to reach the daemon, and
+// HOME / BUILDX_CONFIG, which decide where the docker CLI looks for its plugins.
 const RESERVED_EXACT = new Set([
-	'PATH',
+	'PATH', 'HOME', 'BUILDX_CONFIG',
 	'LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT',
 	'NODE_OPTIONS',
 	'BASH_ENV', 'ENV', 'SHELLOPTS', 'IFS', 'SHELL',

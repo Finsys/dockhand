@@ -37,3 +37,24 @@ export function targetsOwnContainer(
 	const n = Math.min(t.length, ownId.length);
 	return t.slice(0, n) === ownId.slice(0, n);
 }
+
+/**
+ * Hide the env values of Dockhand's own container from a caller who is not an administrator:
+ * they hold its database URL and encryption key. Mutates the inspect payload; keys stay.
+ * Returns whether it masked.
+ */
+export function maskOwnContainerEnv(
+	details: { Id?: string; Config?: { Env?: string[] | null } | null },
+	ownId: string | null,
+	privileged: boolean
+): boolean {
+	const env = details.Config?.Env;
+	if (privileged || !Array.isArray(env) || !targetsOwnContainer(details.Id, { id: ownId })) return false;
+	details.Config!.Env = maskEnvValues(env);
+	return true;
+}
+
+/** `KEY=value` entries as `KEY=***`; an entry without `=` is kept. */
+export function maskEnvValues(env: string[]): string[] {
+	return env.map((entry) => (entry.includes('=') ? `${entry.slice(0, entry.indexOf('='))}=***` : entry));
+}

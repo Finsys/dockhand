@@ -8,6 +8,7 @@ import { createJobResponse } from '$lib/server/sse';
 import { createRunRecorder } from '$lib/server/deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
 import type { RequestHandler } from './$types';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * @openapi
@@ -18,7 +19,7 @@ import type { RequestHandler } from './$types';
  * body-example: {"pull":true,"build":false,"forceRecreate":false}
  * resp-400: Invalid stack name
  * resp-200: Server-Sent-Events job stream with progress events and a final result event ({success, output})
- * resp-403: Permission denied (requires stacks:start, or environment access denied on enterprise)
+ * resp-403: Permission denied (requires stacks:start, or environment access denied on enterprise), or the environment is missing or out of scope (Enterprise non-admin)
  */
 export const POST: RequestHandler = async (event) => {
 	const { params, url, cookies, request } = event;
@@ -33,7 +34,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	// Environment access check (enterprise only)
-	if (envIdNum && auth.isEnterprise && !(await auth.canAccessEnvironment(envIdNum))) {
+	if (await deniesEnvScope(auth, envIdNum)) {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 

@@ -8,6 +8,7 @@ import { isForbiddenStackPath, holdsForbiddenStackPath, isProtectedPath } from '
 import { moveDirEntries } from '$lib/server/stack-relocate-move';
 import { existsSync, readdirSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * POST /api/stacks/[name]/relocate
@@ -21,7 +22,7 @@ import { join, dirname, resolve } from 'node:path';
  * resp-200: {success:boolean!, movedFiles:array<string>!, errors:array<string>, composeContent:string!, rawEnvContent:string!, envVars:array<{key:string!, value:string!, isSecret:boolean!}>!}
  * resp-200-example: {"success":true,"movedFiles":["compose.yaml",".env"],"composeContent":"services: {}","rawEnvContent":"FOO=bar\n","envVars":[{"key":"FOO","value":"bar","isSecret":false}]}
  * resp-400: oldDir and newComposePath are required, or the source directory does not exist
- * resp-403: Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory
+ * resp-403: Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory, or the environment is missing or out of scope (Enterprise non-admin)
  * resp-404: No stack source row for this name and environment
  * resp-500: Failed to relocate stack
  */
@@ -33,8 +34,9 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 	if (auth.authEnabled && !(await auth.can('stacks', 'edit', envIdNum))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
-	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
-	if (envAccessDenied) return envAccessDenied;
+	if (await deniesEnvScope(auth, envIdNum)) {
+		return json({ error: 'Access denied to this environment' }, { status: 403 });
+	}
 
 	try {
 		const body = await request.json();

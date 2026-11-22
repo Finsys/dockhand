@@ -3,6 +3,7 @@ import { removeStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * @openapi
@@ -15,7 +16,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: Compose down failed and force was not set
- * resp-403: Permission denied, or access denied to this environment
+ * resp-403: Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)
  * resp-404: Compose file not found for this stack
  * resp-500: Unexpected error while removing the stack
  */
@@ -37,7 +38,7 @@ export const DELETE: RequestHandler = async (event) => {
 	}
 
 	// Environment access check (enterprise only)
-	if (envIdNum && auth.isEnterprise && !(await auth.canAccessEnvironment(envIdNum))) {
+	if (await deniesEnvScope(auth, envIdNum)) {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 

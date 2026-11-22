@@ -115,7 +115,22 @@ export function isForbiddenCrossOrigin(req: CsrfRequestInfo): boolean {
 	// HTTP auth schemes are excluded: a browser re-sends those on its own, e.g. to a proxy
 	// with basic auth in front of Dockhand. A session cookie keeps the request checked.
 	if (req.hasBearerToken && !req.hasSessionCookie) return false;
+	return rejectsOrigin(req);
+}
 
+type OriginInfo = Pick<CsrfRequestInfo, 'origin' | 'secFetchSite' | 'host' | 'isExemptPath' | 'trustedOrigins'>;
+
+/**
+ * True when a WebSocket upgrade must be refused. A page on any origin can open a WebSocket and
+ * the browser sends its cookies, so the origin is the only gate; a client without an Origin
+ * header is not a browser page.
+ */
+export function isForbiddenCrossOriginUpgrade(req: Omit<OriginInfo, 'isExemptPath'> & { disabled: boolean }): boolean {
+	if (req.disabled) return false;
+	return rejectsOrigin({ ...req, isExemptPath: false });
+}
+
+function rejectsOrigin(req: OriginInfo): boolean {
 	const origin = headerValue(req.origin);
 	const isExempt = () => {
 		if (req.isExemptPath) return true;

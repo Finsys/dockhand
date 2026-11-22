@@ -181,7 +181,7 @@
 			<TogglePill
 				bind:checked={authEnabled}
 				onchange={(checked) => handleAuthEnabledToggle(checked)}
-				disabled={authLoading || authSaving || !$canAccess('settings', 'edit')}
+				disabled={authLoading || authSaving || !$isAdmin}
 			/>
 		</div>
 		<p class="text-xs text-muted-foreground mt-1">
@@ -314,7 +314,7 @@
 								value={neverExpire ? 'never' : 'timed'}
 								options={[{ value: 'timed', label: m.settings_auth_session_timed() }, { value: 'never', label: m.settings_auth_session_never_expire() }]}
 								onchange={(v) => neverExpire = v === 'never'}
-								disabled={!$canAccess('settings', 'edit')}
+								disabled={!$isAdmin}
 							/>
 							<span class="text-xs text-muted-foreground">
 								{neverExpire ? m.settings_auth_session_never_expire_hint() : m.settings_auth_session_timed_hint()}
@@ -332,7 +332,7 @@
 									e.currentTarget.value = String(sessionTimeout);
 								}}
 								class="w-32"
-								disabled={neverExpire || !$canAccess('settings', 'edit')}
+								disabled={neverExpire || !$isAdmin}
 							/>
 							<span class="text-sm text-muted-foreground">{m.settings_auth_session_seconds()}</span>
 							<span class="text-xs text-muted-foreground">
@@ -343,7 +343,7 @@
 					<div class="space-y-1.5 border-t border-border/60 pt-4">
 						<div class="flex items-center gap-3">
 							<Label class="text-sm">{m.settings_auth_passkeys_label()}</Label>
-							<TogglePill bind:checked={passkeysEnabled} disabled={!$canAccess('settings', 'edit')} />
+							<TogglePill bind:checked={passkeysEnabled} disabled={!$isAdmin} />
 						</div>
 						<p class="text-xs text-muted-foreground">
 							{m.settings_auth_passkeys_description()}
@@ -358,7 +358,7 @@
 							</div>
 						{/if}
 					</div>
-					{#if $canAccess('settings', 'edit')}
+					{#if $isAdmin}
 						<Button size="sm" onclick={saveAuthSettings} disabled={authSaving}>
 							{#if authSaving}
 								<RefreshCw class="w-4 h-4 mr-1 animate-spin" />

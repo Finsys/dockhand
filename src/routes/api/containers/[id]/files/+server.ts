@@ -3,6 +3,7 @@ import { listContainerDirectory } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * GET /api/containers/{id}/files - List a directory inside a container
@@ -14,7 +15,7 @@ import type { RequestHandler } from './$types';
  * query: path:string Absolute directory path inside the container (default "/")
  * query: simpleLs:boolean Use a lightweight `ls` listing instead of a full stat of each entry
  * resp-200: Directory listing (entries with name, type, size and permission metadata)
- * resp-403: Permission denied (needs containers:exec)
+ * resp-403: Permission denied (needs containers:exec), or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: Container not found
  * resp-500: Failed to list the directory
  */
@@ -34,6 +35,12 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	// file write/create/delete siblings and the terminal, not as plain view.
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	try {

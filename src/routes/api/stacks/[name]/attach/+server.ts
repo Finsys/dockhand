@@ -22,6 +22,7 @@ import { buildAttachEnvVars } from '$lib/server/stack-attach-core';
 import { isValidStackName } from '$lib/server/stack-name-guard';
 import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
 import { existsSync, readFileSync } from 'node:fs';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * @openapi
@@ -31,7 +32,7 @@ import { existsSync, readFileSync } from 'node:fs';
  * body: {stackName:string,repositoryId:integer,url:string,repoName:string,branch:string,credentialId:integer,composePath:string,envFilePath:string,autoUpdate:boolean,autoUpdateSchedule:string,autoUpdateCron:string,webhookEnabled:boolean,webhookSecret:string,contextDir:string,buildOnDeploy:boolean,noBuildCache:boolean,repullImages:boolean,forceRedeploy:boolean,secretProviderId:integer,envVars:array<{key:string!,value:string,isSecret:boolean}>,deployNow:boolean}
  * resp-200: Git stack created; returns the git stack record, or a job response when deployNow starts deployment
  * resp-400: Invalid conversion request or repository configuration
- * resp-403: Caller lacks stacks:edit or required secrets:view permission, or access denied to this environment (enterprise)
+ * resp-403: Caller lacks stacks:edit or required secrets:view permission, or access denied to this environment (enterprise), or the environment is missing or out of scope (Enterprise non-admin)
  * resp-404: Stack not found
  * resp-500: Failed to convert stack to Git management
  */
@@ -49,7 +50,7 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		// Environment access check (enterprise only), matching the sibling stack endpoints.
-		if (envIdNum && auth.isEnterprise && !(await auth.canAccessEnvironment(envIdNum))) {
+		if (await deniesEnvScope(auth, envIdNum)) {
 			return json({ error: 'Access denied to this environment' }, { status: 403 });
 		}
 

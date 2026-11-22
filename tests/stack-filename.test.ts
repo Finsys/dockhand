@@ -29,7 +29,11 @@ describe('isAllowedStackFilename', () => {
 		['.env.local'],
 		['.env.production'],
 		['prod.env'],
-		['staging.env']
+		['staging.env'],
+		['prod.env.staging'],
+		['.env.prod-eu_1'],
+		['.env.production.local'],
+		['.env.development.local']
 	])('accepts %s', (filename: string) => {
 		expect(isAllowedStackFilename(filename)).toBe(true);
 	});
@@ -58,8 +62,37 @@ describe('isAllowedStackFilename', () => {
 		['compose.yml.bak'],
 		// .env in the middle
 		['environment'],
-		['notenv']
+		['notenv'],
+		// env-family names a runtime loads as code (Dockhand's own build/env.js)
+		['env.js'],
+		['handler.env.js'],
+		['.env.mjs'],
+		['env.cjs'],
+		['env.ts'],
+		['env.json'],
+		['env.node'],
+		['env.sh'],
+		['env.JS'],
+		['.env.local.js'],
+		// a suffix with a path-ish or odd character
+		['.env.a b']
 	])('rejects %s', (filename: string) => {
 		expect(isAllowedStackFilename(filename)).toBe(false);
+	});
+});
+
+describe('isAllowedStackFilename on long input', () => {
+	test('a name past NAME_MAX is refused at once', () => {
+		const start = performance.now();
+		expect(isAllowedStackFilename('.env.a'.repeat(20000) + '!')).toBe(false);
+		expect(isAllowedStackFilename('.env' + '.a'.repeat(200))).toBe(false);
+		expect(performance.now() - start).toBeLessThan(100);
+	});
+
+	test('a long legal name up to 255 characters still passes', () => {
+		const name = '.env.' + 'x'.repeat(250);
+		expect(name.length).toBe(255);
+		expect(isAllowedStackFilename(name)).toBe(true);
+		expect(isAllowedStackFilename(name + 'x')).toBe(false);
 	});
 });

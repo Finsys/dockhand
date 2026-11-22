@@ -4,6 +4,7 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import { parseChownSpec } from '$lib/server/chown-spec-core';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * POST /api/containers/{id}/files/chown - Change ownership of a path in a container
@@ -17,7 +18,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!, path:string!, owner:string!, recursive:boolean!}
  * resp-200-example: {"success":true,"path":"/app/data","owner":"1000:1000","recursive":true}
  * resp-400: Path or owner missing, an invalid owner spec, or the container is not running
- * resp-403: Permission denied, read-only file system, or operation not permitted
+ * resp-403: Permission denied, read-only file system, or operation not permitted, or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: Path not found
  * resp-500: Failed to change ownership
  */
@@ -32,6 +33,12 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	try {

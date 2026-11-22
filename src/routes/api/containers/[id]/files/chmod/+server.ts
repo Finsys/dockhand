@@ -3,6 +3,7 @@ import { chmodContainerPath } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * POST /api/containers/{id}/files/chmod - Change permissions of a path in a container
@@ -16,7 +17,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!, path:string!, mode:string!, recursive:boolean!}
  * resp-200-example: {"success":true,"path":"/app/entrypoint.sh","mode":"755","recursive":false}
  * resp-400: Path or mode missing, an invalid chmod mode, or the container is not running
- * resp-403: Permission denied, read-only file system, or operation not permitted
+ * resp-403: Permission denied, read-only file system, or operation not permitted, or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: Path not found
  * resp-500: Failed to change permissions
  */
@@ -32,6 +33,12 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 	// Permission check with environment context
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	try {

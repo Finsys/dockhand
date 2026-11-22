@@ -9,6 +9,7 @@
  */
 
 import { resolve, sep, join, dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { isForbiddenStackPath, safeResolve } from './fs-guard';
 
 export function assertSafeRepoUrl(url: string): void {
@@ -147,11 +148,23 @@ function assertNotForbidden(abs: string, label: string, shown: string): void {
  * Absolute path of the base `.env` that sits beside a compose file inside a clone. The
  * compose path is resolved through repoFilePath (containment-checked, ABSOLUTE), so the
  * `.env` is just its sibling - NOT re-joined onto repoPath, which would double the prefix
- * (#1495).
+ * (#1495). Call it after the clone: a committed `.env` symlink must resolve inside it.
  */
 export function repoBaseEnvPath(repoPath: string, composeUserPath: string): string {
 	const safeComposePath = repoFilePath(repoPath, composeUserPath, 'Compose path');
 	const envPath = join(dirname(safeComposePath), '.env');
 	assertNotForbidden(envPath, 'Env file', '.env');
+	assertResolvedWithinRepo(repoPath, envPath, 'Env file', '.env');
 	return envPath;
+}
+
+/**
+ * Read a user-named file from a clone, validating the path against what is on disk NOW.
+ * repoFilePath follows committed symlinks, so it only means something once the clone
+ * exists; a check made before the clone sees no link and passes anything. Returns null
+ * when the file is absent.
+ */
+export function readRepoFile(repoPath: string, userRel: string, label: string): string | null {
+	const abs = repoFilePath(repoPath, userRel, label);
+	return existsSync(abs) ? readFileSync(abs, 'utf-8') : null;
 }

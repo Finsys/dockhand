@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
 	isForbiddenCrossOrigin,
+	isForbiddenCrossOriginUpgrade,
 	isCsrfExemptPath,
 	parseTrustedOrigins,
 	csrfOriginCheckDisabled,
@@ -245,5 +246,41 @@ describe('csrfOriginCheckDisabled', () => {
 		expect(csrfOriginCheckDisabled('')).toBe(false);
 		expect(csrfOriginCheckDisabled(null)).toBe(false);
 		expect(csrfOriginCheckDisabled('TRUE')).toBe(false);
+	});
+});
+
+// The terminal WebSocket: a GET the browser sends with cookies from any page, so only the
+// origin decides.
+describe('isForbiddenCrossOriginUpgrade', () => {
+	const ws = (over: Partial<Parameters<typeof isForbiddenCrossOriginUpgrade>[0]>) =>
+		isForbiddenCrossOriginUpgrade({
+			origin: 'http://192.168.1.50:3000',
+			secFetchSite: null,
+			host: '192.168.1.50:3000',
+			trustedOrigins: new Set(),
+			disabled: false,
+			...over
+		});
+
+	test('the app own page opens a terminal', () => {
+		expect(ws({})).toBe(false);
+		expect(ws({ origin: 'https://dockhand.example.com', host: 'dockhand.example.com', secFetchSite: 'same-origin' })).toBe(false);
+		expect(ws({ origin: 'http://localhost:5173', host: 'localhost:5173' })).toBe(false);
+	});
+
+	test('a page on another origin is refused', () => {
+		expect(ws({ origin: 'https://evil.com' })).toBe(true);
+		expect(ws({ origin: 'http://192.168.1.50:8080' })).toBe(true);
+		expect(ws({ origin: 'https://evil.com', secFetchSite: 'cross-site' })).toBe(true);
+	});
+
+	test('a sibling origin on the same site is refused too', () => {
+		expect(ws({ origin: 'https://wiki.example.com', host: 'dockhand.example.com', secFetchSite: 'same-site' })).toBe(true);
+	});
+
+	test('a trusted origin, a client without Origin, and the disabled check pass', () => {
+		expect(ws({ origin: 'https://evil.com', trustedOrigins: new Set(['https://evil.com']) })).toBe(false);
+		expect(ws({ origin: null })).toBe(false);
+		expect(ws({ origin: 'https://evil.com', disabled: true })).toBe(false);
 	});
 });
