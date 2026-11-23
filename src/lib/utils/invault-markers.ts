@@ -54,7 +54,8 @@ export function resolvedRefVarNames(
 
 /**
  * The prefixes a provider resolves as an inline reference: 1Password
- * (service-account and Connect), KeePass, Azure Key Vault, Proton Pass.
+ * (Vault references and service-account Environment mappings), KeePass,
+ * Azure Key Vault, Proton Pass.
  *
  * Kept in one place because the editor decides what to send for probing and the
  * server decides what to resolve; a provider whose prefix reaches only one of
@@ -62,7 +63,7 @@ export function resolvedRefVarNames(
  * A provider that gains an inline syntax belongs here as well as in its own
  * isReference.
  */
-export const INLINE_REF_PREFIXES = ['op://', 'keepass://', 'azurekv://', 'pass://'] as const;
+export const INLINE_REF_PREFIXES = ['op://', 'op-env://', 'keepass://', 'azurekv://', 'pass://'] as const;
 
 /**
  * Whether a value is an inline provider reference rather than a literal.
