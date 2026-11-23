@@ -106,6 +106,7 @@ describe('isInlineProviderRef', () => {
 		expect(isInlineProviderRef('keepass://Group/Entry/Password')).toBe(true);
 		expect(isInlineProviderRef('azurekv://my-secret')).toBe(true);
 		expect(isInlineProviderRef('pass://MockVault/my-item/password')).toBe(true);
+		expect(isInlineProviderRef('bws://my-secret')).toBe(true);
 	});
 
 	test('a quoted reference still counts - 1Password copies it with quotes', () => {

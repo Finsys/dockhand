@@ -15,6 +15,7 @@ import { connectProvider } from '../src/lib/server/secretproviders/connect';
 import { protonProvider } from '../src/lib/server/secretproviders/proton';
 import { keepassProvider } from '../src/lib/server/secretproviders/keepass';
 import { azureKvProvider } from '../src/lib/server/secretproviders/azure-kv';
+import { bitwardenProvider } from '../src/lib/server/secretproviders/bitwarden';
 
 describe('stripSurroundingQuotes', () => {
 	test('strips matching double quotes', () => {
@@ -101,5 +102,16 @@ describe('azurekv:// isReference tolerates surrounding quotes (#1521)', () => {
 	});
 	test('a plain value is not a reference', () => {
 		expect(azureKvProvider.isReference('"nope"')).toBe(false);
+	});
+
+	describe('bws:// isReference tolerates surrounding quotes (#1521)', () => {
+		test('detects bare + quoted bws:// references', () => {
+			expect(bitwardenProvider.isReference('bws://Project/Secret')).toBe(true);
+			expect(bitwardenProvider.isReference('"bws://Project/Secret"')).toBe(true);
+			expect(bitwardenProvider.isReference("'bws://Project/Secret'")).toBe(true);
+		});
+		test('a plain value is not a reference', () => {
+			expect(bitwardenProvider.isReference('"nope"')).toBe(false);
+		});
 	});
 });
