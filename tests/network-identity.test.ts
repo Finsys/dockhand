@@ -6,7 +6,8 @@ import {
 	endpointSettingsFromInspect,
 	mapContainerNetworks,
 	withComposeAliases,
-	recreateEndpointAliases
+	recreateEndpointAliases,
+	isDefaultBridge
 } from '../src/lib/utils/network-identity';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -350,5 +351,38 @@ describe('withComposeAliases - a recreate restores the service alias (#1928)', (
 		expect(code).toMatch(/recreateEndpointAliases\(netName, \{ \.\.\.endpoint \}, networkMode, attachedNetworkNames, config\.Labels\)/);
 		expect(code).toContain('const endpointConfig = recreateEndpoint(initialNetworkName, initialNetworkConfig);');
 		expect(code).toContain('const settings = recreateEndpoint(netName, nc);');
+	});
+});
+
+describe('the default bridge gets no compose service alias', () => {
+	// Docker: "invalid config for network bridge: invalid endpoint settings: network-scoped
+	// aliases are only supported for user-defined networks". A compose service with
+	// network_mode: bridge is on it, carrying the compose labels.
+	const labels = { 'com.docker.compose.project': 'cloudflared', 'com.docker.compose.service': 'cloudflared' };
+	const id = 'abc123def456';
+
+	test('isDefaultBridge knows it by NetworkMode, on Docker and Podman', () => {
+		expect(isDefaultBridge('bridge', 'bridge')).toBe(true);
+		expect(isDefaultBridge('bridge', 'default')).toBe(true);
+		expect(isDefaultBridge('podman', 'bridge')).toBe(true);
+		expect(isDefaultBridge('cloudflared_default', 'cloudflared_default')).toBe(false);
+		// A user-defined network that happens to be called "bridge" isn't NetworkMode bridge.
+		expect(isDefaultBridge('bridge', 'my_net')).toBe(false);
+	});
+
+	test('a batch or scheduled recreate leaves the bridge endpoint as it was', () => {
+		const ep = { Aliases: null, NetworkID: 'n1' };
+		expect(recreateEndpointAliases('bridge', ep, 'bridge', ['bridge'], labels)).toBe(ep);
+		expect(recreateEndpointAliases('podman', ep, 'bridge', ['podman'], labels)).toBe(ep);
+		// A user-defined primary still gets it.
+		expect(recreateEndpointAliases('cloudflared_default', { Aliases: [] as string[] }, 'cloudflared_default', ['cloudflared_default'], labels).Aliases).toEqual(['cloudflared']);
+	});
+
+	test('a single update sends no aliases for it', () => {
+		const compose = { project: 'cloudflared', service: 'cloudflared' };
+		const onBridge = mapContainerNetworks({ bridge: { Aliases: null, DNSNames: null } }, 'bridge', id, compose);
+		expect(onBridge.primaryAliases).toBeUndefined();
+		const onOwn = mapContainerNetworks({ cloudflared_default: { Aliases: null } }, 'cloudflared_default', id, compose);
+		expect(onOwn.primaryAliases).toEqual(['cloudflared', 'cloudflared-cloudflared']);
 	});
 });
