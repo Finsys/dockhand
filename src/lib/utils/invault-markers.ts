@@ -54,7 +54,8 @@ export function resolvedRefVarNames(
 
 /**
  * The prefixes a provider resolves as an inline reference: 1Password
- * (service-account and Connect), KeePass, Azure Key Vault, Proton Pass.
+ * (service-account and Connect), KeePass, Azure Key Vault, Proton Pass,
+ * Bitwarden (bws://).
  *
  * Kept in one place because the editor decides what to send for probing and the
  * server decides what to resolve; a provider whose prefix reaches only one of

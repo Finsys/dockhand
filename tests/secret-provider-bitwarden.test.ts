@@ -9,6 +9,11 @@ const secretId = '22222222-2222-4222-8222-222222222222';
 const invalidKeysProjectId = '44444444-4444-4444-8444-444444444444';
 const duplicateKeysProjectId = '55555555-5555-4555-8555-555555555555';
 const emptyProjectId = '66666666-6666-4666-8666-666666666666';
+// A secret the stand-in prints valid JSON for yet exits non-zero, to pin that a
+// non-zero exit is a failure even when stdout parses.
+const nonZeroWithStdoutId = '77777777-7777-4777-8777-777777777777';
+// A secret the stand-in exits 0 for but prints non-JSON, to pin runJsonObject's throw.
+const zeroExitNonJsonId = '88888888-8888-4888-8888-888888888888';
 const config = { token: 'test-token' };
 const previousBwsPath = process.env.DOCKHAND_BWS_PATH;
 let dir: string;
@@ -45,6 +50,14 @@ case "$1:$2:$3" in
     ;;
   secret:get:${secretId})
     printf '%s\\n' '{"id":"${secretId}","key":"API_KEY","value":"reference-value"}'
+    ;;
+  secret:get:${nonZeroWithStdoutId})
+    printf '%s\\n' '{"id":"${nonZeroWithStdoutId}","key":"API_KEY","value":"partial"}'
+    exit 1
+    ;;
+  secret:get:${zeroExitNonJsonId})
+    printf '%s\\n' 'not json at all'
+    exit 0
     ;;
   *)
     exit 1
@@ -101,19 +114,19 @@ describe('Bitwarden provider with a fake bws executable', () => {
 		expect(result.size).toBe(1);
 	});
 
-	test('returns empty result for a missing secret', async () => {
+	test('throws when a referenced secret cannot be fetched', async () => {
 		const missing = '33333333-3333-4333-8333-333333333333';
-		const result = await bitwardenProvider.resolveSecretReferences(config, [`bws://${missing}`])
-		expect(result.size).toBe(0);
+		expect(
+			bitwardenProvider.resolveSecretReferences(config, [`bws://${missing}`])
+		).rejects.toThrow();
 	});
 
-  test('returns present references and skips missing ones', async () => {
+	test('a failing reference aborts the whole batch rather than shipping a literal', async () => {
 		const ref1 = `bws://${secretId}`;
 		const ref2 = `bws://33333333-3333-4333-8333-333333333333`;
-		const result = await bitwardenProvider.resolveSecretReferences(config, [ref1, ref2]);
-		expect(result.get(ref1)).toBe('reference-value');
-		expect(result.has(ref2)).toBe(false);
-		expect(result.size).toBe(1);
+		expect(
+			bitwardenProvider.resolveSecretReferences(config, [ref1, ref2])
+		).rejects.toThrow();
 	});
 
 	test('throws for an invalid project ID', async () => {
@@ -129,11 +142,12 @@ describe('Bitwarden provider with a fake bws executable', () => {
 		expect(result.size).toBe(0);
 	});
 
-	test('resolving references fails with invalid access token', async () => {
+	test('resolving references throws with an invalid access token', async () => {
 		const invalidConfig = { ...config, token: 'invalid' };
 		const ref = `bws://${secretId}`;
-		const result = await bitwardenProvider.resolveSecretReferences(invalidConfig, [ref]);
-		expect(result.size).toBe(0);
+		expect(
+			bitwardenProvider.resolveSecretReferences(invalidConfig, [ref])
+		).rejects.toThrow();
 	});
 
 	test('duplicate references resolve once', async () => {
@@ -141,6 +155,18 @@ describe('Bitwarden provider with a fake bws executable', () => {
 		const result = await bitwardenProvider.resolveSecretReferences(config, [ref, ref]);
 		expect(result.get(ref)).toBe('reference-value');
 		expect(result.size).toBe(1);
+	});
+
+	test('a non-zero exit is a failure even when stdout is valid JSON', async () => {
+		expect(
+			bitwardenProvider.resolveSecretReferences(config, [`bws://${nonZeroWithStdoutId}`])
+		).rejects.toThrow();
+	});
+
+	test('a zero exit with non-JSON stdout throws rather than skipping the secret', async () => {
+		expect(
+			bitwardenProvider.resolveSecretReferences(config, [`bws://${zeroExitNonJsonId}`])
+		).rejects.toThrow();
 	});
 
 });

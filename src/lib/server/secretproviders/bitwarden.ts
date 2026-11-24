@@ -3,7 +3,7 @@
  *
  * This is deliberately only an adapter around an operator-provided official
  * `bws` executable. Dockhand does not distribute the client and does not
- * implement Bitwarden's API or cryptography. The provider optionally targets an 
+ * implement Bitwarden's API or cryptography. The provider optionally targets an
  * EU or self-hosted server. Two resolution modes:
  *   - Bulk pull: retrieves all secrets from a selected project at once
  *   - Inline reference: `bws://UUID` retrieves a single secret by its UUID reference
@@ -167,6 +167,10 @@ async function executeBws(
 					reject(failure);
 					return;
 				}
+				if (code !== 0) {
+					reject(new BwsAdapterError('Bitwarden bws command failed'));
+					return;
+				}
 				resolve(Buffer.concat(stdoutChunks, stdoutBytes));
 			});
 		});
@@ -238,9 +242,7 @@ async function runJsonObject(args: string[], limits: CommandLimits): Promise<Rec
 		try {
 			parsed = JSON.parse(output.toString('utf8'));
 		} catch {
-			// If JSON parsing fails (e.g., 404 with no valid output), return empty object
-			// to allow the caller to handle the missing secret gracefully
-			return {};
+			throw new BwsAdapterError('Bitwarden bws returned invalid JSON');
 		}
 		if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
 			throw new BwsAdapterError('Bitwarden bws returned an invalid JSON response');
@@ -396,9 +398,13 @@ export const bitwardenProvider: SecretProvider<BitwardenConfig> = {
 				try {
 					ref = parseReference(raw);
 				} catch {
-					console.warn(`Failed to parse bitwarden reference "${raw}"`);
-					continue; // malformed reference: leave the literal in place
+					// Malformed reference (not a bws://<uuid>): leave the literal in place.
+					// JSON.stringify keeps a crafted env-var value from forging log lines.
+					console.warn(`Failed to parse bitwarden reference ${JSON.stringify(raw)}`);
+					continue;
 				}
+				// A missing secret or any bws failure throws (executeBws rejects on a
+				// non-zero exit), so it aborts the deploy rather than shipping the literal.
 				const payload = await runJsonObject(
 					['secret', 'get', ref, '--output', 'json', '--color', 'no'],
 					{
@@ -409,10 +415,6 @@ export const bitwardenProvider: SecretProvider<BitwardenConfig> = {
 						serverUrl: server
 					}
 				);
-				if (Object.keys(payload).length === 0) {
-					console.warn(`Bitwarden failed to fetch secret for reference "${raw}"`);
-					continue; // secret not found or invalid format
-				}
 				const value = (payload as Record<string, unknown>)['value'];
 				if (typeof value === 'string') {
 					resolved.set(raw, value);
