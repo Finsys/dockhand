@@ -73,7 +73,7 @@ import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { compareContainerOrder } from './container-labels';
 import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
 import { pendingRowsToClear } from './pending-updates-core';
-import { buildDockhandOverrideFile } from './dockhand-override-file';
+import { buildDockhandOverrideFile, planDockhandOverrideFile } from './dockhand-override-file';
 import { withComposeRateLimitRetry } from './pull-retry';
 
 // =============================================================================
@@ -1478,18 +1478,23 @@ async function executeLocalCompose(
 		args.push('--env-file', customEnvPath);
 	}
 
-	// For git stacks: write non-secret overrides to .env.dockhand and add as second --env-file.
+	// For git stacks: write non-secret overrides to .env.dockhand.
 	// Docker Compose applies env files in order, so later files override earlier ones.
 	// This lets the repo's .env provide defaults while our overrides take precedence.
 	// Secrets are still injected via shell env only (never written to disk).
-	// ONLY when there ARE overrides: any --env-file on the CLI suppresses Compose's
-	// auto-discovery of the adjacent default .env, so writing one for a zero-var stack
-	// would blank a subdir compose's own .env interpolation (#1136). Internal/adopted
-	// stacks already have their non-secrets in the .env file written by the UI.
-	if (useOverrideFile && envVars && Object.keys(envVars).length > 0) {
+	// Always write the file (header-only when empty) so a removed override is cleared on
+	// disk and a compose referencing env_file: .env.dockhand still resolves. Attach the
+	// CLI --env-file only when overrides exist: any --env-file suppresses Compose's
+	// auto-discovery of the adjacent default .env, so a zero-var stack must not pass one
+	// or it blanks a subdir compose's own .env interpolation. Internal/adopted stacks
+	// already have their non-secrets in the .env file written by the UI.
+	const overridePlan = planDockhandOverrideFile(!!useOverrideFile, envVars);
+	if (overridePlan.shouldWrite) {
 		const overrideEnvPath = join(composeFileDir, '.env.dockhand');
-		writeFileSync(overrideEnvPath, buildDockhandOverrideFile(envVars));
-		args.push('--env-file', overrideEnvPath);
+		writeFileSync(overrideEnvPath, overridePlan.content);
+		if (overridePlan.attachCliArg) {
+			args.push('--env-file', overrideEnvPath);
+		}
 	}
 
 	if (useStdin) {
@@ -1750,6 +1755,16 @@ async function executeComposeViaHawser(
 			console.log(`${logPrefix} Sending ${registries.length} registry credentials to Hawser`);
 		}
 
+		// When a stack's only non-secret var is marked secret, no .env is generated and so
+		// none is sent; the agent must delete the stale plaintext .env it wrote earlier, or
+		// compose keeps reading the old value from the host. `files` is final here, so a .env
+		// we ARE sending is never listed. Deploy ops only; the agent re-checks its allow-list.
+		// (.env.dockhand on the Hawser deploy path is intentionally not cleared here - clearing it safely needs the
+		// agent to drive the --env-file list so a header-only file still resolves env_file:
+		// without being forced onto the command line, which is deferred to a follow-up.)
+		const clearEnvFiles =
+			(operation === 'up' || operation === 'build') && !('.env' in files) ? ['.env'] : [];
+
 		const body = JSON.stringify({
 			operation,
 			projectName: stackName,
@@ -1776,6 +1791,7 @@ async function executeComposeViaHawser(
 				: undefined,
 			// Stack deletion (#1162): remove the agent-side stack dir on down
 			removeFiles: removeFiles || false,
+			clearEnvFiles: clearEnvFiles.length > 0 ? clearEnvFiles : undefined,
 			// Ask the agent to also send its output line by line while the command runs.
 			// Old agents ignore the field and just return the block as before.
 			streamOutput: !!onLine
