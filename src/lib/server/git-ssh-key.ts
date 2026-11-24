@@ -44,3 +44,18 @@ export function removeSshKey(credentialId: number, env?: Record<string, string>)
 		// Ignore cleanup errors - a leftover /tmp key is harmless.
 	}
 }
+
+/**
+ * Delete the per-operation key an ssh credential created, using the exact path env
+ * stashed. Callers MUST pass the operation's env: without it cleanup targets the legacy
+ * deterministic path, which never matches makeSshKeyPath, leaving the decrypted key on
+ * disk. Structural credential type so this stays db-free (unit-testable).
+ */
+export function cleanupSshKey(
+	credential: { id: number; authType: string } | null,
+	env?: Record<string, string>
+): void {
+	if (credential?.authType === 'ssh') {
+		removeSshKey(credential.id, env);
+	}
+}

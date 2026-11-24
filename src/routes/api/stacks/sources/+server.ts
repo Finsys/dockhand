@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getStackSources } from '$lib/server/db';
 import { countStackEnvVars } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { filterByAccessibleEnv } from '$lib/server/env-scope-filter';
 
 /**
  * @openapi
@@ -23,7 +24,11 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 
 	try {
-		const sources = await getStackSources(envIdNum);
+		const allSources = await getStackSources(envIdNum);
+		// When no env is given the query returns every environment's rows, so an
+		// enterprise non-admin must see only the environments they can access (a null-env
+		// row is local and visible to all). getStackSources already scopes when env is set.
+		const sources = filterByAccessibleEnv(allSources, await auth.getAccessibleEnvironmentIds());
 
 		// Convert to a map for easier lookup in the frontend
 		const sourceMap: Record<
@@ -51,10 +56,18 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			)
 		);
 		sources.forEach((source, i) => {
+			// The repository row carries webhookSecret, which authenticates the public
+			// deploy-trigger endpoint, so it must not reach a viewer. Expose only whether
+			// one is set, matching GET /api/git/repositories.
+			let safeRepository: Record<string, unknown> | null = null;
+			if (source.repository) {
+				const { webhookSecret, ...rest } = source.repository;
+				safeRepository = { ...rest, hasWebhookSecret: !!webhookSecret };
+			}
 			sourceMap[source.stackName] = {
 				sourceType: source.sourceType,
 				composePath: source.composePath,
-				repository: source.repository,
+				repository: safeRepository,
 				secretProviderId: source.secretProviderId,
 				icon: source.icon ?? null,
 				envVarCount: counts[i],

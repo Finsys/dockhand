@@ -17799,15 +17799,6 @@
         "summary": "Return the latest cached vulnerability scan for an image, resolving its tag to a SHA256 ID",
         "parameters": [
           {
-            "name": "env",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            },
-            "description": "ID of the environment the image belongs to (from GET /api/environments)"
-          },
-          {
             "name": "image",
             "in": "query",
             "required": true,
@@ -17828,7 +17819,7 @@
         ],
         "responses": {
           "200": {
-            "description": "found=false when no cached scan exists; otherwise result holds the stored scan",
+            "description": "found=false when no cached scan exists; otherwise result holds the stored scan. Takes an env query param (from GET /api/environments); with app auth enabled it is required (400 otherwise) and scopes the lookup to that environment (403 when the caller cannot access it)",
             "content": {
               "application/json": {
                 "schema": {
@@ -17861,10 +17852,7 @@
             }
           },
           "400": {
-            "description": "Image name is required"
-          },
-          "403": {
-            "description": "Permission denied"
+            "description": "Image name is required, or env is required when app auth is enabled"
           },
           "500": {
             "description": "Failed to get scan results"
@@ -18502,7 +18490,7 @@
             "description": "Name and key are required, or activation was rejected (invalid key)"
           },
           "403": {
-            "description": "Permission denied (missing license:manage)"
+            "description": "Permission denied (admin only)"
           },
           "500": {
             "description": "Failed to activate the license"
@@ -18566,7 +18554,7 @@
             }
           },
           "403": {
-            "description": "Permission denied (missing license:manage)"
+            "description": "Permission denied (admin only)"
           },
           "500": {
             "description": "Failed to deactivate the license"
@@ -34135,7 +34123,7 @@
         "tags": [
           "metrics"
         ],
-        "summary": "Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled or EXPORT_METRICS_PUBLIC=true, otherwise requires a session or bearer token)",
+        "summary": "Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled or EXPORT_METRICS_PUBLIC=true, otherwise requires a session or bearer token; refused for an environment-scoped Enterprise user, who must not read the instance-wide snapshot)",
         "parameters": [],
         "responses": {
           "200": {
@@ -34143,6 +34131,9 @@
           },
           "401": {
             "description": "Not authenticated (session or bearer token required when app auth is enabled)"
+          },
+          "403": {
+            "description": "Caller is an environment-scoped Enterprise user (the snapshot spans every environment and cannot be filtered per-caller)"
           },
           "404": {
             "description": "Metrics export disabled (EXPORT_METRICS is not true)"

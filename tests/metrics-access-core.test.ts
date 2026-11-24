@@ -38,8 +38,20 @@ describe('both enforcement points honour the flag (source-pinned, #1698)', () =>
 		expect(src).not.toContain('isPublicPath(event.url.pathname, true)');
 	});
 
-	test('the /metrics handler keeps the !METRICS_PUBLIC term in its 401 check', () => {
+	test('the /metrics handler gates on METRICS_PUBLIC and rejects an unauthenticated caller', () => {
 		const src = read('src/routes/metrics/+server.ts');
-		expect(src).toContain('auth.authEnabled && !auth.isAuthenticated && !METRICS_PUBLIC');
+		// The authenticated branch runs only when auth is on and the scrape is not public.
+		expect(src).toContain('auth.authEnabled && !METRICS_PUBLIC');
+		// An unauthenticated caller still gets a 401 inside that branch.
+		expect(src).toContain('!auth.isAuthenticated');
+		expect(src).toContain('status: 401');
+	});
+
+	test('the /metrics handler refuses an environment-scoped Enterprise caller (A32)', () => {
+		const src = read('src/routes/metrics/+server.ts');
+		// A scoped caller (getAccessibleEnvironmentIds non-null) must not read the
+		// instance-wide snapshot that spans every environment.
+		expect(src).toContain('getAccessibleEnvironmentIds()) !== null');
+		expect(src).toContain("status: 403");
 	});
 });

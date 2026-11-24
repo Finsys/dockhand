@@ -18,9 +18,10 @@ import type { RequestHandler } from './$types';
 
 /**
  * @openapi
- * summary: Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled or EXPORT_METRICS_PUBLIC=true, otherwise requires a session or bearer token)
+ * summary: Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled or EXPORT_METRICS_PUBLIC=true, otherwise requires a session or bearer token; refused for an environment-scoped Enterprise user, who must not read the instance-wide snapshot)
  * resp-200: Prometheus text-exposition-format metrics body
  * resp-401: Not authenticated (session or bearer token required when app auth is enabled)
+ * resp-403: Caller is an environment-scoped Enterprise user (the snapshot spans every environment and cannot be filtered per-caller)
  * resp-404: Metrics export disabled (EXPORT_METRICS is not true)
  * resp-500: Metrics collection failed
  */
@@ -32,11 +33,19 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	// EXPORT_METRICS_PUBLIC leaves the scrape reachable without auth even when app
 	// auth is on (#1698); otherwise a session or bearer token is required.
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !auth.isAuthenticated && !METRICS_PUBLIC) {
-		return new Response('Unauthorized', {
-			status: 401,
-			headers: { 'WWW-Authenticate': 'Bearer' }
-		});
+	if (auth.authEnabled && !METRICS_PUBLIC) {
+		if (!auth.isAuthenticated) {
+			return new Response('Unauthorized', {
+				status: 401,
+				headers: { 'WWW-Authenticate': 'Bearer' }
+			});
+		}
+		// renderMetrics builds one instance-wide snapshot over every environment, so it
+		// cannot be filtered per caller. An Enterprise user scoped to some environments
+		// (getAccessibleEnvironmentIds non-null) must not read the others' data.
+		if ((await auth.getAccessibleEnvironmentIds()) !== null) {
+			return new Response('Forbidden', { status: 403 });
+		}
 	}
 
 	try {

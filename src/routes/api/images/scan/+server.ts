@@ -3,6 +3,7 @@ import { scanImage, scanResultToDbFormat, type ScanProgress } from '$lib/server/
 import { saveVulnerabilityScan, getLatestScanForImage } from '$lib/server/db';
 import { inspectImage } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { authorizeVulnAccess } from '$lib/server/vuln-access';
 import { createJobResponse } from '$lib/server/sse';
 
 /**
@@ -75,28 +76,27 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
  *
  * @openapi
  * summary: Return the latest cached vulnerability scan for an image, resolving its tag to a SHA256 ID
- * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
  * query: image:string! Image name or ID to look up cached results for
  * query: scanner:string Restrict the lookup to a specific scanner (e.g. grype or trivy)
  * resp-200: {found:boolean!, result:object}
- * resp-200-desc: found=false when no cached scan exists; otherwise result holds the stored scan
+ * resp-200-desc: found=false when no cached scan exists; otherwise result holds the stored scan. Takes an env query param (from GET /api/environments); with app auth enabled it is required (400 otherwise) and scopes the lookup to that environment (403 when the caller cannot access it)
  * resp-200-example: {"found":true,"result":{"imageId":"sha256:abc123","scanner":"grype","summary":{"critical":0,"high":2}}}
- * resp-400: Image name is required
- * resp-403: Permission denied
+ * resp-400: Image name is required, or env is required when app auth is enabled
  * resp-500: Failed to get scan results
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
-	const auth = await authorize(cookies);
+	// RBAC (images:view) + enterprise environment scoping, shared with the other
+	// vuln endpoints. The same image SHA can be scanned in multiple environments, so
+	// require a concrete env when auth is on - otherwise the scope check cannot run
+	// and a user scoped to env A could read env B's scans by omitting env (CWE-639).
+	const { envIdNum: envId, denied, authEnabled } = await authorizeVulnAccess(cookies, url);
+	if (denied) return json({ error: denied.message }, { status: denied.status });
+	if (authEnabled && envId === undefined) {
+		return json({ error: 'env is required' }, { status: 400 });
+	}
 
 	const imageName = url.searchParams.get('image');
-	const envIdParam = url.searchParams.get('env');
-	const envId = envIdParam ? parseInt(envIdParam) : undefined;
 	const scanner = url.searchParams.get('scanner') as 'grype' | 'trivy' | undefined;
-
-	// Permission check with environment context
-	if (auth.authEnabled && !await auth.can('images', 'view', envId)) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
 
 	if (!imageName) {
 		return json({ error: 'Image name is required' }, { status: 400 });

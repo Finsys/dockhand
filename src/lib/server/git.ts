@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, chmodSync, readFileSync, writeFileSync }
 import { join, resolve, dirname, basename, relative } from 'node:path';
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { GIT_SSH_KEY_PATH_ENV, makeSshKeyPath, removeSshKey } from './git-ssh-key';
+import { GIT_SSH_KEY_PATH_ENV, makeSshKeyPath, cleanupSshKey } from './git-ssh-key';
 import { permissionDeniedMessage } from './git-error';
 import {
 	getGitRepository,
@@ -299,14 +299,6 @@ async function buildGitEnv(credential: GitCredentialData | null): Promise<GitEnv
 	}
 
 	return env;
-}
-
-function cleanupSshKey(credential: GitCredentialData | null, env?: GitEnv): void {
-	if (credential?.authType === 'ssh') {
-		// Removes the exact per-operation key this env created; falls back to the old
-		// deterministic path only if no env is available (legacy callers). See #1413.
-		removeSshKey(credential.id, env);
-	}
 }
 
 function buildRepoUrl(url: string, credential: GitCredentialData | null): string {
@@ -819,7 +811,7 @@ export async function listRemoteBranches(options: {
 	} catch (error: any) {
 		return { branches: [], error: error.message };
 	} finally {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 	}
 }
 

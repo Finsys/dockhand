@@ -13,6 +13,7 @@ import {
 } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
+import { filterByAccessibleEnv } from '$lib/server/env-scope-filter';
 import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
@@ -43,7 +44,10 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 	try {
 
-		const stacks = await getGitStacks(envIdNum);
+		const allStacks = await getGitStacks(envIdNum);
+		// When no env is given the query returns every environment's rows, so an
+		// enterprise non-admin must see only the environments they can access.
+		const stacks = filterByAccessibleEnv(allStacks, await auth.getAccessibleEnvironmentIds());
 		// The webhook secret authenticates the public deploy-trigger endpoints, so it must
 		// not travel to a viewer. Expose only whether one is set; the real value stays in
 		// the DB where webhook verification reads it directly.

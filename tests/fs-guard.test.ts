@@ -62,6 +62,17 @@ describe('isProtectedPath (file-browser secret guard, H1)', () => {
 		expect(isProtectedPath('/some/deep/nested/.ssh/known_hosts')).toBe(true);
 	});
 
+	test('blocks Dockhand git SSH key temp files (.ssh-key-*) in /tmp', () => {
+		// makeSshKeyPath: /tmp/.ssh-key-<id>-<pid>-<uuid>, holds the decrypted,
+		// passphrase-free private key. /tmp itself stays browsable (next test).
+		expect(isProtectedPath('/tmp/.ssh-key-7-8-7c11fbfe-6a56-46d3-9ca8-8e2d461a7b70')).toBe(true);
+		expect(isProtectedPath('/tmp/.ssh-key-1')).toBe(true);
+		expect(isProtectedPath('/TMP/.SSH-KEY-1-2-x')).toBe(true);
+		// Near miss: not the key prefix, must stay browsable.
+		expect(isProtectedPath('/tmp/.ssh-keys')).toBe(false);
+		expect(isProtectedPath('/tmp/ssh-key-1')).toBe(false);
+	});
+
 	test('does NOT block the stacks dir, external stacks, or git-repos working copies (browsing preserved)', () => {
 		expect(isProtectedPath('/app/data')).toBe(false);
 		expect(isProtectedPath('/app/data/stacks')).toBe(false);

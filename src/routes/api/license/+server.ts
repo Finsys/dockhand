@@ -60,12 +60,15 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * body-example: {"name":"ACME Corp","key":"***"}
  * resp-200: {success:boolean!, license:{}}
  * resp-400: Name and key are required, or activation was rejected (invalid key)
- * resp-403: Permission denied (missing license:manage)
+ * resp-403: Permission denied (admin only)
  * resp-500: Failed to activate the license
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('license', 'manage')) {
+	// Admin only: deactivating/replacing the license flips the edition, which in free
+	// edition makes every authenticated user an admin, so a delegated license:manage
+	// grant must not reach it.
+	if (auth.authEnabled && !auth.isAdmin) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 
@@ -109,12 +112,15 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
  * @openapi
  * summary: Deactivate the currently active license
  * resp-200: {success:boolean!}
- * resp-403: Permission denied (missing license:manage)
+ * resp-403: Permission denied (admin only)
  * resp-500: Failed to deactivate the license
  */
 export const DELETE: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('license', 'manage')) {
+	// Admin only: deactivating the license drops enterprise, which in free edition
+	// makes every authenticated user an admin, so a delegated license:manage grant
+	// must not reach it.
+	if (auth.authEnabled && !auth.isAdmin) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 

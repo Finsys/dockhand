@@ -60,7 +60,9 @@ function protectedPaths(): { dbDir: string; keyFile: string; deployLogsDir: stri
 const MAX_LINKS = 40;
 
 function isProtectedSegment(name: string): boolean {
-	return PROTECTED_SEGMENTS.has(name.toLowerCase());
+	const lower = name.toLowerCase();
+	// .ssh-key-* are Dockhand's own decrypted git SSH key temp files (makeSshKeyPath).
+	return PROTECTED_SEGMENTS.has(lower) || lower.startsWith('.ssh-key-');
 }
 
 /**

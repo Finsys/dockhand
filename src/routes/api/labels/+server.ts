@@ -9,6 +9,17 @@ async function getLabelColors(): Promise<Record<string, string>> {
 	return (colors && typeof colors === 'object' && !Array.isArray(colors)) ? colors : {};
 }
 
+// Environments the caller may see and label. getEnvironments() returns every
+// environment, so an enterprise non-admin whose roles cover only some environments must
+// be narrowed to those; admin and free edition (null) keep all. Reading, listing and
+// mutating labels all run through this so none of them crosses the environment boundary.
+async function scopedEnvironments(auth: Awaited<ReturnType<typeof authorize>>) {
+	const envs = await getEnvironments();
+	const accessibleIds = await auth.getAccessibleEnvironmentIds();
+	if (accessibleIds === null) return envs;
+	return envs.filter((e) => accessibleIds.includes(e.id));
+}
+
 /**
  * GET /api/labels
  *
@@ -26,7 +37,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 
 	try {
-		const environments = await getEnvironments();
+		const environments = await scopedEnvironments(auth);
 		const customColors = await getLabelColors();
 
 		const labelMap = new Map<string, { envId: number; envName: string }[]>();
@@ -93,7 +104,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'New label cannot be empty' }, { status: 400 });
 			}
 
-			const environments = await getEnvironments();
+			const environments = await scopedEnvironments(auth);
 			let affected = 0;
 
 			for (const env of environments) {
@@ -130,7 +141,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'label is required' }, { status: 400 });
 			}
 
-			const environments = await getEnvironments();
+			const environments = await scopedEnvironments(auth);
 			let affected = 0;
 
 			for (const env of environments) {
@@ -163,7 +174,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			}
 
 			const trimmed = label.trim();
-			const environments = await getEnvironments();
+			const environments = await scopedEnvironments(auth);
 			const targetIds = new Set(environmentIds.map(Number));
 			let affected = 0;
 

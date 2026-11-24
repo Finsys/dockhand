@@ -4,7 +4,7 @@ import {
 	getUsers,
 	createUser as dbCreateUser,
 	assignUserRole,
-	hasAdminUser,
+	hasAnyUser,
 	getUserRoles,
 	userHasAdminRole,
 	getRoleByName
@@ -120,8 +120,10 @@ export const POST: RequestHandler = async (event) => {
 		// Hash password
 		const passwordHash = await hashPassword(password);
 
-		// The first user (no Admin-role user yet) is auto-assigned the Admin role below.
-		const isFirstUser = !(await hasAdminUser());
+		// Genuine first-run only: no user exists AND the call is on the unauthenticated
+		// setup path (auth still disabled). Auto-admin and auto-login below hang off this,
+		// so it must not be reachable by an authenticated caller.
+		const isFirstUser = !auth.authEnabled && !(await hasAnyUser());
 
 		// Create user
 		const user = await dbCreateUser({
