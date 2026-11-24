@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.0.60",
+    "date": "",
+    "comingSoon": true,
+    "changes": [
+      { "type": "feature", "text": "re-pull a container's image from the edit modal (#1943, PR#1943, @vgezer)" },
+      { "type": "feature", "text": "Bitwarden inline references with bws://<secret-UUID> (PR#1952, @tuvokian)" },
+      { "type": "fix", "text": "clears a removed git stack env override from the local .env.dockhand (#1888, PR#1949, @Totopo27)" },
+      { "type": "fix", "text": "marking a variable as secret removes the stale plain-value .env from a Hawser host (#1954)" },
+      { "type": "fix", "text": "batch and scheduled updates no longer fail for containers on the default bridge network (#1957, PR#1958, @raetha)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.60"
+  },
+  {
     "version": "1.0.59",
     "date": "2026-11-22",
     "changes": [
