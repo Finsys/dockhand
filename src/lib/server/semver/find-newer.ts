@@ -59,6 +59,21 @@ export interface NewerVersion {
 	skipped: string[];
 	/** The target tag's manifest digest (`sha256:...`), when probed. Lets the UI show/copy the new tag digest-pinned. */
 	digest?: string;
+	/** When the target image was built (its config `created`), when probed. */
+	createdAt?: string;
+	/** The target's image ID (config digest) for the daemon's platform, when probed. */
+	imageId?: string;
+}
+
+/** What a probe learned about one candidate tag. */
+export interface CandidateProbe {
+	/** A runnable image worth offering. */
+	ok: boolean;
+	digest?: string | null;
+	/** The candidate is the image already running: nothing at or below it is newer. */
+	redundant?: boolean;
+	createdAt?: string | null;
+	imageId?: string | null;
 }
 
 /**
@@ -202,38 +217,60 @@ export function findNewerVersionTag(
 	};
 }
 
+const instant = (value: string | null | undefined): number | null => {
+	const t = value ? Date.parse(value) : NaN;
+	return Number.isFinite(t) ? t : null;
+};
+
 /**
- * Like findNewerVersionTag, but verifies the chosen target is a real container
- * image before offering it - dropping any tag that turns out to be a Helm chart or
- * other non-image OCI artifact published into the same repo, and re-picking the
+ * Like findNewerVersionTag, but verifies each candidate is a real container image
+ * before offering it - dropping any tag that turns out to be a Helm chart or other
+ * non-image OCI artifact published into the same repo, and re-picking the
  * next-highest version. `probe` returns `{ ok, digest }` where ok=true means a
  * runnable image; the digest (when present) is attached to the result so the UI can
  * offer the new tag digest-pinned. Async + injected so this stays pure/testable.
  *
- * Only the chosen candidate is probed, not every tag. `maxSkips` bounds the extra
- * probes so a repo full of artifacts can't fan out unbounded. `probe` failures
- * should resolve to `{ ok: true }` (fail-open) at the call site so a probe error
- * never hides a real update.
+ * When the probe knows build dates, the candidates are walked from the highest
+ * version down and the most RECENTLY BUILT one is offered: a version name says what
+ * a maintainer called a build, not when it was made, and several pending betas whose
+ * names do not order them must still yield the same answer every run. Tags of one
+ * image share its date, so among them the highest version wins. Without a date
+ * there is nothing to order by, and the highest version is offered as before.
+ *
+ * `maxSkips` bounds the probes so a repo full of tags can't fan out unbounded.
+ * `probe` failures should resolve to `{ ok: true }` (fail-open) at the call site so
+ * a probe error never hides a real update.
  */
 export async function findNewerImageTag(
 	currentTag: string,
 	allTags: string[],
-	probe: (tag: string) => Promise<{ ok: boolean; digest?: string | null; redundant?: boolean }>,
+	probe: (tag: string) => Promise<CandidateProbe>,
 	options: FindNewerOptions = {},
 	maxSkips = 5
 ): Promise<NewerVersion | null> {
 	const excluded = new Set<string>();
+	// Highest version first, which the stable sort below keeps among equal dates.
+	const offered: NewerVersion[] = [];
 	for (let i = 0; i <= maxSkips; i++) {
 		const pool = excluded.size ? allTags.filter((t) => !excluded.has(t)) : allTags;
 		const newer = findNewerVersionTag(currentTag, pool, options);
-		if (!newer) return null;
-		const { ok, digest, redundant } = await probe(newer.tag);
-		if (ok) return digest ? { ...newer, digest } : newer;
-		// The highest newer tag resolves to the image already running (a more specific
-		// tag of the same digest, e.g. 12.3 running 12.3.3). There is nothing newer, and
-		// dropping to a LOWER patch would be a downgrade - stop, don't search below it.
-		if (redundant) return null;
+		if (!newer) break;
+		const { ok, digest, redundant, createdAt, imageId } = await probe(newer.tag);
+		// This tag resolves to the image already running (a more specific tag of the
+		// same image, e.g. 12.3 running 12.3.3). Nothing below it is newer, and dropping
+		// to a LOWER patch would be a downgrade - stop, don't search below it.
+		if (redundant) break;
 		excluded.add(newer.tag);
+		if (!ok) continue;
+		offered.push({
+			...newer,
+			...(digest ? { digest } : {}),
+			...(instant(createdAt) !== null ? { createdAt: createdAt! } : {}),
+			...(imageId ? { imageId } : {})
+		});
+		if (instant(createdAt) === null) break;
 	}
-	return null;
+	const dated = offered.filter((c) => c.createdAt);
+	if (dated.length === 0) return offered[0] ?? null;
+	return dated.sort((a, b) => instant(b.createdAt)! - instant(a.createdAt)!)[0];
 }

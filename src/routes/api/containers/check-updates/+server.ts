@@ -3,12 +3,12 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { rowsToPersist, withPreviousOnError } from '$lib/utils/pending-update-rows';
-import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
+import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagImage, inspectImage } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig, getPinnedDigestReportEnabled } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
 import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
-import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
+import { checkNewerVersion, type RunningImageCheck } from '$lib/server/semver/check';
 import { userCheckListedAfter } from '$lib/server/semver/tag-source-core';
 import { parseTag } from '$lib/server/semver/tag-parser';
 import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
@@ -181,25 +181,23 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 				// Newer-version-tag detection (opt-in). Skips instantly for floating tags,
 				// so it only hits the registry for pinned versions. Never throws.
 				const versionPattern = getVersionPatternOverride(inspectData.Config?.Labels);
-				// A tag names what a maintainer called a build, not when it was made, so a
-				// repo still carrying high-sorting old tags offers them as upgrades. Reads
-				// the running image's build date locally; skipped for a floating tag, which
-				// checkNewerVersion short-circuits anyway.
-				let staleCheck: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null } | undefined;
+				// Candidates are compared with the running image itself, so a tag holding it
+				// under another index is not offered. A tag names what a maintainer called a
+				// build, not when it was made, so with rejectOlderImages a repo's
+				// high-sorting old tags are dropped too: that reads the running image's build
+				// date locally, skipped for a floating tag, which checkNewerVersion
+				// short-circuits anyway.
+				const runningImage: RunningImageCheck = {
+					probeImage: (registry, repo, digest) => getRegistryTagImage(registry, repo, digest, envIdNum),
+					currentImageId
+				};
 				if (
 					semverEnabled && !systemContainer && semverConfig.rejectOlderImages &&
 					parseTag(parseImageReference(imageName).tag, versionPattern)
 				) {
-					const currentCreatedAt = await inspectImage(currentImageId, envIdNum)
+					runningImage.currentCreatedAt = await inspectImage(currentImageId, envIdNum)
 						.then((img: any) => (typeof img?.Created === 'string' ? img.Created : null))
 						.catch(() => null);
-					if (currentCreatedAt) {
-						staleCheck = {
-							probeCreatedAt: (registry, repo, digest) =>
-								getRegistryTagCreatedAt(registry, repo, digest, envIdNum),
-							currentCreatedAt
-						};
-					}
 				}
 				const newerVersion = semverEnabled && !systemContainer
 					? await checkNewerVersion(imageName, {
@@ -207,7 +205,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 							versionPattern,
 							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels),
 						tagTransform: tagTransformFromLabels(inspectData.Config?.Labels)
-						}, getTagArtifactKind, result.localDigests ?? [], staleCheck, listedAfter).catch(() => null)
+						}, getTagArtifactKind, result.localDigests ?? [], runningImage, listedAfter).catch(() => null)
 					: null;
 
 				// Matches the scheduled check: the label suppresses the same-tag digest
