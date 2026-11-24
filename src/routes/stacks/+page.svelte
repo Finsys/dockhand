@@ -276,9 +276,16 @@
 
 	// Version-update (semver) release-notes modal — opened from a container's Tag badge.
 	let versionModalContainer = $state<StackContainer | null>(null);
-	function openVersionModal(container: StackContainer) {
+	let versionModalStack = $state<ComposeStackInfo | null>(null);
+	function openVersionModal(container: StackContainer, stack: ComposeStackInfo) {
 		versionModalContainer = container;
+		versionModalStack = stack;
 	}
+	const versionModalComposeStack = $derived(
+		versionModalStack && getStackSource(versionModalStack.name).sourceType === 'internal' && $canAccess('stacks', 'edit')
+			? versionModalStack.name
+			: null
+	);
 	let envHasScanning = $state(false);
 	let envVulnerabilityCriteria = $state<'never' | 'any' | 'critical_high' | 'critical' | 'more_than_current'>('never');
 
@@ -2789,7 +2796,7 @@
 											<VersionUpdateBadge
 												newerVersion={container.newerVersion}
 												variant="pill"
-												onclick={() => openVersionModal(container)}
+												onclick={() => openVersionModal(container, stack)}
 											/>
 										{/if}
 										<span class="flex-1"></span>
@@ -3321,6 +3328,9 @@
 	bind:container={versionModalContainer}
 	newerVersion={versionModalContainer?.newerVersion ?? null}
 	{envId}
+	composeStack={versionModalComposeStack}
+	canRedeploy={!!versionModalStack && !getStackSystemType(versionModalStack)}
+	onComposeUpdated={fetchStacks}
 />
 
 <BatchOperationModal
