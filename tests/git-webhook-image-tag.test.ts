@@ -29,12 +29,27 @@ describe('webhook image tag', () => {
 	});
 	test('rejects overlapping webhook deployments and releases the lock after failure', async () => {
 		let release!: () => void;
-		const pending = withGitStackDeployLock(1, () => new Promise<void>(resolve => { release = resolve; }));
-		expect(await withGitStackDeployLock(1, async () => true)).toBeNull();
-		expect(await withGitStackDeployLock(2, async () => true)).toBe(true);
+		const pending = withGitStackDeployLock(1, true, () => new Promise<void>(resolve => { release = resolve; }));
+		expect(await withGitStackDeployLock(1, true, async () => true)).toBeNull();
+		expect(await withGitStackDeployLock(2, true, async () => true)).toBe(true);
+		let started = false;
+		const ordinary = withGitStackDeployLock(1, false, async () => { started = true; });
+		await Promise.resolve();
+		expect(started).toBe(false);
 		release();
 		await pending;
-		await expect(withGitStackDeployLock(1, async () => { throw new Error('failed'); })).rejects.toThrow();
-		expect(await withGitStackDeployLock(1, async () => true)).toBe(true);
+		await ordinary;
+		expect(started).toBe(true);
+		await expect(withGitStackDeployLock(1, true, async () => { throw new Error('failed'); })).rejects.toThrow();
+		expect(await withGitStackDeployLock(1, true, async () => true)).toBe(true);
+	});
+	test('ordinary deployments can overlap, but a tagged deployment cannot start during them', async () => {
+		let release!: () => void;
+		const ordinary = withGitStackDeployLock(3, false, () => new Promise<void>(resolve => { release = resolve; }));
+		expect(await withGitStackDeployLock(3, false, async () => true)).toBe(true);
+		expect(await withGitStackDeployLock(3, true, async () => true)).toBeNull();
+		release();
+		await ordinary;
+		expect(await withGitStackDeployLock(3, true, async () => true)).toBe(true);
 	});
 });

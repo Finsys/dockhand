@@ -23,7 +23,9 @@ with the same name in its Git environment file. Prefer immutable tags such as
 commit SHAs for repeatable deploys; publish `latest` too if it is used as fallback.
 Protect the webhook secret as a deployment credential. IMAGE_TAG over POST requires
 the GitLab token header when a secret is configured: GitHub's HMAC covers the body,
-not the URL query. Concurrent Git deployments for the same stack in one Dockhand
-process are rejected; webhook callers receive HTTP 409 and may retry later. This
-in-process lock does not coordinate multiple Dockhand instances or other direct
-Docker operations. A tagged webhook pulls images for the entire Compose stack.
+not the URL query. A tagged webhook for a stack already being Git-deployed in
+the same Dockhand process returns HTTP 409. A regular Git deployment requested
+while a tagged webhook is running waits for it; regular deployments otherwise
+keep their existing concurrency behavior. This in-process coordination does not
+cover multiple Dockhand instances, standalone syncs, stack edits, or direct Docker
+operations. A tagged webhook pulls images for the entire Compose stack.

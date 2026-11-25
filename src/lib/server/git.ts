@@ -1391,7 +1391,7 @@ type GitStackDeployOptions = {
 };
 
 export async function deployGitStack(stackId: number, options?: GitStackDeployOptions): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
-	return (await withGitStackDeployLock(stackId, async () => {
+	return (await withGitStackDeployLock(stackId, !!options?.prepare, async () => {
 		// Standalone syncs do not take the deployment lock; don't change the tag
 		// when one is already running and will cause syncGitStack to reject us.
 		if (options?.prepare) {
@@ -1790,7 +1790,7 @@ export async function deployGitStackWithProgress(
 	stackId: number,
 	onProgress: ProgressCallback
 ): Promise<{ success: boolean; output?: string; error?: string }> {
-	const result = await withGitStackDeployLock(stackId, () => deployGitStackWithProgressUnlocked(stackId, onProgress));
+	const result = await withGitStackDeployLock(stackId, false, () => deployGitStackWithProgressUnlocked(stackId, onProgress));
 	if (result) return result;
 	onProgress({ status: 'error', error: SYNC_IN_PROGRESS_ERROR });
 	return { success: false, error: SYNC_IN_PROGRESS_ERROR };

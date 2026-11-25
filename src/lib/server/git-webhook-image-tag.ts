@@ -17,10 +17,24 @@ export function webhookDeployStatus(supplied: boolean, success: boolean, concurr
 	return !supplied || success ? 200 : concurrent ? 409 : 500;
 }
 
-// Shared by webhook, scheduled and manual Git deployments in this process.
-const activeStacks = new Set<number>();
-export async function withGitStackDeployLock<T>(id: number, run: () => Promise<T>): Promise<T | null> {
-	if (activeStacks.has(id)) return null;
-	activeStacks.add(id);
-	try { return await run(); } finally { activeStacks.delete(id); }
+// Ordinary deployments retain their existing concurrency. A tagged webhook must
+// not modify the shared environment while any Git deployment is using it.
+const activeDeployments = new Map<number, number>();
+const taggedDeployments = new Map<number, Promise<void>>();
+
+export async function withGitStackDeployLock<T>(id: number, tagged: boolean, run: () => Promise<T>): Promise<T | null> {
+	if (tagged) {
+		if (taggedDeployments.has(id) || activeDeployments.has(id)) return null;
+		let release!: () => void;
+		const done = new Promise<void>((resolve) => { release = resolve; });
+		taggedDeployments.set(id, done);
+		try { return await run(); } finally { taggedDeployments.delete(id); release(); }
+	}
+	while (taggedDeployments.has(id)) await taggedDeployments.get(id);
+	activeDeployments.set(id, (activeDeployments.get(id) ?? 0) + 1);
+	try { return await run(); } finally {
+		const remaining = (activeDeployments.get(id) ?? 1) - 1;
+		if (remaining) activeDeployments.set(id, remaining);
+		else activeDeployments.delete(id);
+	}
 }
