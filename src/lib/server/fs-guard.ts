@@ -11,8 +11,9 @@
  *     blocked because /proc/self, /proc/1, etc. all leak the same secrets and
  *     nothing legitimate is browsed there.
  *   - /etc, /root - system account/secret files (/etc/shadow, /etc/passwd, root's
- *     home). Nothing a compose file lives in, except inside DATA_DIR: the operator
- *     chose it and Dockhand keeps its stacks there (DATA_DIR=/root/docker).
+ *     home). Nothing a compose file lives in, except inside DATA_DIR or a root the
+ *     operator named in EXTRA_STACK_ROOTS: those they chose, and Dockhand keeps or
+ *     finds stacks there (DATA_DIR=/root/docker, or stacks beside it).
  *   - any path segment named .ssh (private keys / known_hosts) or .git (its
  *     config embeds remote credentials), at any depth and in any case, also when
  *     the segment is a symlink. This blocks the credential
@@ -42,6 +43,24 @@ const PROTECTED_SEGMENTS = new Set(['.ssh', '.git']);
 
 function getDataDir(): string {
 	return process.env.DATA_DIR || './data';
+}
+
+/**
+ * Extra stack roots an operator authorises with `EXTRA_STACK_ROOTS`
+ * (colon-separated absolute paths), exempted from the protected roots the same way
+ * DATA_DIR is. For a layout that keeps stacks beside DATA_DIR under a bind-mounted
+ * `/root/docker` rather than inside it. Only absolute paths are honoured; a root that
+ * is itself (or sits above) a protected root is dropped in `judge`, so it can never
+ * open all of `/root` or `/`.
+ */
+function getExtraStackRoots(): string[] {
+	const raw = process.env.EXTRA_STACK_ROOTS;
+	if (!raw) return [];
+	return raw
+		.split(':')
+		.map((p) => p.trim())
+		.filter((p) => p !== '' && isAbsolute(p))
+		.map((p) => resolve(p));
 }
 
 /** Absolute paths Dockhand must never expose through the file browser. */
@@ -167,13 +186,16 @@ function judge(requestedPath: string, roots: readonly string[]): boolean {
 		return true;
 	}
 	// Match each root both literally and symlink-resolved (e.g. macOS /etc -> /private/etc).
-	// DATA_DIR is exempt from the roots (its secrets are refused above), but only when it
-	// sits strictly below them: a DATA_DIR of /root, /etc or / would exempt the whole root.
-	const dataDir = resolveTarget(resolve(getDataDir()));
-	const inDataDir =
-		isInside(resolved, dataDir) &&
-		!roots.some((root) => isInside(root, dataDir) || isInside(resolveTarget(root), dataDir));
-	if (!inDataDir && roots.some((root) => isInside(resolved, root) || isInside(resolved, resolveTarget(root)))) {
+	// DATA_DIR and any EXTRA_STACK_ROOTS are exempt from the roots (their secrets
+	// are refused above), but only when the exempt dir sits strictly below them: an exempt
+	// dir of /root, /etc or / would exempt the whole root, so it is dropped.
+	const exemptDirs = [resolve(getDataDir()), ...getExtraStackRoots()].map(resolveTarget);
+	const inExemptDir = exemptDirs.some(
+		(dir) =>
+			isInside(resolved, dir) &&
+			!roots.some((root) => isInside(root, dir) || isInside(resolveTarget(root), dir))
+	);
+	if (!inExemptDir && roots.some((root) => isInside(resolved, root) || isInside(resolved, resolveTarget(root)))) {
 		return true;
 	}
 	return resolved.split(sep).some(isProtectedSegment);

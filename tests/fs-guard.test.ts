@@ -203,3 +203,67 @@ describe('DATA_DIR under a protected root (DATA_DIR=/root/docker)', () => {
 		}
 	});
 });
+
+describe('EXTRA_STACK_ROOTS exempts sibling stack dirs (#1964)', () => {
+	const withEnv = (dataDir: string, roots: string | undefined, fn: () => void) => {
+		const prevDD = process.env.DATA_DIR;
+		const prevR = process.env.EXTRA_STACK_ROOTS;
+		process.env.DATA_DIR = dataDir;
+		if (roots === undefined) delete process.env.EXTRA_STACK_ROOTS;
+		else process.env.EXTRA_STACK_ROOTS = roots;
+		try { fn(); } finally {
+			if (prevDD === undefined) delete process.env.DATA_DIR; else process.env.DATA_DIR = prevDD;
+			if (prevR === undefined) delete process.env.EXTRA_STACK_ROOTS; else process.env.EXTRA_STACK_ROOTS = prevR;
+		}
+	};
+	const judgeable = !existsSync('/root') || (() => { try { accessSync('/root', constants.X_OK); return true; } catch { return false; } })();
+
+	// The reporter's layout: DATA_DIR one level deep, stacks beside it under /root/docker.
+	test.skipIf(!judgeable)('allows a stack beside DATA_DIR when its root is authorised', () => {
+		withEnv('/root/docker/dockhand', '/root/docker', () => {
+			expect(isProtectedPath('/root/docker/immich/compose.yaml')).toBe(false);
+			expect(isProtectedPath('/root/docker/paperless/.env')).toBe(false);
+			expect(isProtectedPath('/root/docker')).toBe(false);
+		});
+	});
+
+	test.skipIf(!judgeable)('without the env, the sibling stack stays blocked (today\'s behaviour)', () => {
+		withEnv('/root/docker/dockhand', undefined, () => {
+			expect(isProtectedPath('/root/docker/immich/compose.yaml')).toBe(true);
+		});
+	});
+
+	test('the authorised root does not open the rest of /root or other protected trees', () => {
+		withEnv('/root/docker/dockhand', '/root/docker', () => {
+			expect(isProtectedPath('/root/.bashrc')).toBe(true);
+			expect(isProtectedPath('/root/secret/compose.yaml')).toBe(true);
+			expect(isProtectedPath('/etc/shadow')).toBe(true);
+			// Dockhand's own secrets inside the authorised tree stay blocked.
+			expect(isProtectedPath('/root/docker/dockhand/db/dockhand.db')).toBe(true);
+			expect(isProtectedPath('/root/docker/immich/.ssh/id_rsa')).toBe(true);
+		});
+	});
+
+	test('an extra root that IS or sits above a protected root exempts nothing', () => {
+		for (const root of ['/', '/root', '/etc']) {
+			withEnv('/app/data', root, () => {
+				expect(isProtectedPath('/root/.bashrc')).toBe(true);
+				expect(isProtectedPath('/etc/shadow')).toBe(true);
+			});
+		}
+	});
+
+	test('relative or empty entries are ignored', () => {
+		withEnv('/app/data', 'docker:  :/root/docker', () => {
+			// Only the absolute /root/docker entry counts.
+			expect(isProtectedPath('/root/docker/app/compose.yaml')).toBe(false);
+			expect(isProtectedPath('/root/.bashrc')).toBe(true);
+		});
+	});
+
+	test('multiple roots, colon-separated', () => {
+		withEnv('/app/data', '/root/docker:/srv/stacks', () => {
+			expect(isProtectedPath('/root/docker/app/compose.yaml')).toBe(false);
+		});
+	});
+});

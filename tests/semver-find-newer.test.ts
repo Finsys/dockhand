@@ -411,6 +411,71 @@ describe('findNewerVersionTag - linuxserver build counters', () => {
 	});
 });
 
+describe('findNewerVersionTag - installedVersion floors the skipped count (#1880)', () => {
+	// traefik:v3.7 running the real build v3.7.19, with every 3.7.x patch + v3.8.x present.
+	const traefik = [
+		'v3.7', 'v3.7.0', 'v3.7.1', 'v3.7.5', 'v3.7.17', 'v3.7.18', 'v3.7.19', 'v3.8.0', 'v3.8.1'
+	];
+
+	it('counts from the installed build, not the pinned tag', () => {
+		const r = findNewerVersionTag('v3.7', traefik, { installedVersion: 'v3.7.19' });
+		expect(r?.tag).toBe('v3.8.1');
+		// Only what is genuinely newer than v3.7.19 - not the patches already installed.
+		expect(r?.skipped).toEqual(['v3.8.0', 'v3.8.1']);
+	});
+
+	it('without the label, keeps the old behaviour (counts from the pin)', () => {
+		const r = findNewerVersionTag('v3.7', traefik);
+		expect(r?.skipped).toContain('v3.7.1');
+		expect(r?.skipped.length).toBeGreaterThan(2);
+	});
+
+	it('offers nothing when the installed build is already the newest', () => {
+		expect(findNewerVersionTag('v3.7', ['v3.7', 'v3.7.0', 'v3.7.19'], { installedVersion: 'v3.7.19' })).toBeNull();
+	});
+
+	it('target is unchanged by the label', () => {
+		const withLabel = findNewerVersionTag('v3.7', traefik, { installedVersion: 'v3.7.19' });
+		const without = findNewerVersionTag('v3.7', traefik);
+		expect(withLabel?.tag).toBe(without?.tag);
+	});
+
+	// Fail-safe: a maintainer-set label must never raise the floor past a real update.
+	it('ignores a label from a different series (wrong major/minor)', () => {
+		// A bogus v9.9.9 label must NOT suppress the real v3.8.x upgrade.
+		const r = findNewerVersionTag('v3.7', traefik, { installedVersion: 'v9.9.9' });
+		expect(r?.tag).toBe('v3.8.1');
+		expect(r?.skipped).toContain('v3.7.1');
+	});
+
+	it('ignores a label older than the pin', () => {
+		const r = findNewerVersionTag('v3.7', traefik, { installedVersion: 'v3.6.0' });
+		expect(r?.skipped).toContain('v3.7.1');
+	});
+
+	it('ignores a non-version label', () => {
+		const r = findNewerVersionTag('v3.7', traefik, { installedVersion: 'main' });
+		expect(r?.skipped).toContain('v3.7.1');
+	});
+
+	it('ignores a label of a different flavor', () => {
+		const tags = ['1.0-alpine', '1.1-alpine', '1.2-alpine'];
+		// A bare label can't floor an -alpine pin.
+		const r = findNewerVersionTag('1.0-alpine', tags, { installedVersion: '1.1' });
+		expect(r?.skipped).toContain('1.1-alpine');
+	});
+
+	// Isolates the prefix guard: same numeric parts and flavor, only the prefix differs
+	// (not the ''/'v' pair, which prefixMatches treats as equal), so only prefixMatches
+	// can reject it. Without that guard the label would floor the count wrongly.
+	it('ignores a label whose prefix differs from the pin', () => {
+		const tags = ['v3.7', 'v3.7.1', 'v3.7.19', 'v3.8.0'];
+		const r = findNewerVersionTag('v3.7', tags, { installedVersion: 'release-3.7.19' });
+		expect(r?.skipped).toContain('v3.7.1');
+	});
+
+});
+
 describe('build/revision suffix ordering and the CalVer boundary', () => {
 	it('offers a higher numeric revision suffix on the same version (pbs 4.2.8-1.1 -> -1.2)', () => {
 		expect(
