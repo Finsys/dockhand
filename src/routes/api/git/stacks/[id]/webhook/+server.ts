@@ -6,13 +6,16 @@ import { auditGitStack } from '$lib/server/audit';
 import { verifyWebhookSignature, timingSafeStringEqual } from '$lib/server/webhook-signature';
 import { decideWebhookSecretPolicy, allowSecretlessWebhook } from '$lib/server/webhook-secret-policy';
 import { decideWebhookRefSkip } from '$lib/server/git-webhook-ref';
-import { parseWebhookImageTag, resolveWebhookImageTag } from '$lib/server/git-webhook-image-tag';
+import { parseWebhookImageTag, resolveWebhookImageTag, webhookDeployStatus } from '$lib/server/git-webhook-image-tag';
 import { isConcurrentSyncSkip } from '$lib/server/git-deploy-policy';
 
-async function deployWebhook(id: number, stack: NonNullable<Awaited<ReturnType<typeof getGitStack>>>, tagValues: string[]) {
+async function deployWebhook(id: number, stack: NonNullable<Awaited<ReturnType<typeof getGitStack>>>, tagValues: string[]): Promise<{
+	result: { success: boolean; output?: string; error?: string; skipped?: boolean };
+	status: number;
+}> {
 	let tagQuery: ReturnType<typeof parseWebhookImageTag>;
 	try { tagQuery = parseWebhookImageTag(tagValues); }
-	catch (error) { return json({ error: error instanceof Error ? error.message : 'Invalid IMAGE_TAG' }, { status: 400 }); }
+	catch (error) { return { result: { success: false, error: error instanceof Error ? error.message : 'Invalid IMAGE_TAG' }, status: 400 }; }
 	const { supplied, raw } = tagQuery;
 	const result = await deployGitStack(id, {
 		force: supplied, pullImages: supplied, triggeredBy: 'webhook',
@@ -23,8 +26,10 @@ async function deployWebhook(id: number, stack: NonNullable<Awaited<ReturnType<t
 			if (tag !== current) await setStackImageTag(stack.stackName, stack.environmentId ?? null, tag);
 		} : undefined
 	});
-	if (!result.success && isConcurrentSyncSkip(result.error)) return json(result, { status: 409 });
-	return json(result, { status: result.success ? 200 : 500 });
+	// Preserve the legacy HTTP 200 response for ordinary webhooks. A caller
+	// explicitly providing a tag gets failure statuses suitable for CI.
+	const status = webhookDeployStatus(supplied, result.success, isConcurrentSyncSkip(result.error));
+	return { result, status };
 }
 
 function detectSource(request: Request): string {
@@ -90,11 +95,11 @@ export const POST: RequestHandler = async (event) => {
 			// ALLOW_WEBHOOKS_WITHOUT_SECRET opt-in (isolated network): deploy without
 			// verification, but record the unverified trigger in the audit trail.
 			if (refSkip.skip) return skipResponse(refSkip.ref, refSkip.trackedBranch);
-			const response = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
+			const { result, status } = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-				method: 'POST', source, verification: 'skipped_no_secret', status: response.status
+				method: 'POST', source, verification: 'skipped_no_secret', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
 			});
-			return response;
+			return json(result, { status });
 		}
 
 		// policy.action === 'verify' here, so a secret is present.
@@ -119,14 +124,14 @@ export const POST: RequestHandler = async (event) => {
 		if (refSkip.skip) return skipResponse(refSkip.ref, refSkip.trackedBranch);
 
 		// Deploy the git stack (syncs and deploys only if there are changes)
-		const response = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
+		const { result, status } = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
 		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-			method: 'POST', source, status: response.status
+			method: 'POST', source, result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
 		});
-		return response;
+		return json(result, { status });
 	} catch (error: any) {
 		console.error('Webhook error:', error);
-		return json({ success: false, error: 'Webhook deployment failed' }, { status: 500 });
+		return json({ success: false, error: error.message }, { status: 500 });
 	}
 };
 
@@ -171,11 +176,11 @@ export const GET: RequestHandler = async (event) => {
 		}
 		if (policy.action === 'deploy-unverified') {
 			// ALLOW_WEBHOOKS_WITHOUT_SECRET opt-in: deploy without verification, audited.
-			const response = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
+			const { result, status } = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-				method: 'GET', source: 'get', verification: 'skipped_no_secret', status: response.status
+				method: 'GET', source: 'get', verification: 'skipped_no_secret', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
 			});
-			return response;
+			return json(result, { status });
 		}
 
 		// Verify secret via query parameter for GET requests (constant-time).
@@ -188,13 +193,13 @@ export const GET: RequestHandler = async (event) => {
 		}
 
 		// Deploy the git stack (syncs and deploys only if there are changes)
-		const response = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
+		const { result, status } = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
 		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-			method: 'GET', source: 'get', status: response.status
+			method: 'GET', source: 'get', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
 		});
-		return response;
+		return json(result, { status });
 	} catch (error: any) {
 		console.error('Webhook GET error:', error);
-		return json({ success: false, error: 'Webhook deployment failed' }, { status: 500 });
+		return json({ success: false, error: error.message }, { status: 500 });
 	}
 };

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseWebhookImageTag, resolveWebhookImageTag, withGitStackDeployLock } from '../src/lib/server/git-webhook-image-tag';
+import { parseWebhookImageTag, resolveWebhookImageTag, webhookDeployStatus, withGitStackDeployLock } from '../src/lib/server/git-webhook-image-tag';
 
 describe('webhook image tag', () => {
 	test('uses the supplied tag, existing stack value, then latest', () => {
@@ -18,6 +18,14 @@ describe('webhook image tag', () => {
 		expect(parseWebhookImageTag(['a.1-b_c'])).toEqual({ supplied: true, raw: 'a.1-b_c' });
 		expect(() => parseWebhookImageTag(['a', 'b'])).toThrow();
 		expect(() => parseWebhookImageTag(['a/b'])).toThrow();
+	});
+	test('preserves existing webhook HTTP status without a tag and reports tagged failures to CI', () => {
+		expect(webhookDeployStatus(false, true, false)).toBe(200);
+		expect(webhookDeployStatus(false, false, false)).toBe(200);
+		expect(webhookDeployStatus(false, false, true)).toBe(200);
+		expect(webhookDeployStatus(true, true, false)).toBe(200);
+		expect(webhookDeployStatus(true, false, false)).toBe(500);
+		expect(webhookDeployStatus(true, false, true)).toBe(409);
 	});
 	test('rejects overlapping webhook deployments and releases the lock after failure', async () => {
 		let release!: () => void;

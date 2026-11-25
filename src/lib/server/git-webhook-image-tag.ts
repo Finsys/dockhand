@@ -12,6 +12,11 @@ export function parseWebhookImageTag(values: string[]): { supplied: boolean; raw
 	return { supplied: values.length === 1, raw };
 }
 
+/** Preserve the existing response contract when the tag parameter is absent. */
+export function webhookDeployStatus(supplied: boolean, success: boolean, concurrent: boolean): number {
+	return !supplied || success ? 200 : concurrent ? 409 : 500;
+}
+
 // Shared by webhook, scheduled and manual Git deployments in this process.
 const activeStacks = new Set<number>();
 export async function withGitStackDeployLock<T>(id: number, run: () => Promise<T>): Promise<T | null> {
