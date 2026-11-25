@@ -48,6 +48,16 @@ export interface FindNewerOptions {
 	 * is still what gets reported - the transform only feeds the comparison.
 	 */
 	tagTransform?: TagTransform | null;
+	/**
+	 * The version the running image was actually built as (from its
+	 * `org.opencontainers.image.version` label), when the compose tag is a broader
+	 * pin: `traefik:v3.7` running `v3.7.19`. Used only to drop already-installed
+	 * versions from `skipped` so the "N versions behind" count reflects what the
+	 * container still lacks, not every patch of the pinned series. Fail-safe: honoured
+	 * only when it parses, shares the current tag's prefix/flavor and is >= the current
+	 * tag, so a junk or mismatched label never narrows the search or hides an update.
+	 */
+	installedVersion?: string | null;
 }
 
 export interface NewerVersion {
@@ -105,6 +115,21 @@ export function isStaleCandidate(
 	return candidate < current;
 }
 
+/**
+ * Whether `installed` is the same pin as `base` resolved to a more specific build:
+ * same prefix and flavor, and every segment `base` names is equal in `installed`
+ * (`v3.7` -> `v3.7.19`, not `v3.7` -> `v9.9.9`). `installed` may add segments but
+ * must not disagree on any `base` has, so a mismatched label is rejected as the floor.
+ */
+export function isMoreSpecificBuildOf(installed: ParsedTag, base: ParsedTag): boolean {
+	if (!prefixMatches(installed.prefix, base.prefix)) return false;
+	if (!flavorMatches(installed, base)) return false;
+	for (let i = 0; i < base.parts.length; i++) {
+		if ((installed.parts[i] ?? 0) !== (base.parts[i] ?? 0)) return false;
+	}
+	return true;
+}
+
 /** Which segment first differs decides the bump: [0]=major, [1]=minor, else patch. */
 export function classifyBump(current: ParsedTag, candidate: ParsedTag): VersionBump {
 	if ((candidate.parts[0] ?? 0) !== (current.parts[0] ?? 0)) return 'major';
@@ -134,10 +159,18 @@ export function findNewerVersionTag(
 	allTags: string[],
 	options: FindNewerOptions = {}
 ): NewerVersion | null {
-	const { maxBump = 'major', includePrerelease = false, matchFlavor = true, versionPattern = null, tagTransform = null } = options;
+	const { maxBump = 'major', includePrerelease = false, matchFlavor = true, versionPattern = null, tagTransform = null, installedVersion = null } = options;
 
 	const current = parseTag(applyTagTransform(tagTransform, currentTag), versionPattern);
 	if (!current) return null; // floating tag — not a version, never suggest.
+
+	// The real build behind a broader pin (`v3.7` running `v3.7.19`): compare from it
+	// so already-installed patches drop out of `skipped`. Honoured only when it is a
+	// MORE SPECIFIC build of the same pin - same flavor and every segment of the pin
+	// matched - so a maintainer-set label of another series (`v9.9.9` on a `v3.7` pin)
+	// can never raise the floor past a real update.
+	const installed = installedVersion ? parseTag(applyTagTransform(tagTransform, installedVersion), versionPattern) : null;
+	const floor = installed && isMoreSpecificBuildOf(installed, current) ? installed : current;
 
 	const maxRank = BUMP_RANK[maxBump];
 	const currentIsPrerelease = isPrerelease(current);
@@ -155,7 +188,10 @@ export function findNewerVersionTag(
 		.filter((c) => !matchFlavor || flavorMatches(c.parsed, current))
 		.filter((c) => includePrerelease || currentIsPrerelease || !isPrerelease(c.parsed))
 		.filter((c) => !isCalVerDrift(current, c.parsed))
-		.filter((c) => compareParts(c.parsed, current) > 0)
+		// Newer than what is actually installed (the floor), so patches the container
+		// already runs are not counted as "behind".
+		.filter((c) => compareParts(c.parsed, floor) > 0)
+		// The bump cap stays relative to the pinned tag, so maxBump behaves as before.
 		.filter((c) => BUMP_RANK[classifyBump(current, c.parsed)] <= maxRank);
 
 	if (candidates.length === 0) return null;

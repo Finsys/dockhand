@@ -218,6 +218,18 @@ export function getVersionPatternOverride(
 }
 
 /**
+ * The version the image declares it was built as (`org.opencontainers.image.version`),
+ * or undefined. The newer-version check uses it to count from the installed build
+ * rather than a broader pin (`v3.7` running `v3.7.19`); it is a maintainer-set label,
+ * so the comparison treats it as a hint and ignores a value that does not fit the tag.
+ */
+export function getInstalledImageVersion(
+	labels: Record<string, string> | undefined | null
+): string | undefined {
+	return getLabel(labels, 'org.opencontainers.image.version');
+}
+
+/**
  * Why this container's `dockhand.version.pattern` was not used, or null when it was
  * (or when there is no label). Lets a caller say so once, since a rejected label is
  * otherwise indistinguishable from no label at all.

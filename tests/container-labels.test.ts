@@ -20,6 +20,7 @@ import {
 	getOrderValue,
 	compareContainerOrder,
 	getVersionPatternOverride,
+	getInstalledImageVersion,
 	DOCKHAND_LABELS,
 	isDigestWatchDisabledByLabel,
 	isCooldownSkippedByLabel,
@@ -310,6 +311,17 @@ describe('container filtering simulation', () => {
 		expect(isUpdateDisabledByLabel(sp.labels)).toBe(true);
 		expect(isHiddenByLabel(sp.labels)).toBe(true);
 		expect(isNotifyDisabledByLabel(sp.labels)).toBe(true);
+	});
+});
+
+describe('getInstalledImageVersion', () => {
+	test('reads org.opencontainers.image.version', () => {
+		expect(getInstalledImageVersion({ 'org.opencontainers.image.version': 'v3.7.19' })).toBe('v3.7.19');
+	});
+	test('undefined when absent or no labels', () => {
+		expect(getInstalledImageVersion({})).toBeUndefined();
+		expect(getInstalledImageVersion(null)).toBeUndefined();
+		expect(getInstalledImageVersion(undefined)).toBeUndefined();
 	});
 });
 

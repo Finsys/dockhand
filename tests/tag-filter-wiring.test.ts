@@ -53,7 +53,8 @@ describe('the tag filters reach the version check', () => {
 		// chosen by then.
 		const src = read('../src/lib/server/semver/find-newer.ts');
 		const poolAt = src.indexOf('applyTagFilter(');
-		const compareAt = src.indexOf('compareParts(c.parsed, current) > 0');
+		// The candidate version comparison (against the pinned tag or the installed-build floor).
+		const compareAt = src.search(/compareParts\(c\.parsed, \w+\) > 0/);
 		expect(poolAt).toBeGreaterThan(-1);
 		expect(compareAt).toBeGreaterThan(-1);
 		expect(poolAt).toBeLessThan(compareAt);

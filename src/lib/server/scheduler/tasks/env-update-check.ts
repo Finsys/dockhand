@@ -46,7 +46,7 @@ import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '../../container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, getInstalledImageVersion, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '../../container-labels';
 import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
 import { tagTransformFromLabels } from '$lib/server/semver/tag-transform';
 import { recreateContainer } from './container-update';
@@ -312,7 +312,7 @@ export async function runEnvUpdateCheckJob(
 					}
 					const newer = await checkNewerVersion(
 						imageName,
-						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels), tagTransform: tagTransformFromLabels(inspectData.Config?.Labels) },
+						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels), tagTransform: tagTransformFromLabels(inspectData.Config?.Labels), installedVersion: getInstalledImageVersion(inspectData.Config?.Labels) },
 						getTagArtifactKind,
 						result.localDigests ?? [],
 						staleCheck,

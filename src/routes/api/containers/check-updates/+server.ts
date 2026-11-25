@@ -6,7 +6,7 @@ import { rowsToPersist, withPreviousOnError } from '$lib/utils/pending-update-ro
 import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig, getPinnedDigestReportEnabled } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '$lib/server/container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getInstalledImageVersion, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
 import { userCheckListedAfter } from '$lib/server/semver/tag-source-core';
@@ -206,7 +206,8 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 							...semverOptions,
 							versionPattern,
 							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels),
-						tagTransform: tagTransformFromLabels(inspectData.Config?.Labels)
+						tagTransform: tagTransformFromLabels(inspectData.Config?.Labels),
+						installedVersion: getInstalledImageVersion(inspectData.Config?.Labels)
 						}, getTagArtifactKind, result.localDigests ?? [], staleCheck, listedAfter).catch(() => null)
 					: null;
 
