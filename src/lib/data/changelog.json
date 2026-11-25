@@ -6,9 +6,12 @@
     "changes": [
       { "type": "feature", "text": "re-pull a container's image from the edit modal (#1943, PR#1943, @vgezer)" },
       { "type": "feature", "text": "Bitwarden inline references with bws://<secret-UUID> (PR#1952, @tuvokian)" },
+      { "type": "feature", "text": "EXTRA_STACK_ROOTS authorizes stack directories kept outside DATA_DIR (#1964)" },
+      { "type": "feature", "text": "prune the Docker build cache from the images page and on a per-environment schedule (#1937)" },
       { "type": "fix", "text": "clears a removed git stack env override from the local .env.dockhand (#1888, PR#1949, @Totopo27)" },
       { "type": "fix", "text": "marking a variable as secret removes the stale plain-value .env from a Hawser host (#1954)" },
-      { "type": "fix", "text": "batch and scheduled updates no longer fail for containers on the default bridge network (#1957, PR#1958, @raetha)" }
+      { "type": "fix", "text": "batch and scheduled updates no longer fail for containers on the default bridge network (#1957, PR#1958, @raetha)" },
+      { "type": "fix", "text": "newer-version count reflects the installed build, not the pinned tag (#1880)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.60"
   },
