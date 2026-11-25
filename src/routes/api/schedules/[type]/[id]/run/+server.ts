@@ -10,7 +10,7 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { triggerContainerUpdate, triggerScheduledContainerAction, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune, triggerDeployLogReconcile } from '$lib/server/scheduler';
+import { triggerContainerUpdate, triggerScheduledContainerAction, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune, triggerBuildCachePrune, triggerDeployLogReconcile } from '$lib/server/scheduler';
 import { getBackupConfig, getBackupDestination } from '$lib/server/db';
 import { runScheduledBackup } from '$lib/server/scheduler/tasks/backup';
 import { runRepoPrune, runRepoCheck, runRepoVerify } from '$lib/server/scheduler/tasks/repo-maintenance';
@@ -88,6 +88,7 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			}
 			case 'env_update_check':
 			case 'image_prune':
+			case 'build_cache_prune':
 				scheduleEnvId = scheduleId;
 				break;
 			case 'system_cleanup':
@@ -143,6 +144,9 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 				break;
 			case 'image_prune':
 				result = await triggerImagePrune(scheduleId);
+				break;
+			case 'build_cache_prune':
+				result = await triggerBuildCachePrune(scheduleId);
 				break;
 			case 'backup': {
 				const config = await getBackupConfig(scheduleId);

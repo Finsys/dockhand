@@ -5,7 +5,7 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getScheduledContainerActionById, setScheduledContainerActionEnabled, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings, getImagePruneSettings, setImagePruneSettings, getBackupConfig, updateBackupConfig, getBackupDestination, updateBackupDestination } from '$lib/server/db';
+import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getScheduledContainerActionById, setScheduledContainerActionEnabled, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings, getImagePruneSettings, setImagePruneSettings, getBuildCachePruneSettings, setBuildCachePruneSettings, getBackupConfig, updateBackupConfig, getBackupDestination, updateBackupDestination } from '$lib/server/db';
 import { registerSchedule, unregisterSchedule, registerContainerActionSchedules, unregisterContainerActionSchedules } from '$lib/server/scheduler';
 import { authorize } from '$lib/server/authorize';
 import { auditBackup, auditBackupDestination } from '$lib/server/audit';
@@ -142,6 +142,29 @@ export const POST: RequestHandler = async (event) => {
 				await registerSchedule(scheduleId, 'image_prune', scheduleId);
 			} else {
 				unregisterSchedule(scheduleId, 'image_prune');
+			}
+
+			return json({ success: true, enabled: newEnabled });
+		} else if (type === 'build_cache_prune') {
+			// scheduleId is environmentId for build cache prune
+			const envDenied = await auth.requireEnvAccess(scheduleId);
+			if (envDenied) return envDenied;
+			const config = await getBuildCachePruneSettings(scheduleId);
+			if (!config) {
+				return json({ error: 'Schedule not found' }, { status: 404 });
+			}
+
+			const newEnabled = !config.enabled;
+			await setBuildCachePruneSettings(scheduleId, {
+				...config,
+				enabled: newEnabled
+			});
+
+			// Register or unregister schedule with croner
+			if (newEnabled && config.cronExpression) {
+				await registerSchedule(scheduleId, 'build_cache_prune', scheduleId);
+			} else {
+				unregisterSchedule(scheduleId, 'build_cache_prune');
 			}
 
 			return json({ success: true, enabled: newEnabled });

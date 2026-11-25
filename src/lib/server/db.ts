@@ -1171,6 +1171,8 @@ export const NOTIFICATION_EVENT_TYPES = [
 	{ id: 'disk_space_warning', label: 'Disk space warning', description: 'Docker disk usage exceeds threshold', group: 'system', scope: 'environment' },
 	{ id: 'image_prune_success', label: 'Image prune success', description: 'Scheduled image prune completed successfully', group: 'system', scope: 'environment' },
 	{ id: 'image_prune_failed', label: 'Image prune failed', description: 'Scheduled image prune failed', group: 'system', scope: 'environment' },
+	{ id: 'build_cache_prune_success', label: 'Build cache prune success', description: 'Scheduled build cache prune completed successfully', group: 'system', scope: 'environment' },
+	{ id: 'build_cache_prune_failed', label: 'Build cache prune failed', description: 'Scheduled build cache prune failed', group: 'system', scope: 'environment' },
 	{ id: 'repo_prune_success', label: 'Backup repository prune success', description: 'Scheduled repository prune completed successfully', group: 'system', scope: 'system' },
 	{ id: 'repo_prune_failed', label: 'Backup repository prune failed', description: 'Scheduled repository prune failed', group: 'system', scope: 'system' },
 	{ id: 'repo_check_success', label: 'Backup repository check success', description: 'Scheduled integrity check completed successfully', group: 'system', scope: 'system' },
@@ -1198,7 +1200,7 @@ export const ENVIRONMENT_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_TYPES.filter(e
 
 export type NotificationEventType = typeof NOTIFICATION_EVENT_TYPES[number]['id'];
 
-const environmentEventIds = new Set(ENVIRONMENT_NOTIFICATION_EVENTS.map(e => e.id));
+const environmentEventIds = new Set<string>(ENVIRONMENT_NOTIFICATION_EVENTS.map(e => e.id));
 
 /** Strip system-scoped events (e.g. license_expiring) from environment notification records */
 function filterEnvironmentEventTypes(eventTypes: string[]): string[] {
@@ -3875,7 +3877,7 @@ export type AuditEntityType =
 	| 'container' | 'image' | 'stack' | 'volume' | 'network'
 	| 'user' | 'role' | 'settings' | 'environment' | 'registry' | 'git_repository' | 'git_credential'
 	| 'config_set' | 'notification' | 'oidc_provider' | 'ldap_config' | 'git_stack' | 'api_token'
-	| 'secret_provider' | 'backup_destination' | 'backup_config';
+	| 'secret_provider' | 'backup_destination' | 'backup_config' | 'build_cache';
 
 export interface AuditLogData {
 	id: number;
@@ -4581,7 +4583,7 @@ export async function saveDashboardPreferences(data: {
 // SCHEDULE EXECUTION OPERATIONS
 // =============================================================================
 
-export type ScheduleType = 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
+export type ScheduleType = 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'build_cache_prune' | 'backup' | 'restore' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
 
 // Runtime list of every ScheduleType. Used to bound a no-type-filter executions
 // query to the caller's viewable types (viewableScheduleTypes). The two type
@@ -4596,6 +4598,7 @@ export const ALL_SCHEDULE_TYPES = [
 	'system_cleanup',
 	'env_update_check',
 	'image_prune',
+	'build_cache_prune',
 	'backup',
 	'restore',
 	'stack_deploy',
@@ -5651,6 +5654,72 @@ export async function getAllImagePruneSettings(): Promise<Array<{ envId: number;
 			const envId = parseInt(match[1]);
 			const config = JSON.parse(row.value) as ImagePruneSettings;
 			// Return all settings, not just enabled ones (UI needs to show disabled schedules too)
+			results.push({ envId, settings: config });
+		} catch {
+			// Skip invalid entries
+		}
+	}
+	return results;
+}
+
+// =============================================================================
+// BUILD CACHE PRUNE SETTINGS (per environment, stored as JSON in settings)
+// =============================================================================
+
+export interface BuildCachePruneSettings {
+	enabled: boolean;
+	cronExpression: string;
+	/** dangling = only unreferenced cache; all = every unused cache layer. */
+	pruneMode: 'dangling' | 'all';
+	/** Age filter passed to Docker as filters.until, e.g. "336h" (empty = no age limit). */
+	until?: string;
+	/** Bytes of cache to keep (reserved-space / keep-storage); 0 or undefined = no floor. */
+	reservedSpace?: number;
+	lastPruned?: string;
+	lastResult?: {
+		spaceReclaimed?: number;
+		cachesDeleted: number;
+	};
+}
+
+export async function getBuildCachePruneSettings(envId: number): Promise<BuildCachePruneSettings | null> {
+	const key = `env_${envId}_build_cache_prune`;
+	const result = await db.select().from(settings).where(eq(settings.key, key));
+	if (!result[0]) return null;
+	try {
+		return JSON.parse(result[0].value);
+	} catch {
+		return null;
+	}
+}
+
+export async function setBuildCachePruneSettings(envId: number, config: BuildCachePruneSettings): Promise<void> {
+	const key = `env_${envId}_build_cache_prune`;
+	const value = JSON.stringify(config);
+	const existing = await db.select().from(settings).where(eq(settings.key, key));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, key));
+	} else {
+		await db.insert(settings).values({ key, value });
+	}
+}
+
+export async function deleteBuildCachePruneSettings(envId: number): Promise<void> {
+	const key = `env_${envId}_build_cache_prune`;
+	await db.delete(settings).where(eq(settings.key, key));
+}
+
+export async function getAllBuildCachePruneSettings(): Promise<Array<{ envId: number; settings: BuildCachePruneSettings }>> {
+	const rows = await db.select().from(settings).where(sql`${settings.key} LIKE 'env_%_build_cache_prune'`);
+	const results: Array<{ envId: number; settings: BuildCachePruneSettings }> = [];
+	for (const row of rows) {
+		try {
+			const match = row.key.match(/^env_(\d+)_build_cache_prune$/);
+			if (!match) continue;
+			const envId = parseInt(match[1]);
+			const config = JSON.parse(row.value) as BuildCachePruneSettings;
 			results.push({ envId, settings: config });
 		} catch {
 			// Skip invalid entries

@@ -167,7 +167,7 @@
 
 	interface ScheduleExecution {
 		id: number;
-		scheduleType: 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
+		scheduleType: 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'build_cache_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
 		scheduleId: number;
 		environmentId: number | null;
 		entityName: string;
@@ -186,7 +186,7 @@
 	interface Schedule {
 		key: string; // Unique key: type-id
 		id: number;
-		type: 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
+		type: 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'build_cache_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
 		name: string;
 		entityName: string;
 		description?: string;
@@ -991,6 +991,8 @@
 								{m.schedules_type_env_update_checks()}
 							{:else if filterTypes[0] === 'image_prune'}
 								{m.schedules_type_image_prune()}
+							{:else if filterTypes[0] === 'build_cache_prune'}
+								{m.schedules_type_build_cache_prune()}
 							{:else if filterTypes[0] === 'backup'}
 								{m.nav_backups()}
 							{:else if filterTypes[0] === 'repo_prune'}
@@ -1044,6 +1046,10 @@
 					<Select.Item value="image_prune">
 						<Trash2 class="w-4 h-4 mr-2 inline text-amber-500 drop-shadow-[0_0_3px_rgba(245,158,11,0.4)]" />
 						{m.schedules_type_image_prune()}
+					</Select.Item>
+					<Select.Item value="build_cache_prune">
+						<Trash2 class="w-4 h-4 mr-2 inline text-violet-500 drop-shadow-[0_0_3px_rgba(139,92,246,0.4)]" />
+						{m.schedules_type_build_cache_prune()}
 					</Select.Item>
 					<Select.Item value="stack_deploy">
 						<Server class="w-4 h-4 mr-2 inline text-indigo-500 drop-shadow-[0_0_3px_rgba(99,102,241,0.4)]" />
@@ -1263,6 +1269,8 @@
 						{/if}
 					{:else if schedule.type === 'image_prune'}
 						<Trash2 class="w-4 h-4 text-amber-500 glow-amber shrink-0" />
+					{:else if schedule.type === 'build_cache_prune'}
+						<Trash2 class="w-4 h-4 text-violet-500 shrink-0" />
 					{:else if schedule.type === 'backup'}
 						<Archive class="w-4 h-4 text-blue-500 glow-blue shrink-0" />
 					{:else if schedule.type === 'repo_prune'}
@@ -1313,6 +1321,8 @@
 								<span class="truncate">{schedule.description || m.schedules_desc_env_update_check()}</span>
 							{:else if schedule.type === 'image_prune'}
 								<span class="truncate">{schedule.description || m.images_list_prune_unused_title()}</span>
+							{:else if schedule.type === 'build_cache_prune'}
+								<span class="truncate">{schedule.description || m.images_build_cache_title()}</span>
 							{:else if schedule.type === 'backup'}
 								{@const parts = (schedule.description || '').split(' to ')}
 								{#if parts.length === 2}

@@ -11671,6 +11671,277 @@
         ]
       }
     },
+    "/api/environments/{id}/build-cache-prune": {
+      "get": {
+        "operationId": "get_api_environments_id_build-cache-prune",
+        "tags": [
+          "environments"
+        ],
+        "summary": "Get the automatic build-cache-prune schedule settings for an environment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cronExpression": {
+                          "type": "string"
+                        },
+                        "pruneMode": {
+                          "type": "string"
+                        },
+                        "until": {
+                          "type": "string"
+                        },
+                        "reservedSpace": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "cronExpression",
+                        "pruneMode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "settings"
+                  ]
+                },
+                "example": {
+                  "settings": {
+                    "enabled": false,
+                    "cronExpression": "0 3 * * 0",
+                    "pruneMode": "dangling"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (RBAC 'environments:view' missing)"
+          },
+          "404": {
+            "description": "Environment not found"
+          },
+          "500": {
+            "description": "Unexpected error while loading the settings"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_environments_id_build-cache-prune",
+        "tags": [
+          "environments"
+        ],
+        "summary": "Save the automatic build-cache-prune schedule for an environment (registers/unregisters the croner job)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cronExpression": {
+                          "type": "string"
+                        },
+                        "pruneMode": {
+                          "type": "string"
+                        },
+                        "until": {
+                          "type": "string"
+                        },
+                        "reservedSpace": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "cronExpression",
+                        "pruneMode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "settings"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "settings": {
+                    "enabled": true,
+                    "cronExpression": "string",
+                    "pruneMode": "string",
+                    "until": "string",
+                    "reservedSpace": 0
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
+          },
+          "404": {
+            "description": "Environment not found"
+          },
+          "500": {
+            "description": "Unexpected error while saving the settings"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "cronExpression": {
+                    "type": "string"
+                  },
+                  "pruneMode": {
+                    "type": "string"
+                  },
+                  "until": {
+                    "type": "string"
+                  },
+                  "reservedSpace": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "example": {
+                "enabled": true,
+                "cronExpression": "0 3 * * 0",
+                "pruneMode": "dangling",
+                "until": "336h"
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_environments_id_build-cache-prune",
+        "tags": [
+          "environments"
+        ],
+        "summary": "Immediately run a build cache prune for an environment (outside its schedule)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The prune operation itself failed (Docker error)"
+          },
+          "403": {
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
+          },
+          "404": {
+            "description": "Environment not found"
+          },
+          "500": {
+            "description": "Unexpected error while triggering the prune"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/environments/{id}/disk-warning": {
       "get": {
         "operationId": "get_api_environments_id_disk-warning",
@@ -22160,6 +22431,61 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/prune/build-cache": {
+      "post": {
+        "operationId": "post_api_prune_build-cache",
+        "tags": [
+          "prune"
+        ],
+        "summary": "Prune the Docker build cache, streaming progress as a Server-Sent Events job",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Target environment id; scopes both the prune operation and the permission check (defaults to the local environment) (from GET /api/environments)"
+          },
+          {
+            "name": "all",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "When \"true\", prune all unused build cache; otherwise only dangling cache (the default, matching docker builder prune)"
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Age filter, e.g. \"336h\" or \"24h\" - prune only cache older than this (Go duration or timestamp)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream; the final `result` event contains { success, result } or { success:false, error }"
+          },
+          "403": {
+            "description": "Permission denied - requires the \"remove\" permission on images for the target environment"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Returns a text/event-stream. On completion a `result` event carries { success, result } on success or { success:false, error } on failure - the operation itself never returns a non-200 HTTP status once the permission check passes. Wraps Docker's POST /build/prune; the disk-keep parameter is reserved-space on API 1.48+ and keep-storage below."
       }
     },
     "/api/prune/containers": {

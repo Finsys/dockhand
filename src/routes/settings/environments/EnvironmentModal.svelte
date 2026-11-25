@@ -92,6 +92,7 @@
 	import { labelColorOverrides } from '$lib/stores/label-colors';
 	import EventTypesEditor, { ENVIRONMENT_EVENT_IDS, shownEventCount } from './EventTypesEditor.svelte';
 	import UpdatesTab from './tabs/UpdatesTab.svelte';
+	import PruneTab from './tabs/PruneTab.svelte';
 	import ActivityTab from './tabs/ActivityTab.svelte';
 	import ReportsTab from './tabs/ReportsTab.svelte';
 	import { m } from '$lib/paraglide/messages.js';
@@ -504,6 +505,14 @@
 	let imagePruneLastPruned = $state<string | undefined>(undefined);
 	let imagePruneLastResult = $state<{ spaceReclaimed?: number; imagesRemoved: number } | undefined>(undefined);
 	let imagePruneLoading = $state(false);
+	let buildCachePruneEnabled = $state(false);
+	let buildCachePruneCron = $state('0 3 * * 0'); // Default: 3 AM Sunday
+	let buildCachePruneMode = $state<'dangling' | 'all'>('dangling');
+	let buildCachePruneUntil = $state('');
+	let buildCachePruneReservedGiB = $state('');
+	let buildCachePruneLastPruned = $state<string | undefined>(undefined);
+	let buildCachePruneLastResult = $state<{ spaceReclaimed?: number; cachesDeleted: number } | undefined>(undefined);
+	let buildCachePruneLoading = $state(false);
 
 	// === Validation Functions ===
 	function isValidHost(host: string): boolean {
@@ -578,6 +587,7 @@
 			loadUpdateCheckSettings(environment.id);
 			if (isAdmin) loadReportSettings(environment.id);
 			loadImagePruneSettings(environment.id);
+			loadBuildCachePruneSettings(environment.id);
 			loadTimezone(environment.id);
 			loadDiskWarningSettings(environment.id);
 			if (usesStackPath(formConnectionType)) loadRemoteStacksDir(environment.id);
@@ -639,6 +649,13 @@
 			imagePruneMode = 'dangling';
 			imagePruneLastPruned = undefined;
 			imagePruneLastResult = undefined;
+			buildCachePruneEnabled = false;
+			buildCachePruneCron = '0 3 * * 0';
+			buildCachePruneMode = 'dangling';
+			buildCachePruneUntil = '';
+			buildCachePruneReservedGiB = '';
+			buildCachePruneLastPruned = undefined;
+			buildCachePruneLastResult = undefined;
 			// Reset the scheduled report; the tab is live while adding, so it needs its
 			// channels even though there is no environment id yet.
 			resetReportSettings();
@@ -897,6 +914,10 @@
 				if (imagePruneEnabled && newEnv?.id) {
 					await saveImagePruneSettings(newEnv.id);
 				}
+				// Save build cache prune settings if enabled
+				if (buildCachePruneEnabled && newEnv?.id) {
+					await saveBuildCachePruneSettings(newEnv.id);
+				}
 				// Save timezone if not default
 				if (newEnv?.id) {
 					await saveTimezone(newEnv.id);
@@ -1041,6 +1062,7 @@
 				await saveUpdateCheckSettings(environment.id);
 				const reportSaved = isAdmin ? await saveReportSettings(environment.id) : true;
 				await saveImagePruneSettings(environment.id);
+				await saveBuildCachePruneSettings(environment.id);
 				await saveTimezone(environment.id);
 				await saveDiskWarningSettings(environment.id);
 				if (usesStackPath(formConnectionType)) await saveRemoteStacksDir(environment.id);
@@ -1412,6 +1434,59 @@
 		}
 	}
 
+	async function loadBuildCachePruneSettings(envId: number) {
+		buildCachePruneLoading = true;
+		try {
+			const response = await fetch(`/api/environments/${envId}/build-cache-prune`);
+			if (response.ok) {
+				const data = await response.json();
+				if (data.settings) {
+					buildCachePruneEnabled = data.settings.enabled ?? false;
+					buildCachePruneCron = data.settings.cronExpression || '0 3 * * 0';
+					buildCachePruneMode = data.settings.pruneMode || 'dangling';
+					buildCachePruneUntil = data.settings.until || '';
+					buildCachePruneReservedGiB = typeof data.settings.reservedSpace === 'number' && data.settings.reservedSpace > 0
+						? String(+(data.settings.reservedSpace / 1024 ** 3).toFixed(2))
+						: '';
+					buildCachePruneLastPruned = data.settings.lastPruned;
+					buildCachePruneLastResult = data.settings.lastResult;
+				} else {
+					buildCachePruneEnabled = false;
+					buildCachePruneCron = '0 3 * * 0';
+					buildCachePruneMode = 'dangling';
+					buildCachePruneUntil = '';
+					buildCachePruneReservedGiB = '';
+					buildCachePruneLastPruned = undefined;
+					buildCachePruneLastResult = undefined;
+				}
+			}
+		} catch (error) {
+			console.error('Failed to load build cache prune settings:', error);
+		} finally {
+			buildCachePruneLoading = false;
+		}
+	}
+
+	async function saveBuildCachePruneSettings(envId: number) {
+		try {
+			const gib = parseFloat(buildCachePruneReservedGiB);
+			const reservedSpace = Number.isFinite(gib) && gib > 0 ? Math.floor(gib * 1024 ** 3) : undefined;
+			await fetch(`/api/environments/${envId}/build-cache-prune`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					enabled: buildCachePruneEnabled,
+					cronExpression: buildCachePruneCron,
+					pruneMode: buildCachePruneMode,
+					until: buildCachePruneUntil.trim() || undefined,
+					reservedSpace
+				})
+			});
+		} catch (error) {
+			console.error('Failed to save build cache prune settings:', error);
+		}
+	}
+
 	async function removeGrype(envId?: number) {
 		removingGrype = true;
 		try {
@@ -1756,7 +1831,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => { if (o) focusFirstInput(); else onClose(); }}>
-	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+	<Dialog.Content class="max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
 		<Dialog.Header class="flex-shrink-0 border-b pb-4">
 			<Dialog.Title class="flex items-center gap-2">
 				{#if !isEditing}
@@ -1783,6 +1858,10 @@
 				<Tabs.Trigger value="updates" class="flex-1 flex items-center justify-center gap-1.5">
 					<CircleFadingArrowUp class="w-3.5 h-3.5" />
 					{m.envmodal_tab_updates()}
+				</Tabs.Trigger>
+				<Tabs.Trigger value="prune" class="flex-1 flex items-center justify-center gap-1.5">
+					<Trash2 class="w-3.5 h-3.5" />
+					{m.envmodal_tab_prune()}
 				</Tabs.Trigger>
 				<Tabs.Trigger value="activity" class="flex-1 flex items-center justify-center gap-1.5">
 					<Activity class="w-3.5 h-3.5" />
@@ -2743,13 +2822,27 @@
 						minimumReleaseAgeOverridden={minimumReleaseAgeOverridden}
 						bind:minimumReleaseAgeOverride={minimumReleaseAgeOverride}
 						scannerEnabled={scannerEnabled}
+						bind:timezone={formTimezone}
+					/>
+				</Tabs.Content>
+
+				<!-- Prune Tab -->
+				<Tabs.Content value="prune" class="space-y-4 mt-0 h-full">
+					<PruneTab
 						imagePruneLoading={imagePruneLoading}
 						bind:imagePruneEnabled={imagePruneEnabled}
 						bind:imagePruneCron={imagePruneCron}
 						bind:imagePruneMode={imagePruneMode}
 						imagePruneLastPruned={imagePruneLastPruned}
 						imagePruneLastResult={imagePruneLastResult}
-						bind:timezone={formTimezone}
+						buildCachePruneLoading={buildCachePruneLoading}
+						bind:buildCachePruneEnabled={buildCachePruneEnabled}
+						bind:buildCachePruneCron={buildCachePruneCron}
+						bind:buildCachePruneMode={buildCachePruneMode}
+						bind:buildCachePruneUntil={buildCachePruneUntil}
+						bind:buildCachePruneReservedGiB={buildCachePruneReservedGiB}
+						buildCachePruneLastPruned={buildCachePruneLastPruned}
+						buildCachePruneLastResult={buildCachePruneLastResult}
 					/>
 				</Tabs.Content>
 

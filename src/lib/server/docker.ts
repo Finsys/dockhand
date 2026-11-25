@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
 import { toWebReadableStream } from './node-readable-stream';
 import { buildImagePruneFilters, pruneAllUnused, holderFailureWarning, type ImagePruneResult } from './image-prune-core';
+import { buildBuildPruneQuery, type BuildCachePruneOptions } from './build-cache-prune-core';
 import { containerImageNamer, containersPerImage } from './image-usage-core';
 import { demuxDockerStream } from './docker-demux-core';
 import { isExpectedConnectionError, isQuietDockerFailure, transportTimeoutError } from './docker-probe-core';
@@ -5110,6 +5111,27 @@ export async function pruneVolumes(
 
 export async function pruneNetworks(envId?: number | null) {
 	return dockerJsonRequest('/networks/prune', { method: 'POST' }, envId);
+}
+
+/** Result of `POST /build/prune` (Docker's BuildPruneResponse). */
+export interface BuildCachePruneResult {
+	CachesDeleted?: string[] | null;
+	SpaceReclaimed?: number;
+}
+
+export async function pruneBuildCache(
+	opts: BuildCachePruneOptions,
+	envId?: number | null
+): Promise<BuildCachePruneResult> {
+	// The disk-keep field name depends on the daemon's API version (reserved-space from
+	// 1.48, keep-storage below) - build-cache-prune-core picks it from the negotiated version.
+	const apiVersion = await getNegotiatedApiVersion(envId);
+	const qs = buildBuildPruneQuery(opts, apiVersion);
+	return dockerJsonRequest<BuildCachePruneResult>(
+		`/build/prune${qs ? `?${qs}` : ''}`,
+		{ method: 'POST' },
+		envId
+	);
 }
 
 export async function pruneAll(envId?: number | null) {

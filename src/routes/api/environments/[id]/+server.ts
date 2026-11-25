@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { join } from 'path';
 import { existsSync, rmSync, renameSync } from 'fs';
 import type { RequestHandler } from './$types';
-import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, deleteEnvReportSettings, getGitStacksForEnvironmentOnly, deleteGitStack, getBackupConfigs, rebaseStackSourcePaths, getEnvironmentByName } from '$lib/server/db';
+import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, deleteBuildCachePruneSettings, deleteEnvReportSettings, getGitStacksForEnvironmentOnly, deleteGitStack, getBackupConfigs, rebaseStackSourcePaths, getEnvironmentByName } from '$lib/server/db';
 import { clearDockerClientCache } from '$lib/server/docker';
 import { deleteGitStackFiles, getGitReposDir } from '$lib/server/git';
 import { getStacksDir } from '$lib/server/stacks';
@@ -334,6 +334,10 @@ export const DELETE: RequestHandler = async (event) => {
 		// Clean up image prune settings and unregister schedule
 		await deleteImagePruneSettings(id);
 		unregisterSchedule(id, 'image_prune');
+
+		// Clean up build cache prune settings and unregister schedule
+		await deleteBuildCachePruneSettings(id);
+		unregisterSchedule(id, 'build_cache_prune');
 
 		// Clean up the scheduled report and unregister it
 		await deleteEnvReportSettings(id);

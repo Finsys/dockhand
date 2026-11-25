@@ -15,6 +15,7 @@ import {
 	updateGitStack,
 	deleteEnvUpdateCheckSettings,
 	deleteImagePruneSettings,
+	deleteBuildCachePruneSettings,
 	deleteBackupConfig,
 	getBackupConfig,
 	getBackupDestination,
@@ -120,6 +121,14 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 			if (envDenied) return envDenied;
 			await deleteImagePruneSettings(scheduleId);
 			unregisterSchedule(scheduleId, 'image_prune');
+			return json({ success: true });
+
+		} else if (type === 'build_cache_prune') {
+			// Delete build cache prune settings (scheduleId is environmentId)
+			const envDenied = await auth.requireEnvAccess(scheduleId);
+			if (envDenied) return envDenied;
+			await deleteBuildCachePruneSettings(scheduleId);
+			unregisterSchedule(scheduleId, 'build_cache_prune');
 			return json({ success: true });
 
 		} else if (type === 'backup') {

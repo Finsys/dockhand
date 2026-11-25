@@ -1,5 +1,5 @@
-// Dashboard disk-usage segment -> page it links to. Build cache has no page of
-// its own, so it returns null and the click falls through to the tile (#1314).
+// Dashboard disk-usage segment -> page it links to. Build cache links to the
+// images page, where the prune-build-cache action lives.
 export type DiskSegmentKey = 'images' | 'containers' | 'volumes' | 'buildCache';
 
 export function diskSegmentPath(key: DiskSegmentKey): string | null {
@@ -10,6 +10,8 @@ export function diskSegmentPath(key: DiskSegmentKey): string | null {
 			return '/containers';
 		case 'volumes':
 			return '/volumes';
+		case 'buildCache':
+			return '/images';
 		default:
 			return null;
 	}

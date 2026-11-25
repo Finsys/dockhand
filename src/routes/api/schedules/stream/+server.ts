@@ -10,6 +10,7 @@ import {
 	getAllAutoUpdateGitStacks,
 	getAllEnvUpdateCheckSettings,
 	getAllImagePruneSettings,
+	getAllBuildCachePruneSettings,
 	getBackupConfigs,
 	getBackupDestination,
 	getBackupDestinations,
@@ -185,6 +186,44 @@ async function getSchedulesData(): Promise<ScheduleInfo[]> {
 		})
 	);
 	schedules.push(...imagePruneSchedules);
+
+	// Get build cache prune schedules
+	const buildCachePruneConfigs = await getAllBuildCachePruneSettings();
+	const buildCachePruneSchedules = await Promise.all(
+		buildCachePruneConfigs.map(async ({ envId, settings }) => {
+			const [env, lastExecution, recentExecutions, timezone] = await Promise.all([
+				getEnvironment(envId),
+				getLastExecutionForSchedule('build_cache_prune', envId),
+				getRecentExecutionsForSchedule('build_cache_prune', envId, 5),
+				getEnvironmentTimezone(envId)
+			]);
+			const isEnabled = settings.enabled ?? false;
+			const nextRun = isEnabled && settings.cronExpression ? getNextRun(settings.cronExpression, timezone) : null;
+
+			const description = settings.pruneMode === 'all'
+				? 'Prune all unused build cache'
+				: 'Prune dangling build cache only';
+
+			return {
+				id: envId,
+				type: 'build_cache_prune' as const,
+				name: `Prune build cache: ${env?.name || 'Unknown'}`,
+				entityName: env?.name || 'Unknown',
+				description,
+				environmentId: envId,
+				environmentName: env?.name ?? null,
+				enabled: isEnabled,
+				scheduleType: 'custom',
+				cronExpression: settings.cronExpression ?? null,
+				nextRun: nextRun?.toISOString() ?? null,
+				lastExecution: lastExecution ?? null,
+				recentExecutions,
+				isSystem: false,
+				pruneMode: settings.pruneMode
+			};
+		})
+	);
+	schedules.push(...buildCachePruneSchedules);
 
 	// Get backup schedules
 	const allBackupConfigs = await getBackupConfigs();

@@ -33,6 +33,7 @@
 	import ImageHistoryModal from './ImageHistoryModal.svelte';
 	import ImageScanModal from './ImageScanModal.svelte';
 	import PushToRegistryModal from './PushToRegistryModal.svelte';
+	import PruneBuildCachePopover from './PruneBuildCachePopover.svelte';
 	import ImagePullModal from '$lib/components/ImagePullModal.svelte';
 	import type { ImageInfo } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
@@ -1079,6 +1080,7 @@
 					</span>
 				{/snippet}
 			</ConfirmPopover>
+			<PruneBuildCachePopover {envId} onComplete={fetchImages} />
 			{/if}
 			{#if $canAccess('images', 'pull')}
 			<Button size="sm" variant="default" onclick={() => showPullModal = true}>

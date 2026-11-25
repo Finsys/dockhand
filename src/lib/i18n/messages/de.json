@@ -3393,6 +3393,22 @@
 	"images_list_prune_unused_title": "Ungenutzte Images bereinigen",
 	"images_list_prune_unused_hint": "ALLE Images entfernen, die von keinem Container verwendet werden (auch getaggte Images)",
 	"images_list_prune_unused": "Ungenutzte bereinigen",
+	"images_build_cache_button": "Build-Cache bereinigen",
+	"images_build_cache_hint": "Docker-Build-Cache zurückgewinnen (von Builds auf diesem Host)",
+	"images_build_cache_title": "Build-Cache bereinigen",
+	"images_build_cache_desc": "Vom Docker-Build-Cache belegten Speicher zurückgewinnen.",
+	"images_build_cache_mode_label": "Modus",
+	"images_build_cache_mode_dangling": "Nur verwaiste",
+	"images_build_cache_mode_all": "Alle ungenutzten",
+	"images_build_cache_until_label": "Älter als",
+	"images_build_cache_reserved_label": "Behalten (GiB)",
+	"images_build_cache_fields_hint": "Alter (z. B. 336h) und reservierter Speicher behalten aktuellen Cache, damit Build-on-Deploy-Stacks nicht komplett neu bauen.",
+	"images_build_cache_all_warning": "Das Bereinigen des gesamten Caches lässt Build-on-Deploy-Stacks beim nächsten Deploy jeden Dienst neu bauen.",
+	"images_build_cache_submit": "Bereinigen",
+	"images_build_cache_cancel": "Abbrechen",
+	"images_build_cache_toast_done": "Build-Cache bereinigt, {size} zurückgewonnen",
+	"images_build_cache_toast_nothing": "Kein Build-Cache zum Zurückgewinnen",
+	"images_build_cache_toast_failed": "Build-Cache konnte nicht bereinigt werden",
 	"images_list_pull": "Pullen",
 	"images_list_loading": "Wird geladen…",
 	"images_list_load_from_tar": "Aus tar laden",
@@ -4365,6 +4381,7 @@
 	"schedules_type_git_stack_syncs": "Git-Stack-Synchronisierungen",
 	"schedules_type_env_update_checks": "Umgebungs-Updateprüfungen",
 	"schedules_type_image_prune": "Image-Bereinigung",
+	"schedules_type_build_cache_prune": "Build-Cache-Bereinigung",
 	"schedules_type_repo_prune": "Repo-Bereinigung",
 	"schedules_type_repo_check": "Repo-Prüfung",
 	"schedules_type_data_verify": "Datenverifizierung",
@@ -4996,6 +5013,7 @@
 	"envmodal_toast_token_generate_failed": "Token konnte nicht erzeugt werden",
 	"envmodal_tab_general": "Allgemein",
 	"envmodal_tab_updates": "Updates",
+	"envmodal_tab_prune": "Bereinigung",
 	"envmodal_tab_notifications": "Benachrichtigungen",
 	"envmodal_tab_reports": "Berichte",
 	"envmodal_remove_custom_icon": "Eigenes Icon entfernen",
@@ -5271,6 +5289,10 @@
 	"settings_envs_event_image_prune_success_desc": "Geplante Image-Bereinigung erfolgreich abgeschlossen",
 	"settings_envs_event_image_prune_failed": "Image-Bereinigung fehlgeschlagen",
 	"settings_envs_event_image_prune_failed_desc": "Geplante Image-Bereinigung fehlgeschlagen",
+	"settings_envs_event_build_cache_prune_success": "Build-Cache-Bereinigung abgeschlossen",
+	"settings_envs_event_build_cache_prune_success_desc": "Geplante Build-Cache-Bereinigung erfolgreich abgeschlossen",
+	"settings_envs_event_build_cache_prune_failed": "Build-Cache-Bereinigung fehlgeschlagen",
+	"settings_envs_event_build_cache_prune_failed_desc": "Geplante Build-Cache-Bereinigung fehlgeschlagen",
 	"settings_envs_event_environment_offline": "Umgebung offline",
 	"settings_envs_event_environment_offline_desc": "Umgebung ist nicht mehr erreichbar",
 	"settings_envs_event_environment_online": "Umgebung online",
@@ -5426,6 +5448,10 @@
 	"settings_envs_prune_description": "Entfernt ungenutzte Docker-Images automatisch nach Zeitplan, um Speicherplatz freizugeben.",
 	"settings_envs_prune_enable": "Automatische Image-Bereinigung aktivieren",
 	"settings_envs_prune_enable_hint": "Ungenutzte Images nach Zeitplan automatisch entfernen",
+	"settings_envs_build_cache_prune_title": "Automatische Build-Cache-Bereinigung",
+	"settings_envs_build_cache_prune_description": "Den Docker-Build-Cache nach Zeitplan automatisch zurückgewinnen, um Speicher freizugeben.",
+	"settings_envs_build_cache_prune_enable": "Automatische Build-Cache-Bereinigung aktivieren",
+	"settings_envs_build_cache_prune_enable_hint": "Den Build-Cache nach Zeitplan automatisch bereinigen",
 	"settings_envs_prune_mode": "Bereinigungsmodus",
 	"settings_envs_prune_mode_dangling": "Nur verwaiste Images",
 	"settings_envs_prune_mode_all": "Alle ungenutzten Images",
@@ -6648,7 +6674,21 @@
 	"settings_git_item_repository": "Repository",
 	"settings_git_delete": "Löschen",
 	"settings_git_checking_stacks": "Es wird geprüft, welche Stacks dieses Repository verwenden…",
-	"settings_git_delete_affects_stacks": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Das Löschen dieses Repositorys betrifft {count} Stack:", "countPlural=other": "Das Löschen dieses Repositorys betrifft {count} Stacks:"}}],
+	"settings_git_delete_affects_stacks": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Das Löschen dieses Repositorys betrifft {count} Stack:",
+				"countPlural=other": "Das Löschen dieses Repositorys betrifft {count} Stacks:"
+			}
+		}
+	],
 	"settings_git_error_url_required_to_test": "Für den Test ist eine Repository-URL erforderlich",
 	"settings_git_test_success_detail": "Verbindung erfolgreich! Branch: {branch}, Commit: {commit}",
 	"settings_git_connection_test_failed": "Verbindungstest fehlgeschlagen",

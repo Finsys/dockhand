@@ -109,6 +109,8 @@
 				{ id: 'image_pulled', label: m.settings_envs_event_image_pulled, description: m.settings_envs_event_image_pulled_desc },
 				{ id: 'image_prune_success', label: m.settings_envs_event_image_prune_success, description: m.settings_envs_event_image_prune_success_desc },
 				{ id: 'image_prune_failed', label: m.settings_envs_event_image_prune_failed, description: m.settings_envs_event_image_prune_failed_desc },
+				{ id: 'build_cache_prune_success', label: m.settings_envs_event_build_cache_prune_success, description: m.settings_envs_event_build_cache_prune_success_desc },
+				{ id: 'build_cache_prune_failed', label: m.settings_envs_event_build_cache_prune_failed, description: m.settings_envs_event_build_cache_prune_failed_desc },
 				{ id: 'environment_offline', label: m.settings_envs_event_environment_offline, description: m.settings_envs_event_environment_offline_desc },
 				{ id: 'environment_online', label: m.settings_envs_event_environment_online, description: m.settings_envs_event_environment_online_desc },
 				{ id: 'disk_space_warning', label: m.settings_envs_event_disk_space_warning, description: m.settings_envs_event_disk_space_warning_desc }

@@ -3211,6 +3211,22 @@
 	"images_list_prune_unused_title": "清理未使用镜像",
 	"images_list_prune_unused_hint": "删除未被任何容器使用的所有镜像(包括带标签的镜像)",
 	"images_list_prune_unused": "清理未使用",
+	"images_build_cache_button": "清理构建缓存",
+	"images_build_cache_hint": "回收 Docker 构建缓存（来自此主机上的构建）",
+	"images_build_cache_title": "清理构建缓存",
+	"images_build_cache_desc": "回收 Docker 构建缓存占用的磁盘空间。",
+	"images_build_cache_mode_label": "模式",
+	"images_build_cache_mode_dangling": "仅悬空",
+	"images_build_cache_mode_all": "所有未使用",
+	"images_build_cache_until_label": "早于",
+	"images_build_cache_reserved_label": "保留 (GiB)",
+	"images_build_cache_fields_hint": "保留时长（如 336h）和预留空间可保留近期缓存，使构建部署型 stack 不会完全重建。",
+	"images_build_cache_all_warning": "清理全部缓存会导致构建部署型 stack 在下次部署时重建所有服务。",
+	"images_build_cache_submit": "清理",
+	"images_build_cache_cancel": "取消",
+	"images_build_cache_toast_done": "构建缓存已清理，回收 {size}",
+	"images_build_cache_toast_nothing": "没有可回收的构建缓存",
+	"images_build_cache_toast_failed": "清理构建缓存失败",
 	"images_list_pull": "拉取",
 	"images_list_loading": "加载中…",
 	"images_list_load_from_tar": "从 tar 加载",
@@ -4113,6 +4129,7 @@
 	"schedules_type_git_stack_syncs": "Git 堆栈同步",
 	"schedules_type_env_update_checks": "环境变量更新检查",
 	"schedules_type_image_prune": "镜像清理",
+	"schedules_type_build_cache_prune": "构建缓存清理",
 	"schedules_type_repo_prune": "仓库清理",
 	"schedules_type_repo_check": "仓库检查",
 	"schedules_type_data_verify": "数据校验",
@@ -4744,6 +4761,7 @@
 	"envmodal_toast_token_generate_failed": "生成令牌失败",
 	"envmodal_tab_general": "常规",
 	"envmodal_tab_updates": "更新",
+	"envmodal_tab_prune": "清理",
 	"envmodal_tab_notifications": "通知",
 	"envmodal_tab_reports": "报告",
 	"envmodal_remove_custom_icon": "删除自定义图标",
@@ -5019,6 +5037,10 @@
 	"settings_envs_event_image_prune_success_desc": "计划镜像清理已成功完成",
 	"settings_envs_event_image_prune_failed": "镜像清理失败",
 	"settings_envs_event_image_prune_failed_desc": "计划镜像清理失败",
+	"settings_envs_event_build_cache_prune_success": "构建缓存清理已完成",
+	"settings_envs_event_build_cache_prune_success_desc": "计划的构建缓存清理已成功完成",
+	"settings_envs_event_build_cache_prune_failed": "构建缓存清理失败",
+	"settings_envs_event_build_cache_prune_failed_desc": "计划的构建缓存清理失败",
 	"settings_envs_event_environment_offline": "环境离线",
 	"settings_envs_event_environment_offline_desc": "环境无法访问",
 	"settings_envs_event_environment_online": "环境在线",
@@ -5174,6 +5196,10 @@
 	"settings_envs_prune_description": "按计划自动删除未使用的 Docker 镜像以释放磁盘空间。",
 	"settings_envs_prune_enable": "启用自动镜像清理",
 	"settings_envs_prune_enable_hint": "按计划自动删除未使用的镜像",
+	"settings_envs_build_cache_prune_title": "自动清理构建缓存",
+	"settings_envs_build_cache_prune_description": "按计划自动回收 Docker 构建缓存以释放磁盘空间。",
+	"settings_envs_build_cache_prune_enable": "启用自动清理构建缓存",
+	"settings_envs_build_cache_prune_enable_hint": "按计划自动清理构建缓存",
 	"settings_envs_prune_mode": "清理模式",
 	"settings_envs_prune_mode_dangling": "仅悬空镜像",
 	"settings_envs_prune_mode_all": "所有未使用的镜像",
@@ -6348,7 +6374,21 @@
 	"settings_git_item_repository": "仓库",
 	"settings_git_delete": "删除",
 	"settings_git_checking_stacks": "正在检查哪些堆栈使用此仓库...",
-	"settings_git_delete_affects_stacks": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "删除此仓库会影响 {count} 个堆栈：", "countPlural=other": "删除此仓库会影响 {count} 个堆栈："}}],
+	"settings_git_delete_affects_stacks": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "删除此仓库会影响 {count} 个堆栈：",
+				"countPlural=other": "删除此仓库会影响 {count} 个堆栈："
+			}
+		}
+	],
 	"settings_git_error_url_required_to_test": "测试前必须填写仓库 URL",
 	"settings_git_test_success_detail": "连接成功!分支:{branch},提交:{commit}",
 	"settings_git_connection_test_failed": "连接测试失败",

@@ -8,7 +8,7 @@ describe('diskSegmentPath', () => {
 		expect(diskSegmentPath('volumes')).toBe('/volumes');
 	});
 
-	test('build cache has no view, so it is not linked', () => {
-		expect(diskSegmentPath('buildCache')).toBeNull();
+	test('build cache links to the images page, where its prune action lives', () => {
+		expect(diskSegmentPath('buildCache')).toBe('/images');
 	});
 });

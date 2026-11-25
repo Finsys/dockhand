@@ -36,6 +36,8 @@ import {
 	getAllEnvUpdateCheckSettings,
 	getImagePruneSettings,
 	getAllImagePruneSettings,
+	getBuildCachePruneSettings,
+	getAllBuildCachePruneSettings,
 	getEnvironment,
 	getEnvironmentTimezone,
 	getDefaultTimezone,
@@ -62,6 +64,7 @@ import { runGitStackSync } from './tasks/git-stack-sync';
 import { runEnvUpdateCheckJob } from './tasks/env-update-check';
 import { runEnvReport } from './tasks/env-report';
 import { runImagePrune } from './tasks/image-prune';
+import { runBuildCachePrune } from './tasks/build-cache-prune';
 import { runScheduledBackup } from './tasks/backup';
 import { runRepoPrune, runRepoCheck, runRepoVerify } from './tasks/repo-maintenance';
 import { parsePoliciesJson } from '../backups/helpers';
@@ -100,6 +103,7 @@ export type DynamicScheduleType =
 	| 'git_stack_sync'
 	| 'env_update_check'
 	| 'image_prune'
+	| 'build_cache_prune'
 	| 'backup'
 	| 'repo_prune'
 	| 'repo_check'
@@ -415,6 +419,18 @@ export async function refreshAllSchedules(): Promise<void> {
 		console.error('[Scheduler] Error loading env report schedules:', errorMsg);
 	}
 
+	// Register build cache prune schedules
+	try {
+		const buildCacheConfigs = await getAllBuildCachePruneSettings();
+		for (const { envId, settings } of buildCacheConfigs) {
+			if (settings.enabled && settings.cronExpression) {
+				await registerSchedule(envId, 'build_cache_prune', envId);
+			}
+		}
+	} catch (error) {
+		console.error('[Scheduler] Error registering build cache prune schedules:', error);
+	}
+
 	// Register image prune schedules
 	let imagePruneCount = 0;
 	try {
@@ -548,6 +564,14 @@ export async function registerSchedule(
 			cronExpression = config.cronExpression;
 			entityName = `Prune: ${env.name}`;
 			enabled = config.enabled;
+		} else if (type === 'build_cache_prune') {
+			const config = await getBuildCachePruneSettings(scheduleId);
+			if (!config) return false;
+			const env = await getEnvironment(scheduleId);
+			if (!env) return false;
+			cronExpression = config.cronExpression;
+			entityName = `Build cache prune: ${env.name}`;
+			enabled = config.enabled;
 		} else if (type === 'backup') {
 			const config = await getBackupConfig(scheduleId);
 			if (!config) return false;
@@ -613,6 +637,10 @@ export async function registerSchedule(
 				const config = await getImagePruneSettings(scheduleId);
 				if (!config || !config.enabled) return;
 				await runImagePrune(scheduleId, 'cron');
+			} else if (type === 'build_cache_prune') {
+				const config = await getBuildCachePruneSettings(scheduleId);
+				if (!config || !config.enabled) return;
+				await runBuildCachePrune(scheduleId, 'cron');
 			} else if (type === 'backup') {
 				const config = await getBackupConfig(scheduleId);
 				if (!config || !config.enabled) return;
@@ -734,6 +762,22 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		console.error('[Scheduler] Error refreshing env update check schedule:', errorMsg);
+	}
+
+	// Re-register build cache prune schedule for this environment
+	try {
+		const config = await getBuildCachePruneSettings(environmentId);
+		if (config && config.enabled && config.cronExpression) {
+			const registered = await registerSchedule(
+				environmentId,
+				'build_cache_prune',
+				environmentId
+			);
+			if (registered) refreshedCount++;
+		}
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing build cache prune schedule:', errorMsg);
 	}
 
 	// Re-register image prune schedule for this environment
@@ -1031,6 +1075,30 @@ export async function triggerImagePrune(environmentId: number): Promise<{ succes
 
 		// Run in background
 		runImagePrune(environmentId, 'manual');
+
+		return { success: true };
+	} catch (error: any) {
+		return { success: false, error: error.message };
+	}
+}
+
+/**
+ * Manually trigger a build cache prune for an environment.
+ */
+export async function triggerBuildCachePrune(environmentId: number): Promise<{ success: boolean; executionId?: number; error?: string }> {
+	try {
+		const config = await getBuildCachePruneSettings(environmentId);
+		if (!config) {
+			return { success: false, error: 'Build cache prune settings not found for this environment' };
+		}
+
+		const env = await getEnvironment(environmentId);
+		if (!env) {
+			return { success: false, error: 'Environment not found' };
+		}
+
+		// Run in background
+		runBuildCachePrune(environmentId, 'manual');
 
 		return { success: true };
 	} catch (error: any) {
