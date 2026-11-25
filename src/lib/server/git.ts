@@ -27,6 +27,7 @@ import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, readRepoFile, stripUrlCredentials, incompatibleCredentialReason } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
 import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX, isConcurrentSyncSkip, SYNC_IN_PROGRESS_ERROR } from './git-deploy-policy';
+import { withGitStackDeployLock } from './git-webhook-image-tag';
 import { resolveStackBranch } from '../git-stack-branch';
 import { parseEnvFileContent, redactEnvVarsForLog } from './env-file-content-core';
 export { parseEnvFileContent };
@@ -1379,10 +1380,36 @@ async function markGitStackDeployFailed(
  * recorder setup, right at its own deployStack() call. See that function's doc
  * comment for why it is a second call site instead of routing through here.
  */
-export async function deployGitStack(
+type GitStackDeployOptions = {
+	force?: boolean;
+	pullImages?: boolean;
+	triggeredBy?: ScheduleTrigger;
+	userId?: number;
+	onLine?: (line: string) => void;
+	/** Run after acquiring the deployment lock, before syncing. */
+	prepare?: () => Promise<void>;
+};
+
+export async function deployGitStack(stackId: number, options?: GitStackDeployOptions): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
+	return (await withGitStackDeployLock(stackId, async () => {
+		// Standalone syncs do not take the deployment lock; don't change the tag
+		// when one is already running and will cause syncGitStack to reject us.
+		if (options?.prepare) {
+			const stack = await getGitStack(stackId);
+			if (!stack) return { success: false, error: 'Git stack not found' };
+			if (stack.syncStatus === 'syncing') return { success: false, error: SYNC_IN_PROGRESS_ERROR };
+		}
+		await options?.prepare?.();
+		return deployGitStackUnlocked(stackId, options);
+	})) ?? { success: false, error: SYNC_IN_PROGRESS_ERROR };
+}
+
+async function deployGitStackUnlocked(
 	stackId: number,
 	options?: {
 		force?: boolean;
+		/** Pull images even when the stack's usual repull setting is disabled. */
+		pullImages?: boolean;
 		/** Who/what triggered this deploy, for the stack_deploy run record. Defaults to
 		 *  'manual' for backward compatibility with existing callers/tests that predate
 		 *  this parameter -- every REAL call site below passes its own explicit value. */
@@ -1431,7 +1458,7 @@ export async function deployGitStack(
 					envId: gitStack.environmentId ?? null,
 					userId: options?.userId,
 					triggeredBy,
-					options: { pull: !!gitStack.repullImages, build: !!gitStack.buildOnDeploy, forceRecreate: !!(options?.force ?? true) },
+					options: { pull: !!(options?.pullImages || gitStack.repullImages), build: !!gitStack.buildOnDeploy, forceRecreate: !!(options?.force ?? true) },
 					composeHash: '',
 					envHash: '',
 					secrets: []
@@ -1540,7 +1567,7 @@ export async function deployGitStack(
 		envId: gitStack.environmentId ?? null,
 		userId: options?.userId,
 		triggeredBy,
-		options: { pull: !!gitStack.repullImages, build: !!gitStack.buildOnDeploy, forceRecreate: !!forceRecreate },
+		options: { pull: !!(options?.pullImages || gitStack.repullImages), build: !!gitStack.buildOnDeploy, forceRecreate: !!forceRecreate },
 		composeHash: hashComposeContent(syncResult.composeContent!),
 		envHash: hashEnvFingerprint(effectiveEnvVars),
 		secrets: Object.values(effectiveEnvVars)
@@ -1569,7 +1596,7 @@ export async function deployGitStack(
 			forceRecreate,
 			build: gitStack.buildOnDeploy,
 			noBuildCache: gitStack.noBuildCache,
-			pullPolicy: gitStack.repullImages ? 'always' : undefined,
+			pullPolicy: (options?.pullImages || gitStack.repullImages) ? 'always' : undefined,
 			filesToDelete: syncResult.deletionPlan?.toDelete,
 			isGitDeploy: true, // stack_* skips the channels that get git_sync_* below
 			onLine
@@ -1760,6 +1787,16 @@ type ProgressCallback = (data: {
  * which path.
  */
 export async function deployGitStackWithProgress(
+	stackId: number,
+	onProgress: ProgressCallback
+): Promise<{ success: boolean; output?: string; error?: string }> {
+	const result = await withGitStackDeployLock(stackId, () => deployGitStackWithProgressUnlocked(stackId, onProgress));
+	if (result) return result;
+	onProgress({ status: 'error', error: SYNC_IN_PROGRESS_ERROR });
+	return { success: false, error: SYNC_IN_PROGRESS_ERROR };
+}
+
+async function deployGitStackWithProgressUnlocked(
 	stackId: number,
 	onProgress: ProgressCallback
 ): Promise<{ success: boolean; output?: string; error?: string }> {

@@ -1,11 +1,31 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitStack } from '$lib/server/db';
+import { getGitStack, getStackEnvVars, setStackImageTag } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
 import { auditGitStack } from '$lib/server/audit';
 import { verifyWebhookSignature, timingSafeStringEqual } from '$lib/server/webhook-signature';
 import { decideWebhookSecretPolicy, allowSecretlessWebhook } from '$lib/server/webhook-secret-policy';
 import { decideWebhookRefSkip } from '$lib/server/git-webhook-ref';
+import { parseWebhookImageTag, resolveWebhookImageTag } from '$lib/server/git-webhook-image-tag';
+import { isConcurrentSyncSkip } from '$lib/server/git-deploy-policy';
+
+async function deployWebhook(id: number, stack: NonNullable<Awaited<ReturnType<typeof getGitStack>>>, tagValues: string[]) {
+	let tagQuery: ReturnType<typeof parseWebhookImageTag>;
+	try { tagQuery = parseWebhookImageTag(tagValues); }
+	catch (error) { return json({ error: error instanceof Error ? error.message : 'Invalid IMAGE_TAG' }, { status: 400 }); }
+	const { supplied, raw } = tagQuery;
+	const result = await deployGitStack(id, {
+		force: supplied, pullImages: supplied, triggeredBy: 'webhook',
+		prepare: supplied ? async () => {
+			const variables = await getStackEnvVars(stack.stackName, stack.environmentId ?? null, false);
+			const current = variables.find(v => v.key === 'IMAGE_TAG')?.value;
+			const tag = resolveWebhookImageTag(raw, current);
+			if (tag !== current) await setStackImageTag(stack.stackName, stack.environmentId ?? null, tag);
+		} : undefined
+	});
+	if (!result.success && isConcurrentSyncSkip(result.error)) return json(result, { status: 409 });
+	return json(result, { status: result.success ? 200 : 500 });
+}
 
 function detectSource(request: Request): string {
 	if (request.headers.get('x-hub-signature-256')) return 'github';
@@ -18,6 +38,7 @@ function detectSource(request: Request): string {
  * summary: Webhook trigger (GitHub/GitLab) that deploys a git stack when its signature/token verifies
  * description: Public endpoint authenticated by the stack's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification.
  * path: id:integer! Git stack ID (from GET /api/git/stacks)
+ * query: IMAGE_TAG:string Docker image tag; an explicit value triggers a deployment and image pull
  * resp-200: {success:boolean, skipped:boolean, error:string, output:string}
  * resp-200-example: {"success":true,"skipped":false}
  * resp-400: The id path segment is not a valid integer
@@ -27,7 +48,7 @@ function detectSource(request: Request): string {
  * resp-500: The deployment triggered by the webhook failed
  */
 export const POST: RequestHandler = async (event) => {
-	const { params, request } = event;
+	const { params, request, url } = event;
 	try {
 		const id = parseInt(params.id);
 		if (isNaN(id)) {
@@ -69,11 +90,11 @@ export const POST: RequestHandler = async (event) => {
 			// ALLOW_WEBHOOKS_WITHOUT_SECRET opt-in (isolated network): deploy without
 			// verification, but record the unverified trigger in the audit trail.
 			if (refSkip.skip) return skipResponse(refSkip.ref, refSkip.trackedBranch);
-			const result = await deployGitStack(id, { force: false, triggeredBy: 'webhook' });
+			const response = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-				method: 'POST', source, verification: 'skipped_no_secret', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
+				method: 'POST', source, verification: 'skipped_no_secret', status: response.status
 			});
-			return json(result);
+			return response;
 		}
 
 		// policy.action === 'verify' here, so a secret is present.
@@ -89,18 +110,23 @@ export const POST: RequestHandler = async (event) => {
 			});
 			return json({ error: 'Invalid webhook signature' }, { status: 401 });
 		}
+		// GitHub signs the body only, not the query string. A captured signed push
+		// must not authorize an attacker-selected image tag.
+		if (githubSignature && event.url.searchParams.has('IMAGE_TAG')) {
+			return json({ error: 'IMAGE_TAG requires GitLab token authentication' }, { status: 400 });
+		}
 
 		if (refSkip.skip) return skipResponse(refSkip.ref, refSkip.trackedBranch);
 
 		// Deploy the git stack (syncs and deploys only if there are changes)
-		const result = await deployGitStack(id, { force: false, triggeredBy: 'webhook' });
+		const response = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
 		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-			method: 'POST', source, result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
+			method: 'POST', source, status: response.status
 		});
-		return json(result);
+		return response;
 	} catch (error: any) {
 		console.error('Webhook error:', error);
-		return json({ success: false, error: error.message }, { status: 500 });
+		return json({ success: false, error: 'Webhook deployment failed' }, { status: 500 });
 	}
 };
 
@@ -110,6 +136,7 @@ export const POST: RequestHandler = async (event) => {
  * summary: GET webhook trigger for a git stack, with the secret passed as the `secret` query parameter
  * path: id:integer! Git stack ID (from GET /api/git/stacks)
  * query: secret:string Webhook secret; required only if the stack has a webhook secret configured
+ * query: IMAGE_TAG:string Docker image tag; an explicit value triggers a deployment and image pull
  * resp-200: {success:boolean, skipped:boolean, error:string, output:string}
  * resp-200-example: {"success":true,"skipped":false}
  * resp-400: The id path segment is not a valid integer
@@ -144,11 +171,11 @@ export const GET: RequestHandler = async (event) => {
 		}
 		if (policy.action === 'deploy-unverified') {
 			// ALLOW_WEBHOOKS_WITHOUT_SECRET opt-in: deploy without verification, audited.
-			const result = await deployGitStack(id, { force: false, triggeredBy: 'webhook' });
+			const response = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-				method: 'GET', source: 'get', verification: 'skipped_no_secret', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
+				method: 'GET', source: 'get', verification: 'skipped_no_secret', status: response.status
 			});
-			return json(result);
+			return response;
 		}
 
 		// Verify secret via query parameter for GET requests (constant-time).
@@ -161,13 +188,13 @@ export const GET: RequestHandler = async (event) => {
 		}
 
 		// Deploy the git stack (syncs and deploys only if there are changes)
-		const result = await deployGitStack(id, { force: false, triggeredBy: 'webhook' });
+		const response = await deployWebhook(id, gitStack, url.searchParams.getAll('IMAGE_TAG'));
 		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-			method: 'GET', source: 'get', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
+			method: 'GET', source: 'get', status: response.status
 		});
-		return json(result);
+		return response;
 	} catch (error: any) {
 		console.error('Webhook GET error:', error);
-		return json({ success: false, error: error.message }, { status: 500 });
+		return json({ success: false, error: 'Webhook deployment failed' }, { status: 500 });
 	}
 };

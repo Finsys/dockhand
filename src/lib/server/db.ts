@@ -5949,6 +5949,26 @@ export async function setStackEnvVars(
 	}
 }
 
+/** Update one stack variable without replacing unrelated variables. */
+export async function setStackImageTag(stackName: string, environmentId: number | null, value: string): Promise<void> {
+	const condition = and(
+		eq(stackEnvironmentVariables.stackName, stackName),
+		environmentId === null ? isNull(stackEnvironmentVariables.environmentId) : eq(stackEnvironmentVariables.environmentId, environmentId),
+		eq(stackEnvironmentVariables.key, 'IMAGE_TAG')
+	);
+	const existing = await db.select().from(stackEnvironmentVariables).where(condition);
+	const now = new Date().toISOString();
+	if (existing.length) {
+		// Preserve the secret flag if the user chose to mark this variable secret.
+		await db.update(stackEnvironmentVariables).set({
+			value: existing[0].isSecret ? (encrypt(value) ?? '') : value,
+			updatedAt: now
+		}).where(condition);
+	} else {
+		await db.insert(stackEnvironmentVariables).values({ stackName, environmentId, key: 'IMAGE_TAG', value, isSecret: false, createdAt: now, updatedAt: now });
+	}
+}
+
 /**
  * Get the set of secret key names for a stack.
  * Used to mask secret values in container inspect responses.
