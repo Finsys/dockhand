@@ -13,6 +13,7 @@ import { sendEnvironmentNotification } from './notifications/index.js';
 import { shouldNotifyContainerEvent } from './container-event-notify.js';
 import { isHealthTransition } from './subprocess-manager.js';
 import { pushMetric } from './metrics-store.js';
+import { edgeCpuPercent, edgeMemoryPercent } from './edge-metrics-core.js';
 import { secureGetRandomValues, secureRandomUUID } from './crypto-fallback.js';
 import { hashPassword, verifyPassword } from './auth.js';
 // The 'stream' message routing logic lives in a db-free core module so it stays unit-testable
@@ -269,11 +270,11 @@ export async function handleEdgeMetrics(
 			};
 		}
 
-		// Normalize CPU by core count (agent sends raw percentage across all cores)
-		const cpuPercent = metrics.cpuCores > 0 ? metrics.cpuUsage / metrics.cpuCores : metrics.cpuUsage;
-		const memoryPercent = metrics.memoryTotal > 0
-			? (metrics.memoryUsed / metrics.memoryTotal) * 100
-			: 0;
+		// cpuUsage is already whole-host utilization 0-100 (the agent computes it from the
+		// aggregate /proc/stat line), so it is used as-is. Dividing by cpuCores here would
+		// normalize a second time and underreport host CPU by the core count.
+		const cpuPercent = edgeCpuPercent(metrics);
+		const memoryPercent = edgeMemoryPercent(metrics);
 
 		// Push to in-memory ring buffer
 		pushMetric(environmentId, cpuPercent, memoryPercent, metrics.memoryUsed, metrics.memoryTotal);
