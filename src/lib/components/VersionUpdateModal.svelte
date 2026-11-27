@@ -1,18 +1,20 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import { Box, ArrowRight, ExternalLink, Copy, Check, RefreshCw, ChevronDown, BookOpen, ShieldCheck, Info } from 'lucide-svelte';
+	import { Box, ArrowRight, ExternalLink, Copy, Check, RefreshCw, ChevronDown, BookOpen, ShieldCheck, Info, FileCode, Rocket } from 'lucide-svelte';
 	import { toast } from 'svelte-sonner';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { renderMarkdown } from '$lib/utils/markdown';
 	import { formatDate } from '$lib/stores/settings';
 	import { repoBaseOf } from '$lib/utils/pinned-ref';
+	import { replaceServiceImageTag } from '$lib/utils/compose-image-tag';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import type { NewerVersion } from '$lib/types';
 	import { m } from '$lib/paraglide/messages.js';
 
 	// Minimal shape shared by ContainerInfo and StackContainer - all the modal needs.
-	type ModalContainer = { id: string; name: string; image: string };
+	type ModalContainer = { id: string; name: string; image: string; labels?: Record<string, string> };
 
 	interface ReleaseNote {
 		version: string;
@@ -29,9 +31,12 @@
 		/** The newer-version suggestion (target tag + skipped versions). */
 		newerVersion: NewerVersion | null;
 		envId: number | null;
+		composeStack?: string | null;
+		canRedeploy?: boolean;
+		onComposeUpdated?: () => void;
 	}
 
-	let { container = $bindable(), newerVersion, envId }: Props = $props();
+	let { container = $bindable(), newerVersion, envId, composeStack = null, canRedeploy = false, onComposeUpdated }: Props = $props();
 
 	const open = $derived(!!container && !!newerVersion);
 
@@ -124,6 +129,58 @@
 
 	function close() {
 		container = null;
+	}
+
+	const composeService = $derived(container?.labels?.['com.docker.compose.service'] ?? null);
+	let composeBusy = $state<'save' | 'redeploy' | null>(null);
+
+	const composeErrors = {
+		service_not_found: () => m.updates_compose_service_not_found(),
+		image_not_found: () => m.updates_compose_image_not_found(),
+		variable: () => m.updates_compose_variable(),
+		repo_mismatch: () => m.updates_compose_repo_mismatch(),
+		unchanged: () => m.updates_compose_unchanged()
+	};
+
+	async function updateCompose(redeploy: boolean) {
+		if (!container || !newerVersion || !composeStack || !composeService || composeBusy) return;
+		const stack = composeStack;
+		const url = appendEnvParam(`/api/stacks/${encodeURIComponent(stack)}/compose`, envId);
+		composeBusy = redeploy ? 'redeploy' : 'save';
+		try {
+			const res = await fetch(url);
+			const data = await res.json().catch(() => ({}));
+			if (!res.ok || typeof data.content !== 'string') {
+				toast.error(data.error || m.updates_compose_save_failed());
+				return;
+			}
+			const result = replaceServiceImageTag(data.content, composeService, container.image, newerVersion.tag, newerVersion.digest);
+			if (!result.ok) {
+				toast.error(composeErrors[result.reason]());
+				return;
+			}
+			const saveRes = await fetch(url, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ content: result.content, restart: redeploy, pull: false, forceRecreate: false })
+			});
+			const saved = redeploy ? await readJobResponse(saveRes) : await saveRes.json().catch(() => ({}));
+			if (!saveRes.ok) {
+				toast.error(saved.error || m.updates_compose_save_failed());
+				return;
+			}
+			onComposeUpdated?.();
+			if (saved.success === false) {
+				toast.error(m.updates_compose_redeploy_failed({ error: saved.error || '' }));
+				return;
+			}
+			toast.success(redeploy ? m.updates_compose_redeployed({ stack, image: result.image }) : m.updates_compose_saved({ image: result.image }));
+			close();
+		} catch {
+			toast.error(m.updates_compose_save_failed());
+		} finally {
+			composeBusy = null;
+		}
 	}
 
 	// Note for a given version path entry, if GitHub had one.
@@ -302,6 +359,37 @@
 				</div>
 				<div class="flex gap-2">
 					<Button variant="outline" size="sm" onclick={close}>{m.ui_close()}</Button>
+					{#if composeStack && composeService}
+						<Button
+							variant={canRedeploy ? 'outline' : 'default'}
+							size="sm"
+							disabled={!!composeBusy}
+							onclick={() => updateCompose(false)}
+							title={m.updates_compose_save_title({ stack: composeStack })}
+						>
+							{#if composeBusy === 'save'}
+								<RefreshCw class="w-3.5 h-3.5 mr-1.5 animate-spin" />
+							{:else}
+								<FileCode class="w-3.5 h-3.5 mr-1.5" />
+							{/if}
+							{m.updates_compose_save()}
+						</Button>
+						{#if canRedeploy}
+							<Button
+								size="sm"
+								disabled={!!composeBusy}
+								onclick={() => updateCompose(true)}
+								title={m.updates_compose_redeploy_title({ stack: composeStack })}
+							>
+								{#if composeBusy === 'redeploy'}
+									<RefreshCw class="w-3.5 h-3.5 mr-1.5 animate-spin" />
+								{:else}
+									<Rocket class="w-3.5 h-3.5 mr-1.5" />
+								{/if}
+								{m.updates_compose_redeploy()}
+							</Button>
+						{/if}
+					{/if}
 				</div>
 			</Dialog.Footer>
 		{/if}

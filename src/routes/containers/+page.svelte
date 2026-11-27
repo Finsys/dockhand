@@ -529,9 +529,20 @@
 	// Version-update (semver) release-notes modal — opened from the Tag badge.
 	let versionModalContainer = $state<ContainerInfo | null>(null);
 	let versionModalNewer = $state<import('$lib/server/semver/find-newer').NewerVersion | null>(null);
-	function openVersionModal(container: ContainerInfo, newer: import('$lib/server/semver/find-newer').NewerVersion) {
+	let versionModalComposeStack = $state<string | null>(null);
+	async function openVersionModal(container: ContainerInfo, newer: import('$lib/server/semver/find-newer').NewerVersion) {
+		versionModalComposeStack = null;
 		versionModalContainer = container;
 		versionModalNewer = newer;
+		const project = getComposeProject(container.labels);
+		if (!project || !$canAccess('stacks', 'edit')) return;
+		try {
+			const res = await fetch(appendEnvParam('/api/stacks/sources', envId));
+			const sources = res.ok ? await res.json() : {};
+			if (sources[project]?.sourceType === 'internal' && versionModalContainer?.id === container.id) {
+				versionModalComposeStack = project;
+			}
+		} catch {}
 	}
 
 	// Release notes for a held (cooling-down) update, so the user can judge whether to
@@ -2906,6 +2917,8 @@
 	bind:container={versionModalContainer}
 	newerVersion={versionModalNewer}
 	{envId}
+	composeStack={versionModalComposeStack}
+	canRedeploy={!versionModalContainer?.systemContainer}
 />
 
 <CooldownNotesModal
