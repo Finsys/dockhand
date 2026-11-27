@@ -2,10 +2,16 @@ import { repoBaseOf } from './pinned-ref';
 
 export type ComposeImageTagResult =
 	| { ok: true; content: string; image: string }
-	| { ok: false; reason: 'service_not_found' | 'image_not_found' | 'variable' | 'repo_mismatch' | 'unchanged' };
+	| { ok: false; reason: 'service_not_found' | 'image_not_found' | 'variable' | 'repo_mismatch' | 'unchanged' | 'invalid_tag' };
 
 const KEY_LINE = /^(\s*)(["']?)([^"'#:\s]+)\2\s*:(\s.*|)$/;
 const IMAGE_LINE = /^(\s*image\s*:\s*)(["']?)([^"'\s#]+)\2(\s+#.*|\s*)$/;
+
+// The tag and digest come from a registry tag list, which is untrusted input. They are
+// written verbatim into the image line, so a value carrying whitespace or a newline
+// would inject sibling YAML into the compose file. Accept only the Docker grammar.
+const TAG_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
+const DIGEST_RE = /^[A-Za-z0-9_+.-]+:[A-Za-z0-9=_.:-]+$/;
 
 function indentOf(line: string): number {
 	return line.length - line.trimStart().length;
@@ -31,6 +37,9 @@ export function replaceServiceImageTag(
 	newTag: string,
 	newDigest?: string | null
 ): ComposeImageTagResult {
+	if (!TAG_RE.test(newTag)) return { ok: false, reason: 'invalid_tag' };
+	if (newDigest && !DIGEST_RE.test(newDigest)) return { ok: false, reason: 'invalid_tag' };
+
 	const eol = compose.includes('\r\n') ? '\r\n' : '\n';
 	const lines = compose.split(/\r?\n/);
 

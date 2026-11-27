@@ -74,4 +74,23 @@ describe('replaceServiceImageTag', () => {
 	test('reports a compose file that already has the new tag', () => {
 		expect(replaceServiceImageTag(compose, 'db', 'postgres:16.1', '16.1')).toEqual({ ok: false, reason: 'unchanged' });
 	});
+
+	test('rejects a tag carrying a newline or whitespace without touching the file', () => {
+		const inject = '1.3.0\n    privileged: true';
+		expect(replaceServiceImageTag(compose, 'web', 'ghcr.io/owner/app:1.2.0', inject)).toEqual({ ok: false, reason: 'invalid_tag' });
+		expect(replaceServiceImageTag(compose, 'web', 'ghcr.io/owner/app:1.2.0', '1.3.0 extra')).toEqual({ ok: false, reason: 'invalid_tag' });
+		expect(replaceServiceImageTag(compose, 'web', 'ghcr.io/owner/app:1.2.0', '1.3.0\tx')).toEqual({ ok: false, reason: 'invalid_tag' });
+	});
+
+	test('rejects a tag with characters outside the docker tag grammar', () => {
+		expect(replaceServiceImageTag(compose, 'web', 'ghcr.io/owner/app:1.2.0', '1.3.0:evil')).toEqual({ ok: false, reason: 'invalid_tag' });
+		expect(replaceServiceImageTag(compose, 'web', 'ghcr.io/owner/app:1.2.0', '')).toEqual({ ok: false, reason: 'invalid_tag' });
+	});
+
+	test('rejects a malformed digest and keeps a well-formed one', () => {
+		const yaml = `services:\n  app:\n    image: nginx:1.25@sha256:old\n`;
+		expect(replaceServiceImageTag(yaml, 'app', 'nginx:1.25', '1.27', 'sha256:not a digest')).toEqual({ ok: false, reason: 'invalid_tag' });
+		const good = replaceServiceImageTag(yaml, 'app', 'nginx:1.25', '1.27', 'sha256:' + 'a'.repeat(64));
+		expect(good.ok && good.image).toBe('nginx:1.27@sha256:' + 'a'.repeat(64));
+	});
 });

@@ -139,7 +139,8 @@
 		image_not_found: () => m.updates_compose_image_not_found(),
 		variable: () => m.updates_compose_variable(),
 		repo_mismatch: () => m.updates_compose_repo_mismatch(),
-		unchanged: () => m.updates_compose_unchanged()
+		unchanged: () => m.updates_compose_unchanged(),
+		invalid_tag: () => m.updates_compose_invalid_tag()
 	};
 
 	async function updateCompose(redeploy: boolean) {
