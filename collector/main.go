@@ -202,9 +202,6 @@ type environment struct {
 	statusMu       sync.Mutex // guards online + statusReported (written from metrics + events goroutines)
 	online         bool
 	statusReported bool // true after first env_status message sent
-	// End of the last poll's window that was read in full (poll mode); only the
-	// events goroutine touches it. Zero until the first successful poll.
-	lastPollUntil time.Time
 }
 
 // markOnline records the env as online and reports whether this is a transition
@@ -258,8 +255,12 @@ type manager struct {
 	eventMode       string // "stream" or "poll"
 	pollInterval    time.Duration
 	diskInterval    time.Duration
-	output          *json.Encoder
-	outputMu        sync.Mutex
+	// End of the last poll window read per environment (poll mode). Kept here, not on
+	// the environment, so a reconfigure, which rebuilds every environment, does not
+	// make the next poll read again what was already sent. Guarded by mu.
+	pollUntil map[int]time.Time
+	output    *json.Encoder
+	outputMu  sync.Mutex
 }
 
 func newManager(output *json.Encoder) *manager {
@@ -269,6 +270,7 @@ func newManager(output *json.Encoder) *manager {
 		eventMode:       "stream",
 		pollInterval:    60 * time.Second,
 		diskInterval:    5 * time.Minute,
+		pollUntil:       make(map[int]time.Time),
 		output:          output,
 	}
 }
@@ -666,6 +668,10 @@ func (m *manager) runEvents(env *environment) {
 		m.mu.Lock()
 		mode := m.eventMode
 		pollInterval := m.pollInterval
+		if mode != "poll" {
+			// The stream sees these events; a later switch back to poll starts afresh.
+			delete(m.pollUntil, env.id)
+		}
 		m.mu.Unlock()
 
 		if mode == "poll" {
@@ -801,9 +807,10 @@ func (m *manager) pollEvents(env *environment) {
 
 	m.mu.Lock()
 	interval := m.pollInterval
+	lastUntil := m.pollUntil[env.id]
 	m.mu.Unlock()
 	now := time.Now()
-	since := pollWindowStart(env.lastPollUntil, now, interval)
+	since := pollWindowStart(lastUntil, now, interval)
 
 	ctx, cancel := context.WithTimeout(env.ctx, 15*time.Second)
 	defer cancel()
@@ -821,6 +828,7 @@ func (m *manager) pollEvents(env *environment) {
 
 	pollScanner := bufio.NewScanner(resp.Body)
 	pollScanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var lastSent time.Time
 	for pollScanner.Scan() {
 		line := pollScanner.Bytes()
 		if len(line) == 0 {
@@ -832,11 +840,39 @@ func (m *manager) pollEvents(env *environment) {
 				EnvID: env.id,
 				Event: json.RawMessage(append([]byte(nil), line...)),
 			})
+			var ev struct {
+				TimeNano int64 `json:"timeNano"`
+			}
+			if json.Unmarshal(line, &ev) == nil && ev.TimeNano > 0 {
+				lastSent = time.Unix(0, ev.TimeNano)
+			}
 		}
 	}
-	// Only a window read to the end moves on; otherwise the next poll reads it again.
-	if pollScanner.Err() == nil {
-		env.lastPollUntil = now
+	// A window read to the end moves on to now. A broken read resumes AT the last event
+	// sent (pollWindowStart adds 1ns): another event at that same instant is not lost,
+	// at the cost of that one event possibly arriving twice.
+	done := now
+	if pollScanner.Err() != nil {
+		done = time.Time{}
+		if !lastSent.IsZero() {
+			done = lastSent.Add(-time.Nanosecond)
+		}
+	}
+	m.recordPollEnd(env.id, done)
+}
+
+// recordPollEnd stores where an environment's next poll window starts. Only forward,
+// and only while the environment is registered: a goroutine cancelled by configure or
+// remove may finish its read late, and must neither move the end back nor bring back
+// the entry of a removed environment.
+func (m *manager) recordPollEnd(envID int, done time.Time) {
+	if done.IsZero() {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.envs[envID]; ok && done.After(m.pollUntil[envID]) {
+		m.pollUntil[envID] = done
 	}
 }
 
@@ -845,13 +881,19 @@ func (m *manager) pollEvents(env *environment) {
 // happened. Twice the longest poll interval Dockhand allows (5 minutes).
 const maxPollCatchUp = 10 * time.Minute
 
+// firstPollLookBack is how far back a poll with no previous window reads (a fresh
+// collector, or after a long outage): at most 30 seconds, so a restart does not
+// send again what was recorded just before it.
+const firstPollLookBack = 30 * time.Second
+
 // pollWindowStart returns where a poll's window of Docker events starts: just
 // after the end of the last window read in full, so no event between two polls
 // is lost or read twice, whatever the poll interval (#1886). The first poll, and
-// one after a gap longer than maxPollCatchUp, read one interval back.
+// one after a gap longer than maxPollCatchUp, read one interval back, at most
+// firstPollLookBack.
 func pollWindowStart(lastUntil, now time.Time, interval time.Duration) time.Time {
 	if lastUntil.IsZero() || now.Sub(lastUntil) > maxPollCatchUp {
-		return now.Add(-interval)
+		return now.Add(-minDuration(interval, firstPollLookBack))
 	}
 	// Docker's since and until both include their own instant.
 	return lastUntil.Add(time.Nanosecond)
@@ -1002,6 +1044,7 @@ func (m *manager) remove(envID int) {
 		env.cancel()
 		env.closeTransports()
 		delete(m.envs, envID)
+		delete(m.pollUntil, envID)
 		fmt.Fprintf(os.Stderr, "[collector] removed env %d\n", envID)
 	}
 }

@@ -18,9 +18,9 @@ import type { RequestHandler } from './$types';
  * summary: Return the total finding count, severity summary, and distinct image/container/stack filter values for an environment
  * description: With groupBy (container, image or stack), returns {groupBy, groups} instead - each scanned container, image or stack with its critical/high/medium/low/total counts, most severe first. A clean one is listed with zeroes; one whose image was never scanned is not listed. A stack counts each image once.
  * query: groupBy:string Group the counts by "container", "image" or "stack"
- * resp-200: {total:integer!, summary:object!, images:array<string>!, containers:array<string>!, stacks:array<string>!}
- * resp-200-desc: An empty metadata object is returned when no environment resolves; a permission failure returns the status from the access check
- * resp-200-example: {"total":12,"summary":{"critical":1,"high":3,"medium":5,"low":3},"images":["nginx:latest"],"containers":["web"],"stacks":["frontend"]}
+ * resp-200: {total:integer, summary:object, options:{images:array<string>, containers:array<string>, stacks:array<string>}, groupBy:string, groups:array<object>}
+ * resp-200-desc: Without groupBy: total, summary, and the filter values under options (an empty metadata object when no environment resolves). With groupBy: only groupBy and groups (empty when no environment resolves); a container group has id, name, image, an image group id, name, containers, a stack group name, images, each with critical, high, medium, low and total. A permission failure returns the status from the access check
+ * resp-200-example: {"total":12,"summary":{"critical":1,"high":3,"medium":5,"low":3},"options":{"images":["nginx:latest"],"containers":["web"],"stacks":["frontend"]}}
  * resp-400: groupBy is not container, image or stack
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {

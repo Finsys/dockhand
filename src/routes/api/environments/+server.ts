@@ -1,9 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getEnvironments, getEnvironmentByName, createEnvironment, assignUserRole, getRoleByName, getEnvironmentPublicIps, setEnvironmentPublicIp, getEnvUpdateCheckSettings, getEnvironmentTimezone, getImagePruneSettings, type Environment } from '$lib/server/db';
+import { getEnvironments, getEnvironmentByName, createEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, getEnvUpdateCheckSettings, getEnvironmentTimezone, getImagePruneSettings, type Environment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditEnvironment } from '$lib/server/audit';
-import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 import { refreshSubprocessEnvironments } from '$lib/server/subprocess-manager';
 import { resetHostDetection, detectHostDataDir } from '$lib/server/host-path';
 import { serializeLabels, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
@@ -81,13 +80,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * resp-200: {id:integer!, name:string!, connectionType:string!}
  * resp-200-example: {"id":3,"name":"hhdocker03","connectionType":"socket"}
  * resp-400: Invalid name, invalid connectionType, or host missing for direct/hawser-standard
- * resp-403: Permission denied (RBAC 'environments:create' missing)
+ * resp-403: Permission denied (RBAC 'environments:create' missing, or a non-admin under Enterprise RBAC)
  * resp-409: An environment with this name already exists
  * resp-500: Unexpected error while creating the environment
  */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
+	// A new environment can point at any Docker socket or host, Dockhand's own included, so
+	// creating one is an instance-level action: admin under RBAC, as for DELETE.
+	if (auth.authEnabled && auth.isEnterprise && !auth.isAdmin) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
 	if (auth.authEnabled && !await auth.can('environments', 'create')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
@@ -152,23 +156,6 @@ export const POST: RequestHandler = async (event) => {
 		// can now reach Docker through this env without a restart (#1203). Fire-and-forget.
 		resetHostDetection();
 		void detectHostDataDir();
-
-		// Auto-assign Admin role to creator (Enterprise only)
-		if (auth.isEnterprise && auth.authEnabled && auth.isAuthenticated && !auth.isAdmin) {
-			const user = auth.user;
-			if (user) {
-				try {
-					const adminRole = await getRoleByName('Admin');
-					if (adminRole) {
-						await assignUserRole(user.id, adminRole.id, env.id);
-						invalidateTokenCacheForUser(user.id);
-					}
-				} catch (roleError) {
-					// Log but don't fail - environment was created successfully
-					console.error(`Failed to auto-assign Admin role to user ${user.id} for environment ${env.id}:`, roleError);
-				}
-			}
-		}
 
 		// Audit log
 		await auditEnvironment(event, 'create', env.id, env.name);

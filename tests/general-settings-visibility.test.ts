@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
 	visibleGeneralSettings,
-	PRESENTATION_SETTINGS
+	PRESENTATION_SETTINGS,
+	ADMIN_ONLY_WRITE_SETTINGS,
+	writesAdminOnlySetting
 } from '../src/lib/server/general-settings-visibility';
 
 /**
@@ -107,5 +110,39 @@ describe('a setting nobody has classified yet', () => {
 		const operational = /grype|trivy|scanner|cron|interval|retention|path|proxy|stackLocation/i;
 		const slipped = PRESENTATION_SETTINGS.filter((k) => operational.test(k));
 		expect(slipped).toEqual([]);
+	});
+});
+
+// The scanner and backup helper containers run with a Docker socket bound in, for every
+// environment, so their settings are admin-only to WRITE. An env-scoped settings:edit
+// role passes can('settings','edit') without an environmentId, so the key list decides.
+describe('admin-only general settings writes', () => {
+	test('each helper-container key needs an administrator', () => {
+		for (const key of ADMIN_ONLY_WRITE_SETTINGS) {
+			expect(writesAdminOnlySetting({ [key]: 'x' })).toBe(true);
+		}
+	});
+
+	test('presentation keys and the recent stack locations stay writable with settings:edit', () => {
+		expect(writesAdminOnlySetting({ timeFormat: '24h', lightTheme: 'x' })).toBe(false);
+		expect(writesAdminOnlySetting({ externalStackPaths: ['/srv/stacks'] })).toBe(false);
+		expect(writesAdminOnlySetting({})).toBe(false);
+	});
+
+	test('clearing a key is a write too', () => {
+		expect(writesAdminOnlySetting({ defaultTrivyArgs: '' })).toBe(true);
+		expect(writesAdminOnlySetting({ defaultScannerDns: null })).toBe(true);
+	});
+
+	test('a key mixed into an otherwise harmless body still counts', () => {
+		expect(writesAdminOnlySetting({ timeFormat: '24h', defaultBackupImage: 'evil/helper' })).toBe(true);
+	});
+
+	test('every image, default-args and scanner key the route writes is on the list', () => {
+		const src = readFileSync('src/routes/api/settings/general/+server.ts', 'utf8');
+		const destructured = src.match(/const \{ (confirmDestructive[^}]+)\} = body;/)![1].split(',').map((k) => k.trim());
+		const helperKeys = destructured.filter((k) => /Image$|^default(Grype|Trivy)Args$|^defaultScanner/.test(k));
+		expect(helperKeys.length).toBeGreaterThanOrEqual(7);
+		expect(helperKeys.filter((k) => !(ADMIN_ONLY_WRITE_SETTINGS as readonly string[]).includes(k))).toEqual([]);
 	});
 });

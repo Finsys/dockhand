@@ -4,6 +4,7 @@ import { getStackEnvVars } from '$lib/server/db';
 import { getStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { extractEnvPlaceholderReferences } from '$lib/server/env-parser';
+import { extractComposeVars } from '$lib/utils/compose-var-ref';
 import type { RequestHandler } from './$types';
 
 interface ValidationResult {
@@ -30,66 +31,6 @@ const DOCKER_COMPOSE_BUILTIN_VARS = new Set([
 	'DOCKER_HIDE_LEGACY_COMMANDS', 'DOCKER_HOST', 'DOCKER_TLS',
 	'DOCKER_TLS_VERIFY', 'BUILDKIT_PROGRESS', 'NO_COLOR',
 ]);
-
-/**
- * Extract environment variables from compose YAML content.
- * Matches ${VAR_NAME} and ${VAR_NAME:-default} patterns.
- * Ignores variables in commented lines (lines starting with #).
- * Ignores escaped $$ (Docker Compose escape syntax for literal $).
- * Returns { required: [...], optional: [...] }
- */
-function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
-	const required: string[] = [];
-	const optional: string[] = [];
-
-	// Process line by line to skip commented lines
-	const lines = yaml.split('\n');
-	for (const line of lines) {
-		// Skip lines that are comments (start with # after optional whitespace)
-		const trimmedLine = line.trim();
-		if (trimmedLine.startsWith('#')) {
-			continue;
-		}
-
-		// Match ${VAR_NAME} (required) and ${VAR_NAME:-default} or ${VAR_NAME-default} (optional)
-		// Use negative lookbehind (?<!\$) to skip escaped $$ (Docker Compose escape syntax)
-		const regex = /(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-?)[^}]*)?\}/g;
-		let match;
-
-		while ((match = regex.exec(line)) !== null) {
-			const varName = match[1];
-			const hasDefault = match[2] !== undefined;
-
-			if (hasDefault) {
-				if (!optional.includes(varName) && !required.includes(varName)) {
-					optional.push(varName);
-				}
-			} else {
-				// Move from optional to required if we find a non-default usage
-				const optIdx = optional.indexOf(varName);
-				if (optIdx !== -1) {
-					optional.splice(optIdx, 1);
-				}
-				if (!required.includes(varName)) {
-					required.push(varName);
-				}
-			}
-		}
-
-		// Also match $VAR_NAME (simple variable substitution)
-		// Use negative lookbehind (?<!\$) to skip escaped $$
-		// Also require $ to not be preceded by an alphanumeric char (avoids matching inside values like "1$abc")
-		const simpleRegex = /(?<![A-Za-z0-9\$])\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
-		while ((match = simpleRegex.exec(line)) !== null) {
-			const varName = match[1];
-			if (!required.includes(varName) && !optional.includes(varName)) {
-				required.push(varName);
-			}
-		}
-	}
-
-	return { required: required.sort(), optional: optional.sort() };
-}
 
 /**
  * POST /api/stacks/[name]/env/validate?env=X

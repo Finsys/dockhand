@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.0.59",
+    "date": "2026-11-22",
+    "changes": [
+      { "type": "feature", "text": "vulnerability counts per container, image or stack in one API call (#1916, PR#1923, @raetha)" },
+      { "type": "feature", "text": "Bulgarian interface translation (PR#1919, @Bare7a)" },
+      { "type": "feature", "text": "Japanese interface translation (PR#1931, @HUNTER-TA)" },
+      { "type": "feature", "text": "container updates show on the Activity page (#1864, PR#1865, @peremunoz)" },
+      { "type": "fix", "text": "poll mode no longer misses container events between polls (#1886, PR#1922, @raetha)" },
+      { "type": "fix", "text": "Dockhand's own helper containers (scanners, backup helpers) no longer show in container lists (#1911, PR#1921, @raetha)" },
+      { "type": "fix", "text": "the compose editor shows the variable badge for a ${VAR} that follows escaped $$ (#1926)" },
+      { "type": "fix", "text": "scheduled and batch updates restore a missing compose service alias, so service-name DNS in the stack works again (#1928)" },
+      { "type": "fix", "text": "stack deploys retry an image pull the registry rate-limits, as container updates do (#1551)" },
+      { "type": "fix", "text": "additional permission and environment-variable hardening across settings and compose validation" },
+      { "type": "fix", "text": "update Node.js to 24.22.3 and docker-compose to 5.7.1-r1 for security fixes" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.59"
+  },
+  {
     "version": "1.0.58",
     "date": "2026-11-16",
     "changes": [

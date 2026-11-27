@@ -4,8 +4,13 @@ import {
 	additionalNetworkNames,
 	isPrimaryNetworkName,
 	endpointSettingsFromInspect,
-	mapContainerNetworks
+	mapContainerNetworks,
+	withComposeAliases,
+	recreateEndpointAliases,
+	isDefaultBridge
 } from '../src/lib/utils/network-identity';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // Verbatim from a live Podman 5.4.2 daemon: the container inspect names the default
 // bridge "podman" while GET /networks and HostConfig.NetworkMode call it "bridge", both
@@ -296,5 +301,88 @@ describe('mapContainerNetworks - what a recreate carries over', () => {
 	test('no networks at all', () => {
 		const mapped = mapContainerNetworks({}, 'bridge', CID);
 		expect(mapped).toEqual({ additionalNetworks: [], networkConfigs: {} });
+	});
+});
+
+describe('withComposeAliases - a recreate restores the service alias (#1928)', () => {
+	const labels = { 'com.docker.compose.project': 'librenms', 'com.docker.compose.service': 'db' };
+
+	test('a missing service alias is put back', () => {
+		expect(withComposeAliases({ Aliases: [] as string[] }, labels).Aliases).toEqual(['db']);
+		expect(withComposeAliases({ Aliases: null }, labels).Aliases).toEqual(['db']);
+		expect(withComposeAliases({}, labels).Aliases).toEqual(['db']);
+	});
+
+	test('existing aliases are kept, in order, without duplicates', () => {
+		expect(withComposeAliases({ Aliases: ['librenms_db', 'db'] }, labels).Aliases).toEqual(['librenms_db', 'db']);
+		// Never an alias compose does not set itself.
+		expect(withComposeAliases({ Aliases: ['librenms_db'] }, labels).Aliases).not.toContain('librenms-db');
+	});
+
+	test('every other endpoint field passes through untouched', () => {
+		const ep = { Aliases: ['x'], IPAMConfig: { IPv4Address: '10.0.0.5' }, MacAddress: 'aa:bb', NetworkID: 'n1' };
+		const out = withComposeAliases(ep, labels);
+		expect(out).toEqual({ ...ep, Aliases: ['x', 'db'] });
+		expect(ep.Aliases).toEqual(['x']);
+	});
+
+	test('a container that is not a compose service is left alone', () => {
+		const ep = { Aliases: ['a'] };
+		expect(withComposeAliases(ep, {})).toBe(ep);
+		expect(withComposeAliases(ep, null)).toBe(ep);
+		expect(withComposeAliases(ep, { 'com.docker.compose.project': 'p' })).toBe(ep);
+		expect(withComposeAliases(ep, { 'com.docker.compose.service': 's' })).toBe(ep);
+	});
+
+	test('only the primary network gets them, whichever network the daemon lists first', () => {
+		const empty = () => ({ Aliases: [] as string[] });
+		// The daemon lists networks by name, so a network connected by hand can come first.
+		const attached = ['aaa_shared', 'librenms_default'];
+		expect(recreateEndpointAliases('aaa_shared', empty(), 'librenms_default', attached, labels).Aliases).toEqual([]);
+		expect(recreateEndpointAliases('librenms_default', empty(), 'librenms_default', attached, labels).Aliases).toEqual(['db']);
+		// A single attachment is the primary whatever it is called.
+		expect(recreateEndpointAliases('custom_net', empty(), 'custom_net', ['custom_net'], labels).Aliases).toEqual(['db']);
+	});
+
+	test('the scheduled and batch update path uses it for every network it creates or connects', () => {
+		// docker.ts cannot be imported here (it pulls in the database), so the wiring is read.
+		const src = readFileSync(join(import.meta.dir, '..', 'src', 'lib', 'server', 'docker.ts'), 'utf8');
+		const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+		expect(code).toMatch(/recreateEndpointAliases\(netName, \{ \.\.\.endpoint \}, networkMode, attachedNetworkNames, config\.Labels\)/);
+		expect(code).toContain('const endpointConfig = recreateEndpoint(initialNetworkName, initialNetworkConfig);');
+		expect(code).toContain('const settings = recreateEndpoint(netName, nc);');
+	});
+});
+
+describe('the default bridge gets no compose service alias', () => {
+	// Docker: "invalid config for network bridge: invalid endpoint settings: network-scoped
+	// aliases are only supported for user-defined networks". A compose service with
+	// network_mode: bridge is on it, carrying the compose labels.
+	const labels = { 'com.docker.compose.project': 'cloudflared', 'com.docker.compose.service': 'cloudflared' };
+	const id = 'abc123def456';
+
+	test('isDefaultBridge knows it by NetworkMode, on Docker and Podman', () => {
+		expect(isDefaultBridge('bridge', 'bridge')).toBe(true);
+		expect(isDefaultBridge('bridge', 'default')).toBe(true);
+		expect(isDefaultBridge('podman', 'bridge')).toBe(true);
+		expect(isDefaultBridge('cloudflared_default', 'cloudflared_default')).toBe(false);
+		// A user-defined network that happens to be called "bridge" isn't NetworkMode bridge.
+		expect(isDefaultBridge('bridge', 'my_net')).toBe(false);
+	});
+
+	test('a batch or scheduled recreate leaves the bridge endpoint as it was', () => {
+		const ep = { Aliases: null, NetworkID: 'n1' };
+		expect(recreateEndpointAliases('bridge', ep, 'bridge', ['bridge'], labels)).toBe(ep);
+		expect(recreateEndpointAliases('podman', ep, 'bridge', ['podman'], labels)).toBe(ep);
+		// A user-defined primary still gets it.
+		expect(recreateEndpointAliases('cloudflared_default', { Aliases: [] as string[] }, 'cloudflared_default', ['cloudflared_default'], labels).Aliases).toEqual(['cloudflared']);
+	});
+
+	test('a single update sends no aliases for it', () => {
+		const compose = { project: 'cloudflared', service: 'cloudflared' };
+		const onBridge = mapContainerNetworks({ bridge: { Aliases: null, DNSNames: null } }, 'bridge', id, compose);
+		expect(onBridge.primaryAliases).toBeUndefined();
+		const onOwn = mapContainerNetworks({ cloudflared_default: { Aliases: null } }, 'cloudflared_default', id, compose);
+		expect(onOwn.primaryAliases).toEqual(['cloudflared', 'cloudflared-cloudflared']);
 	});
 });

@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test';
-import { isTooManyRequests, retryAfterMs, withPullRetry, retryWait, withCheckRetry, isRateLimitedCheck, createRegistryThrottle, checkRetryAfterMs, PULL_RETRY_DELAYS_MS } from '../src/lib/server/pull-retry';
+import { isTooManyRequests, retryAfterMs, withPullRetry, withComposeRateLimitRetry, retryWait, withCheckRetry, isRateLimitedCheck, createRegistryThrottle, checkRetryAfterMs, PULL_RETRY_DELAYS_MS } from '../src/lib/server/pull-retry';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describeRegistryFailure } from '../src/lib/server/registry-failure-core';
 
 // Error messages exactly as pullImage throws them, taken from GHCR rate-limit logs.
@@ -378,5 +380,70 @@ describe('no retries left for a throttled registry', () => {
 		const lines: string[] = [];
 		await expect(withPullRetry(async () => { throw new Error(STREAM); }, { delays: [], log: (m) => lines.push(m) })).rejects.toThrow('toomanyrequests');
 		expect(lines).toEqual(['Registry rate limit: the registry kept refusing earlier in this run, not retrying the pull']);
+	});
+});
+
+// docker compose output exactly as a git stack deploy reported it (issue #1551).
+const COMPOSE_429 = ' Image ghcr.io/linuxserver/radarr:latest Pulling \n Image ghcr.io/linuxserver/radarr:latest Error toomanyrequests: retry-after: 147.461\u00b5s, allowed: 44000/minute\nError response from daemon: toomanyrequests: retry-after: 147.461\u00b5s, allowed: 44000/minute';
+
+describe('withComposeRateLimitRetry - a compose step the registry throttles', () => {
+	const noSleep = { delays: [10, 20, 30], sleep: async () => {} };
+
+	test('a rate-limited step runs again and its later success is returned', async () => {
+		const results = [{ success: false, error: COMPOSE_429 }, { success: true, output: 'up' }];
+		let calls = 0;
+		const out = await withComposeRateLimitRetry(async () => results[calls++], noSleep);
+		expect(calls).toBe(2);
+		expect(out).toEqual({ success: true, output: 'up' });
+	});
+
+	test('the refusal is recognised in the output as well as in the error', async () => {
+		let calls = 0;
+		await withComposeRateLimitRetry(async () => (calls++ === 0 ? { success: false, error: 'exit status 1', output: COMPOSE_429 } : { success: true }), noSleep);
+		expect(calls).toBe(2);
+	});
+
+	test('any other failure is returned at once, without a retry', async () => {
+		let calls = 0;
+		const failed = { success: false, error: 'Error response from daemon: manifest unknown', output: 'pull access denied' };
+		expect(await withComposeRateLimitRetry(async () => { calls++; return failed; }, noSleep)).toBe(failed);
+		expect(calls).toBe(1);
+	});
+
+	test('a success is returned at once', async () => {
+		let calls = 0;
+		const ok = { success: true, output: 'toomanyrequests mentioned by a container log line' };
+		expect(await withComposeRateLimitRetry(async () => { calls++; return ok; }, noSleep)).toBe(ok);
+		expect(calls).toBe(1);
+	});
+
+	test('a step still throttled after every wait returns its last result, not an exception', async () => {
+		let calls = 0;
+		const logs: string[] = [];
+		const out = await withComposeRateLimitRetry(async () => ({ success: false, error: COMPOSE_429, attempt: ++calls }), { ...noSleep, log: (l) => logs.push(l), label: 'stack radarr' });
+		expect(calls).toBe(4);
+		expect(out).toMatchObject({ success: false, attempt: 4 });
+		expect(logs.filter((l) => l.includes('retrying the pull'))).toHaveLength(3);
+		expect(logs.at(-1)).toContain('giving up after 4 attempts');
+		expect(logs[0]).toContain('on stack radarr');
+	});
+
+	test('a build whose RUN output mentions a 429 from a package mirror is not rebuilt', async () => {
+		let calls = 0;
+		const build = { success: false, error: '#7 [3/5] RUN pip install -r requirements.txt\n#7 Retrying after 429 Client Error: Too Many Requests\n#9 ERROR: make: *** [all] Error 2' };
+		expect(await withComposeRateLimitRetry(async () => { calls++; return build; }, noSleep)).toBe(build);
+		expect(calls).toBe(1);
+	});
+
+	test('an exception from the step is not swallowed', async () => {
+		await expect(withComposeRateLimitRetry(async () => { throw new Error('boom'); }, noSleep)).rejects.toThrow('boom');
+	});
+
+	test('deployStack wraps both compose step runners in it', () => {
+		// stacks.ts cannot be imported here (it pulls in the database), so the wiring is read.
+		const src = readFileSync(join(import.meta.dir, '..', 'src', 'lib', 'server', 'stacks.ts'), 'utf8');
+		const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+		expect(code.match(/retryRateLimited\(operation, \(\) => executeComposeCommand\(operation,/g) ?? []).toHaveLength(2);
+		expect(code).toMatch(/withComposeRateLimitRetry\(step, \{ log: warn, label: `stack \$\{name\} \(\$\{operation\}\)` \}\)/);
 	});
 });

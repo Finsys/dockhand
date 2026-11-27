@@ -111,6 +111,8 @@
 	});
 
 	onMount(() => {
+		document.getElementById('app-boot')?.remove();
+
 		// app.html ships lang="en"; tell the browser (and screen readers) the UI language
 		document.documentElement.lang = getLocale();
 

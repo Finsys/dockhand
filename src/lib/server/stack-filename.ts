@@ -14,9 +14,17 @@
  * stack-shaped files. Still blocks authorized_keys, evil.sh, /etc/cron.d/x.
  */
 
-// Matches: foo.yml, foo.yaml, .env, foo.env, .env.local, prod.env.staging
-export const STACK_FILENAME_RE = /\.ya?ml$|(^|\.)env(\.|$)/;
+// Matches: foo.yml, foo.yaml, .env, foo.env, .env.local, prod.env.staging, .env.production.local
+export const STACK_FILENAME_RE = /\.ya?ml$|(^|\.)env(\.[A-Za-z0-9_-]+)*$/;
+
+// A name in the env family must never be a file a runtime loads as code: Dockhand's own
+// build/env.js matches `env.<suffix>`, and replacing it runs code as the server.
+const CODE_EXTENSION_RE = /\.(c|m)?(js|ts)$|\.json$|\.node$|\.sh$/i;
+
+// NAME_MAX. Checked before the regex, whose repeated suffix group is quadratic on long input.
+const MAX_FILENAME_LENGTH = 255;
 
 export function isAllowedStackFilename(filename: string): boolean {
-	return STACK_FILENAME_RE.test(filename);
+	if (filename.length > MAX_FILENAME_LENGTH) return false;
+	return STACK_FILENAME_RE.test(filename) && !CODE_EXTENSION_RE.test(filename);
 }

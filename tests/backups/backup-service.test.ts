@@ -403,6 +403,21 @@ describe('BackupService — verify before success and before retention', () => {
 		// retention (forget) must NOT have run after a failed verify
 		expect(rec.localCalls.some((c) => c[0] === 'forget')).toBe(false);
 	});
+
+	it('verifies by snapshot id ALONE, with no --tag filter (restic 0.20 rejects both)', async () => {
+		// restic 0.20 errors out ("explicit snapshot ids are given", exit 1) when a
+		// --tag filter is passed next to an explicit snapshot id; 0.19 silently ignored
+		// the tag. The id already identifies our own just-written snapshot, so verify
+		// must send the id by itself or every backup fails INTEGRITY on 0.20.
+		const rec = newRecorder();
+		const svc = new BackupService(makePorts({}, rec));
+		const res = await svc.run(job, 'manual');
+		expect(res.status).toBe('success');
+		const verifyCall = rec.localCalls.find((c) => c[0] === 'snapshots');
+		expect(verifyCall).toBeDefined();
+		expect(verifyCall).toContain(SNAP);
+		expect(verifyCall!.includes('--tag')).toBe(false);
+	});
 });
 
 describe('BackupService — no empty snapshot reaches retention', () => {

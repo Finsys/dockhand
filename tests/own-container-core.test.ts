@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { targetsOwnContainer } from '../src/lib/server/own-container-core';
+import { targetsOwnContainer, maskOwnContainerEnv, maskEnvValues } from '../src/lib/server/own-container-core';
+import { inspectToCompose } from '../src/lib/utils/inspect-to-compose';
+import yaml from 'js-yaml';
 
 /**
  * Recognising the container Dockhand itself runs in.
@@ -103,14 +105,68 @@ describe('the guard is wired into both network endpoints', () => {
 		// resolves it, so the guard has to resolve it too.
 		const src = await read('../src/lib/server/own-container-guard.ts');
 		expect(src).toContain('await inspectContainer(containerRef, envId)');
-		// The comparison decides the 403, and nothing returns ahead of it: an early
-		// `return null` would leave every assertion above true while refusing nobody.
-		const body = src.slice(src.indexOf('export async function refuseOwnContainer'));
-		const compare = body.indexOf('targetsOwnContainer(resolvedId');
-		const earlyReturns = [...body.slice(0, compare).matchAll(/^\treturn /gm)];
+		// The comparison decides the answer, and nothing returns ahead of it: an early
+		// `return false` would leave every assertion above true while refusing nobody.
+		const own = src.slice(src.indexOf('export async function isOwnContainer'));
+		const compare = own.indexOf('\treturn targetsOwnContainer(resolvedId');
+		const earlyReturns = [...own.slice(0, compare).matchAll(/^\treturn /gm)];
 		expect(earlyReturns).toHaveLength(0);
-		expect(body).toMatch(
-			/if \(!targetsOwnContainer\(resolvedId, \{ id: ownId \}\)\) return null;\s*return json\(/
-		);
+		expect(own).toMatch(/return targetsOwnContainer\(resolvedId, \{ id: ownId \}\);/);
+		// refuseOwnContainer answers 403 exactly when isOwnContainer says so.
+		const refuse = src.slice(src.indexOf('export async function refuseOwnContainer'), src.indexOf('export async function isOwnContainer'));
+		expect(refuse).toMatch(/if \(!\(await isOwnContainer\(containerRef, envId\)\)\) return null;\s*return json\(/);
+	});
+});
+
+describe('maskOwnContainerEnv', () => {
+	const own = 'a'.repeat(64);
+	const env = () => ['DATABASE_URL=postgres://u:secret@db/x', 'ENCRYPTION_KEY=k3y', 'NOVALUE', 'EMPTY='];
+	const run = (id: string, privileged: boolean) => {
+		const d = { Id: id, Config: { Env: env() } };
+		maskOwnContainerEnv(d, own, privileged);
+		return d.Config.Env;
+	};
+
+	test('a non-admin sees the keys of Dockhand own env but none of the values', () => {
+		expect(run(own, false)).toEqual(['DATABASE_URL=***', 'ENCRYPTION_KEY=***', 'NOVALUE', 'EMPTY=***']);
+		expect(maskOwnContainerEnv({ Id: own, Config: { Env: env() } }, own, false)).toBe(true);
+		expect(maskOwnContainerEnv({ Id: own, Config: { Env: env() } }, own, true)).toBe(false);
+	});
+
+	test('maskEnvValues keeps keys and a value-less entry, and a value with = is hidden whole', () => {
+		expect(maskEnvValues(['A=b', 'C', 'D=e=f'])).toEqual(['A=***', 'C', 'D=***']);
+	});
+
+	test('an admin, another container, or an unknown own id keep the values', () => {
+		expect(run(own, true)).toEqual(env());
+		expect(run('b'.repeat(64), false)).toEqual(env());
+		const d = { Id: own, Config: { Env: env() } };
+		maskOwnContainerEnv(d, null, false);
+		expect(d.Config.Env).toEqual(env());
+	});
+
+	test('a payload without env is left alone', () => {
+		const d = { Id: own, Config: { Env: null } };
+		maskOwnContainerEnv(d, own, false);
+		expect(d.Config.Env).toBeNull();
+		expect(() => maskOwnContainerEnv({ Id: own }, own, false)).not.toThrow();
+	});
+});
+
+// The compose view of Dockhand's own container for a non-admin: both sides masked, so keys the
+// image sets drop out on the key alone and no value is compared or shown.
+describe('masked env with inspectToCompose', () => {
+	test('inherited keys go, keys the image does not set stay, values hidden', () => {
+		const rawEnv = ['PUID=1000', 'PATH=/usr/bin', 'DATABASE_URL=postgres://u:secret@db/x', 'MY_FLAG=1'];
+		const view = (guess: string) =>
+			inspectToCompose(
+				{ Name: '/dockhand', Config: { Image: 'fnsys/dockhand', Env: maskEnvValues(rawEnv) } } as never,
+				{ serviceName: 'dockhand', imageEnv: maskEnvValues(['PUID=1001', 'PATH=/usr/bin', `DATABASE_URL=postgres://u:${guess}@db/x`]) }
+			);
+		const env = ((yaml.load(view('guess')) as any)?.services?.dockhand?.environment as string[]) ?? [];
+		expect(env).toEqual(['MY_FLAG=***']);
+		expect(view('guess')).not.toContain('secret');
+		// A right or a wrong guess in a retagged image gives the same answer.
+		expect(view('secret')).toBe(view('guess'));
 	});
 });

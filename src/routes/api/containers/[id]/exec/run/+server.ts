@@ -12,6 +12,7 @@ import type { RequestHandler } from './$types';
 import { runExecInContainer } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * POST /api/containers/{id}/exec/run - Run a one-shot command and return its output and exit code
@@ -25,7 +26,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  * resp-200: {stdout:string!, stderr:string!, exitCode:integer!}
  * resp-400: Missing or invalid cmd (must be a non-empty array of strings)
  * resp-401: Not authenticated
- * resp-403: Permission denied
+ * resp-403: Permission denied, or the target is Dockhand's own container and the caller is not an administrator
  * resp-500: Failed to run the command
  */
 export const POST: RequestHandler = async ({ params, request, cookies, url }) => {
@@ -43,6 +44,12 @@ export const POST: RequestHandler = async ({ params, request, cookies, url }) =>
 
 	if (!await auth.can('containers', 'exec', envId)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envId);
+		if (denied) return denied;
 	}
 
 	const body = await request.json().catch(() => ({}));

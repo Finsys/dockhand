@@ -186,13 +186,10 @@ export function pinnedDigestReportVisible(
 }
 
 /**
- * Labels for Dockhand's own short-lived helper containers: image scanners and
- * their version checks, backup and restore helpers, probes. They exit on purpose,
- * so they notify nothing; and they are not the user's containers, so they are
- * hidden like any dockhand.hidden=true container. GET /api/containers leaves them
- * out, so a list that lands while a scan runs no longer shows the scanner for a
- * moment, to the UI or to an API client that creates something per container
- * (#1911). A caller's own labels win.
+ * Labels for Dockhand's own short-lived helper containers (scanners and their
+ * version checks, backup/restore helpers, probes): they exit on purpose, so they
+ * notify nothing, and they are not the user's, so container lists leave them out.
+ * A caller's own labels win.
  */
 export const HELPER_CONTAINER_LABELS: Readonly<Record<string, string>> = {
 	[DOCKHAND_LABELS.NOTIFY]: 'false',

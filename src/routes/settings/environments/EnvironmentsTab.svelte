@@ -36,7 +36,7 @@
 	import { licenseStore } from '$lib/stores/license';
 	import { broom, whale } from '@lucide/lab';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
-	import { canAccess } from '$lib/stores/auth';
+	import { canAccess, isAdmin } from '$lib/stores/auth';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { getLabelColors } from '$lib/utils/label-colors';
 	import { labelColorOverrides } from '$lib/stores/label-colors';
@@ -462,7 +462,7 @@
 			<Badge variant="secondary" class="text-xs">{m.environments_total_count({ count: environments.length })}</Badge>
 		</div>
 		<div class="flex gap-2">
-			{#if $canAccess('environments', 'create')}
+			{#if $isAdmin}
 				<Button size="sm" onclick={openAddEnvModal}>
 					<Plus class="w-4 h-4 mr-1" />
 					{m.dashboard_add_environment()}

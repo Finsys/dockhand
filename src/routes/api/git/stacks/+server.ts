@@ -17,6 +17,7 @@ import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 // Stack name validation: Docker Compose requires lowercase; must start with a
 // letter or number, and contain only lowercase letters, numbers, hyphens, underscores
@@ -62,7 +63,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  * summary: Create a git-deployed stack (from an existing repo or new repo url/branch)
  * body: {stackName:string!, environmentId:integer, repositoryId:integer, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string,takeOverExternalStack:boolean}
  * resp-400: Invalid stack name, or secretProviderId is not a number/null
- * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
+ * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)
  * resp-409: A stack with this name already exists in the environment
  * resp-500: Failed to create the git stack
  */
@@ -76,6 +77,9 @@ export const POST: RequestHandler = async (event) => {
 		// Permission check with environment context
 		if (auth.authEnabled && !await auth.can('stacks', 'create', data.environmentId || undefined)) {
 			return json({ error: 'Permission denied' }, { status: 403 });
+		}
+		if (await deniesEnvScope(auth, typeof data.environmentId === 'number' ? data.environmentId : undefined)) {
+			return json({ error: 'Access denied to this environment' }, { status: 403 });
 		}
 
 		if (!data.stackName || typeof data.stackName !== 'string') {

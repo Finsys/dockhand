@@ -29,6 +29,9 @@ export function extractFirstFileFromTar(tarData: Uint8Array): Uint8Array {
 		const name = readString(header, 0, 100);
 		const sizeOctal = readString(header, 124, 12).trim();
 		const size = sizeOctal ? parseInt(sizeOctal, 8) : 0;
+		// The archive comes from a daemon: a negative size would keep the walk on the same
+		// header forever, so refuse it, and an unreadable one with it.
+		if (!Number.isFinite(size) || size < 0) throw new Error('Invalid tar header size');
 		const typeFlag = header[156];
 
 		// Regular file: typeflag '0' (0x30) or NUL (0x00, legacy)

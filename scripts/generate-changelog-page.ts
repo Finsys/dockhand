@@ -528,7 +528,8 @@ if (import.meta.main) {
 		process.exit(1);
 	}
 
-	indexHtml = indexHtml.replace(changelogRegex, newChangelogSection);
+	// A function, so `$$` or `$&` in an entry is inserted as written, not read as a pattern.
+	indexHtml = indexHtml.replace(changelogRegex, () => newChangelogSection);
 
 	// Also update softwareVersion in JSON-LD schema.
 	const latestVersion = latestReleasedVersion(changelog);

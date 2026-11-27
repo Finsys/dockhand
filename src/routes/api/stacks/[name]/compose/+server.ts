@@ -7,6 +7,7 @@ import { isValidStackName } from '$lib/server/stack-name-guard';
 import { createJobResponse } from '$lib/server/sse';
 import { createRunRecorder } from '$lib/server/deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 // GET /api/stacks/[name]/compose - Get compose file content
 /**
@@ -70,7 +71,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * query: env:integer Environment id the stack belongs to
  * body: {content:string!, composePath:string, envPath:string, oldComposePath:string, oldEnvPath:string, moveFromDir:string, restart:boolean, secretProviderId:integer, pull:boolean, respectPullPolicy:boolean, build:boolean, pullBase:boolean, forceRecreate:boolean}
  * resp-400: Invalid request (e.g. missing content, or secretProviderId wrong type)
- * resp-403: Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)
+ * resp-403: Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)
  * resp-500: Failed to save or deploy the compose file
  */
 export const PUT: RequestHandler = async ({ params, request, url, cookies }) => {
@@ -84,8 +85,9 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 	if (auth.authEnabled && !(await auth.can('stacks', 'edit', envIdNum))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
-	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
-	if (envAccessDenied) return envAccessDenied;
+	if (await deniesEnvScope(auth, envIdNum)) {
+		return json({ error: 'Access denied to this environment' }, { status: 403 });
+	}
 
 	// The name reaches saveStackComposeFile (a writeFileSync path); reject a traversal first.
 	if (!isValidStackName(name)) {

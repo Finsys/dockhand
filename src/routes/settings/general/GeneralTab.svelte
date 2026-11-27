@@ -12,7 +12,7 @@
 	import { STACK_LOG_OPERATIONS, type StackLogOperation } from '$lib/utils/stack-log-operations';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
-	import { canAccess, authStore } from '$lib/stores/auth';
+	import { canAccess, isAdmin, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
 	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
@@ -1058,7 +1058,7 @@ services:
 							id="grype-image"
 							value={defaultGrypeImage}
 							onblur={handleGrypeImageBlur}
-							disabled={!$canAccess('settings', 'edit')}
+							disabled={!$isAdmin}
 							placeholder={DEFAULT_GRYPE_IMAGE}
 						/>
 						<div class="flex items-center gap-2 flex-wrap">
@@ -1068,7 +1068,7 @@ services:
 									type="button"
 									class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-600 hover:bg-green-500/20 transition-colors"
 									onclick={() => applyScannerVersion('grype')}
-									disabled={!$canAccess('settings', 'edit')}
+									disabled={!$isAdmin}
 								>
 									{m.settings_general_scanner_use_version({ version: newerScanners.grype })}
 								</button>
@@ -1083,7 +1083,7 @@ services:
 							id="trivy-image"
 							value={defaultTrivyImage}
 							onblur={handleTrivyImageBlur}
-							disabled={!$canAccess('settings', 'edit')}
+							disabled={!$isAdmin}
 							placeholder={DEFAULT_TRIVY_IMAGE}
 						/>
 						<div class="flex items-center gap-2 flex-wrap">
@@ -1093,7 +1093,7 @@ services:
 									type="button"
 									class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-600 hover:bg-green-500/20 transition-colors"
 									onclick={() => applyScannerVersion('trivy')}
-									disabled={!$canAccess('settings', 'edit')}
+									disabled={!$isAdmin}
 								>
 									{m.settings_general_scanner_use_version({ version: newerScanners.trivy })}
 								</button>
@@ -1113,7 +1113,7 @@ services:
 							id="grype-args"
 							value={defaultGrypeArgs}
 							onblur={handleGrypeArgsBlur}
-							disabled={!$canAccess('settings', 'edit')}
+							disabled={!$isAdmin}
 							placeholder={DEFAULT_GRYPE_ARGS}
 						/>
 						<p class="text-xs text-muted-foreground">{splitAtName(m.settings_general_scanner_args_hint)[0]}<code class="bg-muted px-1 rounded">{'{image}'}</code>{splitAtName(m.settings_general_scanner_args_hint)[1]}</p>
@@ -1124,7 +1124,7 @@ services:
 							id="trivy-args"
 							value={defaultTrivyArgs}
 							onblur={handleTrivyArgsBlur}
-							disabled={!$canAccess('settings', 'edit')}
+							disabled={!$isAdmin}
 							placeholder={DEFAULT_TRIVY_ARGS}
 						/>
 						<p class="text-xs text-muted-foreground">{splitAtName(m.settings_general_scanner_args_hint)[0]}<code class="bg-muted px-1 rounded">{'{image}'}</code>{splitAtName(m.settings_general_scanner_args_hint)[1]}</p>
@@ -1151,7 +1151,7 @@ services:
 								value={defaultScannerNetworkMode}
 								onValueChange={handleScannerNetworkModeChange}
 							>
-								<Select.Trigger id="scanner-network-mode" class="w-full" disabled={!$canAccess('settings', 'edit')}>
+								<Select.Trigger id="scanner-network-mode" class="w-full" disabled={!$isAdmin}>
 									<span>{defaultScannerNetworkMode || m.settings_general_scanner_network_default()}</span>
 								</Select.Trigger>
 								<Select.Content>
@@ -1169,7 +1169,7 @@ services:
 								id="scanner-dns"
 								value={defaultScannerDns.join(', ')}
 								onblur={handleScannerDnsBlur}
-								disabled={!$canAccess('settings', 'edit')}
+								disabled={!$isAdmin}
 							/>
 							<p class="text-xs text-muted-foreground">{m.settings_general_scanner_dns_hint()}</p>
 						</div>

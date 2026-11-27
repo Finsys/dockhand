@@ -407,7 +407,7 @@ export class BackupService {
 			log(`snapshot ${summary.snapshotId.slice(0, 8)} created, verifying`);
 			op.progress('verifying', 'Verifying the snapshot is readable...');
 			diag("BEFORE_VERIFY", "snapshot=" + summary.snapshotId);
-			await this.verifySnapshot(summary.snapshotId, instanceId);
+			await this.verifySnapshot(summary.snapshotId);
 
 			// --- commit: record success + config status ---
 			await this.ports.setConfigStatus(job.configId, 'success');
@@ -492,9 +492,12 @@ export class BackupService {
 		}
 	}
 
-	/** Verify the just-written snapshot exists + is readable for our instance. */
-	private async verifySnapshot(snapshotId: string, instanceId: string): Promise<void> {
-		const run = await this.ports.runLocal(['snapshots', '--json', '--no-lock', '--tag', `dockhand:instance=${instanceId}`, snapshotId]);
+	/** Verify the just-written snapshot exists + is readable. The id is the one restic
+	 * returned from our own backup, so instance ownership is already guaranteed by
+	 * provenance; restic 0.20 rejects a --tag filter next to an explicit id, so the id
+	 * stands alone here. */
+	private async verifySnapshot(snapshotId: string): Promise<void> {
+		const run = await this.ports.runLocal(['snapshots', '--json', '--no-lock', snapshotId]);
 		if (run.exitCode !== 0 || !run.stdout.includes(snapshotId.slice(0, 8))) {
 			throw new BackupError('INTEGRITY', 'the new snapshot could not be verified as readable — not declaring success');
 		}

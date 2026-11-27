@@ -44,7 +44,7 @@ import {
 	setPrimaryStackLocation
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
-import { visibleGeneralSettings } from '$lib/server/general-settings-visibility';
+import { visibleGeneralSettings, writesAdminOnlySetting } from '$lib/server/general-settings-visibility';
 import { refreshSystemJobs } from '$lib/server/scheduler';
 import { sendToEventSubprocess, sendToMetricsSubprocess } from '$lib/server/subprocess-manager';
 import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } from '$lib/server/scanner';
@@ -463,7 +463,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * summary: Update global general settings (all fields optional; only supplied keys are written)
  * description: A large flat settings bag - theme/fonts, scanner defaults, cleanup schedules, event/metrics collection, editor options (e.g. editorIndentGuides), and more.
  * body: {animateIcons:boolean, editorIndentGuides:boolean, coloredActionButtons:boolean, lightTheme:string, darkTheme:string, defaultTimezone:string, logBufferSizeKb:integer, externalStackPaths:string, actionIconSize:string, compactPorts:boolean, confirmDestructive:boolean, dateFormat:string, defaultBackupImage:string, defaultComposeTemplate:string, defaultGrypeArgs:string, defaultGrypeImage:string, defaultScannerDns:array<string>, defaultScannerNetworkMode:string, defaultTrivyArgs:string, defaultTrivyImage:string, deployLogReconcileCron:string, deployLogReconcileEnabled:boolean, downloadFormat:string, editorFont:string, editorTheme:string, eventCleanupCron:string, eventCleanupEnabled:boolean, eventCollectionMode:string, eventPollInterval:integer, eventRetentionDays:integer, font:string, fontSize:string, formatLogTimestamps:boolean, gridFontSize:string, highlightUpdates:boolean, honorProxyLabels:boolean, labelFilterMode:string, logMaxLines:integer, metricsCollectionInterval:integer, primaryStackLocation:string, protectScannerImages:boolean, scanRetentionCron:string, scanRetentionEnabled:boolean, scanRetentionGraceDays:integer, scanRetentionKeep:integer, scannerCleanupCron:string, scannerCleanupEnabled:boolean, scheduleCleanupCron:string, scheduleCleanupEnabled:boolean, scheduleRetentionDays:integer, showExposedPorts:boolean, showGitCommitHash:boolean, showImageChangelogLinks:boolean, showStoppedContainers:boolean, showWhatsNew:boolean, terminalFont:string, timeFormat:string, useSelfhstIcons:boolean, stackLogOperations:array<string>}
- * resp-403: Permission denied (needs settings:edit)
+ * resp-403: Permission denied (needs settings:edit; the scanner and backup helper keys - images, default scanner args, scanner network mode and DNS - need an administrator)
  * resp-500: Failed to save settings
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
@@ -474,6 +474,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const body = await request.json();
+		// can() without an environmentId merges every role, env-scoped ones included, so it
+		// cannot express "instance-wide"; admin is the answer, as in POST /api/settings/scanner.
+		if (auth.authEnabled && !auth.isAdmin && writesAdminOnlySetting(body)) {
+			return json({ error: 'Changing scanner or backup helper settings requires administrator access' }, { status: 403 });
+		}
+
 		const { confirmDestructive, showStoppedContainers, highlightUpdates, coloredActionButtons, actionIconSize, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, scannerCleanupCron, scannerCleanupEnabled, deployLogReconcileCron, deployLogReconcileEnabled, scanRetentionCron, scanRetentionEnabled, scanRetentionKeep, scanRetentionGraceDays, logBufferSizeKb, logMaxLines, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, editorTheme, compactPorts, showExposedPorts, showGitCommitHash, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage, defaultComposeTemplate, labelFilterMode, defaultBackupImage, honorProxyLabels, showImageChangelogLinks, useSelfhstIcons, animateIcons, editorIndentGuides, protectScannerImages, showWhatsNew, defaultScannerNetworkMode, defaultScannerDns, stackLogOperations } = body;
 
 		if (confirmDestructive !== undefined) {

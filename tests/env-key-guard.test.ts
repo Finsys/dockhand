@@ -31,6 +31,11 @@ describe('stripReservedEnvKeys - blocks loader/PATH hijack via stack env vars', 
 		expect(out.APP_PORT).toBe('8080');
 	});
 
+	test('strips HOME and BUILDX_CONFIG, which steer where the docker CLI finds its plugins', () => {
+		const out = stripReservedEnvKeys({ HOME: '/data/stacks/x', BUILDX_CONFIG: '/tmp/b', HOMEPAGE_URL: 'https://x', APP_HOME: '/app' });
+		expect(out).toEqual({ HOMEPAGE_URL: 'https://x', APP_HOME: '/app' });
+	});
+
 	test('keeps ordinary application env vars untouched', () => {
 		const vars = { DATABASE_URL: 'postgres://x', API_KEY: 'secret', MY_PATH_SETTING: '/app', PATHOLOGY: 'ok' };
 		// near-misses: MY_PATH_SETTING and PATHOLOGY are NOT PATH and must survive

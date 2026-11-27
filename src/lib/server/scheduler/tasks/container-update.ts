@@ -699,6 +699,38 @@ export interface RecreateContainerOptions {
 	oldImageConfig?: ImageEnvLabels | null;
 }
 
+/**
+ * Record an 'update' row on the Activity page and push it to live listeners. Docker has
+ * no event for a recreation onto a new image (its own 'update' covers resource limits
+ * only), so every per-container update path calls this. Returns the
+ * error message instead of throwing: the update itself has already happened.
+ */
+export async function recordContainerUpdateActivity(entry: {
+	envId?: number | null;
+	containerId: string;
+	containerName: string;
+	image?: string | null;
+	labels?: Record<string, string> | null;
+}): Promise<string | null> {
+	try {
+		const env = entry.envId != null ? await getEnvironment(entry.envId) : undefined;
+		if (env?.collectActivity === false) return null;
+		const savedEvent = await logContainerEvent({
+			environmentId: entry.envId ?? null,
+			containerId: entry.containerId,
+			containerName: entry.containerName,
+			image: entry.image || null,
+			action: 'update',
+			actorAttributes: entry.labels || null,
+			timestamp: new Date().toISOString()
+		});
+		if (savedEvent) containerEventEmitter.emit('event', savedEvent);
+		return null;
+	} catch (e: any) {
+		return e?.message ?? String(e);
+	}
+}
+
 export async function recreateContainer(
 	containerName: string,
 	envId?: number,
@@ -741,29 +773,14 @@ export async function recreateContainer(
 			log?.(`WARNING: dependent-child reconnect step errored (parent update stands): ${e?.message}`);
 		}
 
-		// Docker has no "updated" container action for image recreation (its raw 'update'
-		// event only fires for cgroup resource-limit changes), so record an 'update'
-		// activity row and broadcast it to live SSE listeners here alongside the
-		// container_updated notification (#1864).
-		try {
-			const env = envId != null ? await getEnvironment(envId) : undefined;
-			if (env?.collectActivity !== false) {
-				const savedEvent = await logContainerEvent({
-					environmentId: envId ?? null,
-					containerId: newContainerId || oldParentId,
-					containerName,
-					image: imageName || null,
-					action: 'update',
-					actorAttributes: inspectData.Config?.Labels || null,
-					timestamp: new Date().toISOString()
-				});
-				if (savedEvent) {
-					containerEventEmitter.emit('event', savedEvent);
-				}
-			}
-		} catch (e: any) {
-			log?.(`WARNING: failed to log container update activity event (update stands): ${e?.message}`);
-		}
+		const activityError = await recordContainerUpdateActivity({
+			envId,
+			containerId: newContainerId || oldParentId,
+			containerName,
+			image: imageName,
+			labels: inspectData.Config?.Labels
+		});
+		if (activityError) log?.(`WARNING: failed to log container update activity event (update stands): ${activityError}`);
 
 		// recreateContainer is only ever called to UPDATE a container's image (scheduled
 		// auto-update AND the manual batch-update UI), so a successful recreate is a

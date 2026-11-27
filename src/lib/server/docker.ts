@@ -31,7 +31,7 @@ import { helperWaitDeadline, helperExitFromState, helperFailureDetail, needsDaem
 import { cancelReaderOnAbort } from './reader-abort-core';
 import { configuredMacAddress, endpointForRecreate } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
-import { mapContainerNetworks } from '$lib/utils/network-identity';
+import { mapContainerNetworks, recreateEndpointAliases } from '$lib/utils/network-identity';
 import type { Environment } from './db';
 import { getSetting } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
@@ -2555,6 +2555,13 @@ export async function recreateContainerFromInspect(
 		};
 	}
 
+	// The compose service alias is restored on the primary network, as the single update
+	// does: once missing, it would otherwise be carried forward by every later update and the
+	// stack's service-name DNS stays broken. The other networks pass through as-is.
+	const attachedNetworkNames = Object.keys(networks);
+	const recreateEndpoint = (netName: string, endpoint: any) =>
+		endpointForRecreate(recreateEndpointAliases(netName, { ...endpoint }, networkMode, attachedNetworkNames, config.Labels));
+
 	// Docker can only connect to one network at creation. Pass the first network
 	// from the old container's settings to avoid getting a random bridge IP.
 	// Skip for shared network modes — EndpointsConfig conflicts with container:/host/none modes.
@@ -2563,7 +2570,7 @@ export async function recreateContainerFromInspect(
 		// from the IP, the replacement gets a new address and the carried MAC then
 		// collides with whoever inherits the old one (#1618). Only a configured MAC, or one
 		// derived from an IP the endpoint pins, survives; otherwise Docker derives a fresh one.
-		const endpointConfig = endpointForRecreate({ ...initialNetworkConfig });
+		const endpointConfig = recreateEndpoint(initialNetworkName, initialNetworkConfig);
 		createConfig.NetworkingConfig = {
 			EndpointsConfig: {
 				[initialNetworkName]: endpointConfig
@@ -2603,7 +2610,7 @@ export async function recreateContainerFromInspect(
 			if (nc.NetworkID) {
 				try {
 					// Same rule as the creation endpoint above.
-					const settings = endpointForRecreate({ ...nc });
+					const settings = recreateEndpoint(netName, nc);
 					await connectContainerToNetworkRaw(nc.NetworkID, newContainerId, settings, envId);
 				} catch (netError: any) {
 					log?.(`Warning: Failed to connect to network "${netName}": ${netError.message}`);

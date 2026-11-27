@@ -29,6 +29,21 @@ function reader(snapshots: Array<{ id: string; tags: string[] }>, exitCode = 0):
 	};
 }
 
+/** Like reader(), but records the args of each restic call for assertion. */
+function capturingReader(snapshots: Array<{ id: string; tags: string[] }>): { reader: ResticReader; calls: string[][] } {
+	const calls: string[][] = [];
+	return {
+		calls,
+		reader: {
+			async runLocal(_d: any, args: string[]): Promise<ResticRun> {
+				calls.push(args);
+				const stdout = JSON.stringify(snapshots.map((s) => ({ id: s.id, short_id: s.id.slice(0, 8), tags: s.tags })));
+				return { exitCode: 0, stdout, stderr: '' };
+			},
+		},
+	};
+}
+
 const freeAccess: AccessContext = { isEnterprise: false, canAccessEnvironment: async () => true };
 function enterprise(allowed: number[]): AccessContext {
 	return { isEnterprise: true, canAccessEnvironment: async (id) => allowed.includes(id) };
@@ -63,6 +78,20 @@ describe('assertInstanceOwned', () => {
 		const r = reader([]);
 		await expect(assertInstanceOwned(r, {}, 'me', 'nothex!')).rejects.toThrow(/invalid snapshot id/);
 	});
+	it('queries by snapshot id ALONE with no --tag filter (restic 0.20 rejects both)', async () => {
+		// restic 0.20 hard-errors ("explicit snapshot ids are given") when --tag accompanies
+		// an explicit id; instance scoping is applied on the parsed tags instead. Both the
+		// enterprise and non-enterprise paths must send the bare id.
+		const ent = capturingReader([{ id: SNAP, tags: ['dockhand:instance=me', 'dockhand:envid=3'] }]);
+		await assertInstanceOwned(ent.reader, {}, 'me', SNAP, true);
+		expect(ent.calls[0]).toContain(SNAP);
+		expect(ent.calls[0].includes('--tag')).toBe(false);
+
+		const free = capturingReader([{ id: SNAP, tags: ['dockhand:instance=me'] }]);
+		await assertInstanceOwned(free.reader, {}, 'me', SNAP, false);
+		expect(free.calls[0].includes('--tag')).toBe(false);
+	});
+
 	it('surfaces a restic failure (not a silent empty)', async () => {
 		const r = reader([], 1);
 		await expect(assertInstanceOwned(r, {}, 'me', SNAP)).rejects.toThrow(/could not verify snapshot ownership/);
@@ -195,6 +224,18 @@ describe('resolveSnapshotEnvId — stable-id env resolution, fail closed', () =>
 	it('fails closed on an invalid snapshot id without touching restic', async () => {
 		const r = reader([{ id: SNAP, tags: ['dockhand:envid=7'] }]);
 		expect(await resolveSnapshotEnvId(r, {}, 'me', 'nothex!')).toEqual({ envId: undefined, resolved: false });
+	});
+	it('fails closed for a snapshot owned by ANOTHER instance (env gate is this-instance only)', async () => {
+		// Instance scoping moved from the restic --tag filter (0.20 rejects it) into a JS tag
+		// check: a foreign-instance snapshot must not resolve an env for this install.
+		const r = reader([{ id: SNAP, tags: ['dockhand:instance=OTHER', 'dockhand:envid=7'] }]);
+		expect(await resolveSnapshotEnvId(r, {}, 'me', SNAP)).toEqual({ envId: undefined, resolved: false });
+	});
+	it('queries by id ALONE with no --tag filter (restic 0.20 rejects both)', async () => {
+		const cap = capturingReader([{ id: SNAP, tags: ['dockhand:instance=me', 'dockhand:envid=7'] }]);
+		await resolveSnapshotEnvId(cap.reader, {}, 'me', SNAP);
+		expect(cap.calls[0]).toContain(SNAP);
+		expect(cap.calls[0].includes('--tag')).toBe(false);
 	});
 });
 

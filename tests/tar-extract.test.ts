@@ -76,3 +76,21 @@ describe('extractFirstFileFromTar', () => {
 		expect(() => extractFirstFileFromTar(truncated)).toThrow();
 	});
 });
+
+describe('extractFirstFileFromTar - a header a daemon should never send', () => {
+	// A directory entry (typeflag '5') whose size field the walk has to skip over.
+	function header(sizeField: string): Uint8Array {
+		const tar = makeTar('dir/', new Uint8Array(0));
+		tar.set(new TextEncoder().encode(sizeField.padEnd(12, '\0')), 124);
+		tar[156] = 0x35;
+		return tar;
+	}
+
+	test('a negative size is refused instead of looping forever on the same header', () => {
+		expect(() => extractFirstFileFromTar(header('-1000'))).toThrow('Invalid tar header size');
+	});
+
+	test('an unreadable size is refused', () => {
+		expect(() => extractFirstFileFromTar(header('zz'))).toThrow('Invalid tar header size');
+	});
+});

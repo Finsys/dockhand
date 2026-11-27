@@ -14,6 +14,7 @@ import {
 import { getUser, getUserByUsername } from '$lib/server/db';
 import { auditAuth } from '$lib/server/audit';
 import { getClientIp } from '$lib/server/client-ip';
+import { loginMethod } from '$lib/server/login-provider-core';
 
 /**
  * @openapi
@@ -57,8 +58,10 @@ export const POST: RequestHandler = async (event) => {
 			);
 		}
 
-		// Reject local login attempts when DISABLE_LOCAL_LOGIN is set
-		if (provider === 'local' && process.env.DISABLE_LOCAL_LOGIN === 'true') {
+		// The policy and the dispatch read the same decision, so no provider value reaches
+		// the local login while DISABLE_LOCAL_LOGIN is set.
+		const method = loginMethod(provider);
+		if (method.kind === 'local' && process.env.DISABLE_LOCAL_LOGIN === 'true') {
 			return json({ error: 'Local login is disabled' }, { status: 403 });
 		}
 
@@ -66,14 +69,9 @@ export const POST: RequestHandler = async (event) => {
 		let result: any;
 		let authProviderType: 'local' | 'ldap' | 'oidc' = 'local';
 
-		if (provider.startsWith('ldap:')) {
-			// LDAP provider with specific config ID (e.g., "ldap:1")
-			const configId = parseInt(provider.split(':')[1], 10);
-			result = await authenticateLdap(username, password, configId);
-			authProviderType = 'ldap';
-		} else if (provider === 'ldap') {
-			// Generic LDAP (will try all enabled configs)
-			result = await authenticateLdap(username, password);
+		if (method.kind === 'ldap') {
+			// A specific config ("ldap:1"), or every enabled one ("ldap")
+			result = await authenticateLdap(username, password, method.configId);
 			authProviderType = 'ldap';
 		} else {
 			result = await authenticateLocal(username, password);

@@ -5,6 +5,7 @@ import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import { isValidStackName } from '$lib/server/stack-name-guard';
 import type { RequestHandler } from './$types';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * @openapi
@@ -17,7 +18,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {jobId:string!}
  * resp-200-desc: Fire-and-forget job id — poll GET /api/jobs/{jobId} for the result. Send "Accept: application/json" (without text/event-stream) to instead block and receive the final {success,output|error} synchronously.
  * resp-200-example: {"jobId":"3f9c5b1a-2e4d-4a6f-9b0a-1c7d8e9f0a1b"}
- * resp-403: Permission denied, or access denied to this environment
+ * resp-403: Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)
  */
 export const POST: RequestHandler = async (event) => {
 	const { params, url, cookies, request } = event;
@@ -32,7 +33,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	// Environment access check (enterprise only)
-	if (envIdNum && auth.isEnterprise && !(await auth.canAccessEnvironment(envIdNum))) {
+	if (await deniesEnvScope(auth, envIdNum)) {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 

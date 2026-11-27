@@ -34,6 +34,17 @@ describe('general settings are filtered before they are returned', () => {
 	});
 });
 
+describe('scanner and helper settings need an administrator to change', () => {
+	const handler = read('../src/routes/api/settings/general/+server.ts');
+	const POST = handler.slice(handler.indexOf('export const POST'));
+
+	test('the POST refuses non-admins before anything is written', () => {
+		const gate = POST.search(/if \(auth\.authEnabled && !auth\.isAdmin && writesAdminOnlySetting\(body\)\) \{\s*return json\(/);
+		expect(gate).toBeGreaterThan(-1);
+		expect(gate).toBeLessThan(POST.indexOf('setSetting('));
+	});
+});
+
 describe('the role permission matrix needs permission to read', () => {
 	const list = read('../src/routes/api/roles/+server.ts');
 	const byId = read('../src/routes/api/roles/[id]/+server.ts');

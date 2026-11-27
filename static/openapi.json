@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.58",
+    "version": "1.0.59",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -2808,7 +2808,7 @@
             "description": "Authentication required (auth is enabled and the caller is not authenticated)"
           },
           "403": {
-            "description": "Permission denied (missing settings:edit)"
+            "description": "Permission denied (caller is not an administrator)"
           },
           "500": {
             "description": "Failed to update the auth settings"
@@ -7192,7 +7192,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The raw Docker inspect object for the container"
+            "description": "The raw Docker inspect object for the container. For a non-admin, the env values of Dockhand's own container are masked"
           },
           "403": {
             "description": "Permission denied, or (enterprise) no access to the requested environment"
@@ -7319,7 +7319,7 @@
         ],
         "responses": {
           "200": {
-            "description": "compose keeps only user-set env; composeFullEnv keeps every env var (incl. image-inherited); stackProject is the compose project the container already belongs to, or null",
+            "description": "compose keeps only user-set env; composeFullEnv keeps every env var (incl. image-inherited); stackProject is the compose project the container already belongs to, or null. For a non-admin, the env values of Dockhand's own container are masked",
             "content": {
               "application/json": {
                 "schema": {
@@ -7440,7 +7440,7 @@
             "description": "Not authenticated"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "500": {
             "description": "Failed to create the exec instance"
@@ -7544,7 +7544,7 @@
             "description": "Not authenticated"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "500": {
             "description": "Failed to run the command"
@@ -7645,7 +7645,7 @@
             "description": "Directory listing (entries with name, type, size and permission metadata)"
           },
           "403": {
-            "description": "Permission denied (needs containers:exec)"
+            "description": "Permission denied (needs containers:exec), or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Container not found"
@@ -7732,7 +7732,7 @@
             "description": "Path or mode missing, an invalid chmod mode, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, read-only file system, or operation not permitted"
+            "description": "Permission denied, read-only file system, or operation not permitted, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Path not found"
@@ -7849,7 +7849,7 @@
             "description": "Path or owner missing, an invalid owner spec, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, read-only file system, or operation not permitted"
+            "description": "Permission denied, read-only file system, or operation not permitted, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Path not found"
@@ -7965,7 +7965,7 @@
             "description": "Path is missing, the target is a directory, or the container is not running"
           },
           "403": {
-            "description": "Permission denied to read the file (needs containers:exec)"
+            "description": "Permission denied to read the file (needs containers:exec), or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "File not found"
@@ -8052,7 +8052,7 @@
             "description": "Path is missing, content is missing/not a string, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, or the target file system is read-only"
+            "description": "Permission denied, or the target file system is read-only, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Target directory not found"
@@ -8165,7 +8165,7 @@
             "description": "Path missing, type not \"file\" or \"directory\", or the container is not running"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Parent directory not found"
@@ -8284,7 +8284,7 @@
             "description": "Path missing, a refused critical-path delete, a non-empty directory, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, or read-only file system"
+            "description": "Permission denied, or read-only file system, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Path not found"
@@ -8356,7 +8356,7 @@
             "description": "Path is missing"
           },
           "403": {
-            "description": "Permission denied (requires containers:exec, like reading a file)"
+            "description": "Permission denied (requires containers:exec, like reading a file), or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "File not found"
@@ -8438,7 +8438,7 @@
             "description": "oldPath or newPath missing, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, or read-only file system"
+            "description": "Permission denied, or read-only file system, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Source path not found"
@@ -8564,7 +8564,7 @@
             "description": "Target path missing, or no files provided"
           },
           "403": {
-            "description": "Permission denied to write to the path"
+            "description": "Permission denied to write to the path, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Target directory not found"
@@ -8629,7 +8629,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The raw Docker inspect object for the container"
+            "description": "The raw Docker inspect object for the container. For a non-admin, the env values of Dockhand's own container are masked"
           },
           "403": {
             "description": "Permission denied"
@@ -9136,7 +9136,7 @@
             }
           },
           "403": {
-            "description": "Permission denied, or (enterprise) no access to the requested environment"
+            "description": "Permission denied, or (enterprise) no access to the requested environment, or the target is Dockhand's own container and the caller is not an administrator"
           }
         },
         "security": [
@@ -11290,7 +11290,7 @@
             "description": "Invalid name, invalid connectionType, or host missing for direct/hawser-standard"
           },
           "403": {
-            "description": "Permission denied (RBAC 'environments:create' missing)"
+            "description": "Permission denied (RBAC 'environments:create' missing, or a non-admin under Enterprise RBAC)"
           },
           "409": {
             "description": "An environment with this name already exists"
@@ -13763,10 +13763,10 @@
             }
           },
           "400": {
-            "description": "Host is required for direct/hawser-standard connection types"
+            "description": "Host is required for direct/hawser-standard connection types, the protocol is not http or https, the port is out of range, or the host is not a plain hostname or IP address"
           },
           "403": {
-            "description": "The caller cannot access the environment named by environmentId"
+            "description": "The caller lacks environments:create and environments:edit, or cannot access, or lacks environments:edit on, the environment named by environmentId"
           }
         },
         "security": [
@@ -13777,7 +13777,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token.",
+        "description": "Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token. Needs environments:edit on that environment, and the stored secrets are only reused while host, port and protocol match the saved ones.",
         "requestBody": {
           "required": true,
           "content": {
@@ -15088,7 +15088,7 @@
             "description": "The id path segment is not a valid integer"
           },
           "403": {
-            "description": "Caller lacks the git:edit permission"
+            "description": "Caller lacks git:edit, or stacks:create and stacks:start on the repository's environment, or access to that environment (an Enterprise non-admin needs the repository to have one)"
           },
           "404": {
             "description": "No repository exists with that ID"
@@ -15442,7 +15442,7 @@
             "description": "Invalid stack name, or secretProviderId is not a number/null"
           },
           "403": {
-            "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)"
+            "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "409": {
             "description": "A stack with this name already exists in the environment"
@@ -18634,7 +18634,7 @@
             "description": "Server-Sent Events stream (text/event-stream) emitting heartbeat and per-container log events"
           },
           "400": {
-            "description": "No containers specified"
+            "description": "No containers specified, or a container id is invalid"
           },
           "403": {
             "description": "Permission denied (requires the containers:logs permission)"
@@ -26023,7 +26023,7 @@
             "description": "Successful response"
           },
           "403": {
-            "description": "Permission denied (needs settings:edit)"
+            "description": "Permission denied (needs settings:edit; the scanner and backup helper keys - images, default scanner args, scanner network mode and DNS - need an administrator)"
           },
           "500": {
             "description": "Failed to save settings"
@@ -27384,7 +27384,7 @@
             "description": "Invalid request (e.g. missing name/compose, or secretProviderId wrong type)"
           },
           "403": {
-            "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)"
+            "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "500": {
             "description": "Failed to create or deploy the stack"
@@ -27565,7 +27565,7 @@
             "description": "Compose down failed and force was not set"
           },
           "403": {
-            "description": "Permission denied, or access denied to this environment"
+            "description": "Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "404": {
             "description": "Compose file not found for this stack"
@@ -27619,7 +27619,7 @@
             "description": "Invalid conversion request or repository configuration"
           },
           "403": {
-            "description": "Caller lacks stacks:edit or required secrets:view permission, or access denied to this environment (enterprise)"
+            "description": "Caller lacks stacks:edit or required secrets:view permission, or access denied to this environment (enterprise), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "404": {
             "description": "Stack not found"
@@ -27956,7 +27956,7 @@
             "description": "Invalid request (e.g. missing content, or secretProviderId wrong type)"
           },
           "403": {
-            "description": "Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)"
+            "description": "Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "500": {
             "description": "Failed to save or deploy the compose file"
@@ -28173,7 +28173,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied (requires stacks:start, or environment access denied on enterprise)"
+            "description": "Permission denied (requires stacks:start, or environment access denied on enterprise), or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -28631,7 +28631,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied, or access denied to this environment"
+            "description": "Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -28804,7 +28804,7 @@
             "description": "Invalid variables payload"
           },
           "403": {
-            "description": "Permission denied (needs stacks:edit)"
+            "description": "Permission denied (needs stacks:edit), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "500": {
             "description": "Failed to save env vars"
@@ -29000,7 +29000,7 @@
             "description": "Invalid body (content string required) or refusal to write a masked \"***\" placeholder"
           },
           "403": {
-            "description": "Permission denied (requires stacks:edit, or environment access denied on enterprise), or the env file path is a protected location"
+            "description": "Permission denied (requires stacks:edit, or environment access denied on enterprise), or the env file path is a protected location, or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "500": {
             "description": "Failed to save environment file"
@@ -29492,7 +29492,7 @@
             "description": "oldDir and newComposePath are required, or the source directory does not exist"
           },
           "403": {
-            "description": "Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory"
+            "description": "Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory, or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "404": {
             "description": "No stack source row for this name and environment"
@@ -29585,7 +29585,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied (requires stacks:restart, or environment access denied on enterprise)"
+            "description": "Permission denied (requires stacks:restart, or environment access denied on enterprise), or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -29651,7 +29651,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied, or access denied to this environment"
+            "description": "Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -29717,7 +29717,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied, or access denied to this environment"
+            "description": "Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -32358,7 +32358,7 @@
             "description": "Authentication required (auth is enabled and the caller is not authenticated)"
           },
           "403": {
-            "description": "Permission denied (missing users:remove)"
+            "description": "Permission denied (missing users:remove), or the user is an admin and the caller is not"
           },
           "404": {
             "description": "User not found"
@@ -33716,10 +33716,20 @@
           "vulnerabilities"
         ],
         "summary": "Return the total finding count, severity summary, and distinct image/container/stack filter values for an environment",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "groupBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Group the counts by \"container\", \"image\" or \"stack\""
+          }
+        ],
         "responses": {
           "200": {
-            "description": "An empty metadata object is returned when no environment resolves; a permission failure returns the status from the access check",
+            "description": "Without groupBy: total, summary, and the filter values under options (an empty metadata object when no environment resolves). With groupBy: only groupBy and groups (empty when no environment resolves); a container group has id, name, image, an image group id, name, containers, a stack group name, images, each with critical, high, medium, low and total. A permission failure returns the status from the access check",
             "content": {
               "application/json": {
                 "schema": {
@@ -33732,32 +33742,40 @@
                       "type": "object",
                       "properties": {}
                     },
-                    "images": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
+                    "options": {
+                      "type": "object",
+                      "properties": {
+                        "images": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "containers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "stacks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
                       }
                     },
-                    "containers": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
+                    "groupBy": {
+                      "type": "string"
                     },
-                    "stacks": {
+                    "groups": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "properties": {}
                       }
                     }
-                  },
-                  "required": [
-                    "total",
-                    "summary",
-                    "images",
-                    "containers",
-                    "stacks"
-                  ]
+                  }
                 },
                 "example": {
                   "total": 12,
@@ -33767,18 +33785,23 @@
                     "medium": 5,
                     "low": 3
                   },
-                  "images": [
-                    "nginx:latest"
-                  ],
-                  "containers": [
-                    "web"
-                  ],
-                  "stacks": [
-                    "frontend"
-                  ]
+                  "options": {
+                    "images": [
+                      "nginx:latest"
+                    ],
+                    "containers": [
+                      "web"
+                    ],
+                    "stacks": [
+                      "frontend"
+                    ]
+                  }
                 }
               }
             }
+          },
+          "400": {
+            "description": "groupBy is not container, image or stack"
           }
         },
         "security": [
@@ -33788,7 +33811,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "With groupBy (container, image or stack), returns {groupBy, groups} instead - each scanned container, image or stack with its critical/high/medium/low/total counts, most severe first. A clean one is listed with zeroes; one whose image was never scanned is not listed. A stack counts each image once."
       }
     },
     "/api/vulnerabilities/export": {
