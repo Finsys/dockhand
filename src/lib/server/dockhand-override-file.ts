@@ -15,3 +15,38 @@ export function buildDockhandOverrideFile(envVars: Record<string, string>): stri
 	const lines = Object.entries(envVars).map(([k, v]) => `${k}=${v}`);
 	return HEADER + lines.join('\n') + (lines.length ? '\n' : '');
 }
+
+export interface OverrideFilePlan {
+	/** Whether .env.dockhand should be written to disk. */
+	shouldWrite: boolean;
+	/** The contents to write to .env.dockhand. */
+	content: string;
+	/** Whether --env-file should be passed to docker compose CLI args. */
+	attachCliArg: boolean;
+}
+
+/**
+ * Plan whether and how to emit `.env.dockhand` for a stack.
+ *
+ * For git stacks (`useOverrideFile = true`):
+ * - Always write the file (overwriting any previous overrides with a header-only
+ *   file when empty) so stale overrides from prior deploys are cleared (#1888) and
+ *   compose files referencing `env_file: .env.dockhand` can resolve (#1336).
+ * - Only attach `--env-file` to CLI args when overrides exist; omitting it for
+ *   zero-var stacks prevents suppressing Compose's auto-discovery of adjacent
+ *   default `.env` (#1136).
+ */
+export function planDockhandOverrideFile(
+	useOverrideFile: boolean,
+	envVars?: Record<string, string>
+): OverrideFilePlan {
+	if (!useOverrideFile) {
+		return { shouldWrite: false, content: '', attachCliArg: false };
+	}
+	const hasOverrides = !!envVars && Object.keys(envVars).length > 0;
+	return {
+		shouldWrite: true,
+		content: buildDockhandOverrideFile(envVars || {}),
+		attachCliArg: hasOverrides
+	};
+}

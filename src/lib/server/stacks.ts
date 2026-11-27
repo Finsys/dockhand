@@ -73,7 +73,7 @@ import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { compareContainerOrder } from './container-labels';
 import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
 import { pendingRowsToClear } from './pending-updates-core';
-import { buildDockhandOverrideFile } from './dockhand-override-file';
+import { buildDockhandOverrideFile, planDockhandOverrideFile } from './dockhand-override-file';
 import { withComposeRateLimitRetry } from './pull-retry';
 
 // =============================================================================
@@ -1478,18 +1478,23 @@ async function executeLocalCompose(
 		args.push('--env-file', customEnvPath);
 	}
 
-	// For git stacks: write non-secret overrides to .env.dockhand and add as second --env-file.
+	// For git stacks: write non-secret overrides to .env.dockhand.
 	// Docker Compose applies env files in order, so later files override earlier ones.
 	// This lets the repo's .env provide defaults while our overrides take precedence.
 	// Secrets are still injected via shell env only (never written to disk).
-	// ONLY when there ARE overrides: any --env-file on the CLI suppresses Compose's
-	// auto-discovery of the adjacent default .env, so writing one for a zero-var stack
+	// Always write the file so stale overrides from previous deploys are cleared (#1888)
+	// and compose files referencing `env_file: .env.dockhand` can resolve (#1336).
+	// ONLY add CLI --env-file when there ARE overrides: any --env-file on the CLI suppresses
+	// Compose's auto-discovery of adjacent default .env, so passing it for a zero-var stack
 	// would blank a subdir compose's own .env interpolation (#1136). Internal/adopted
 	// stacks already have their non-secrets in the .env file written by the UI.
-	if (useOverrideFile && envVars && Object.keys(envVars).length > 0) {
+	const overridePlan = planDockhandOverrideFile(!!useOverrideFile, envVars);
+	if (overridePlan.shouldWrite) {
 		const overrideEnvPath = join(composeFileDir, '.env.dockhand');
-		writeFileSync(overrideEnvPath, buildDockhandOverrideFile(envVars));
-		args.push('--env-file', overrideEnvPath);
+		writeFileSync(overrideEnvPath, overridePlan.content);
+		if (overridePlan.attachCliArg) {
+			args.push('--env-file', overrideEnvPath);
+		}
 	}
 
 	if (useStdin) {
