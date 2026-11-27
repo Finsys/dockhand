@@ -17,12 +17,17 @@ const RESERVED_EXACT = new Set([
 	'LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT',
 	'NODE_OPTIONS',
 	'BASH_ENV', 'ENV', 'SHELLOPTS', 'IFS', 'SHELL',
-	'GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_EXEC_PATH',
+	'GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_EXEC_PATH', 'GIT_PROXY_COMMAND',
+	'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM',
 	'DOCKER_HOST', 'DOCKER_CONFIG', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY', 'DOCKER_CONTEXT'
 ]);
 
-// Prefixes covering the whole dynamic-loader families (glibc LD_*, macOS DYLD_*).
-const RESERVED_PREFIXES = ['LD_', 'DYLD_'];
+// Prefixes covering the dynamic-loader families (glibc LD_*, macOS DYLD_*) and git's
+// configuration-by-environment family (GIT_CONFIG_COUNT with its GIT_CONFIG_KEY_<n> /
+// GIT_CONFIG_VALUE_<n> pairs): a command-scope pair sets any config key, so a
+// url.<base>.insteadOf rewrite steers a git child started for a git-remote include into
+// running a program through the ext transport.
+const RESERVED_PREFIXES = ['LD_', 'DYLD_', 'GIT_CONFIG_'];
 
 function isReservedEnvKey(key: string): boolean {
 	if (RESERVED_EXACT.has(key)) return true;
