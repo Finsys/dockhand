@@ -33,6 +33,7 @@ import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
 import { detectRemoteSocketPath } from './scanner-socket-detect';
 import { truncateForLog, classifyUnparseableOutput, pickScanDisplayName } from './scanner-output-core';
+import { createScannerLock } from './scanner-lock-core';
 import { checkNewerVersion } from './semver/check';
 import { userCheckListedAfter } from './semver/tag-source-core';
 import {
@@ -108,27 +109,10 @@ const SCANNER_CACHE_DIR = 'scanner-cache';
 // Per-type serial lock to prevent concurrent scans of the same scanner type.
 // This avoids DB lock conflicts AND ensures the second scan uses warm cache
 // instead of re-downloading the entire vulnerability database (~100MB).
-const scannerLocks = new Map<string, Promise<void>>(); // key: "grype" or "trivy"
+const scannerLock = createScannerLock();
 
-async function withScannerLock<T>(scannerType: string, fn: () => Promise<T>): Promise<T> {
-	const existing = scannerLocks.get(scannerType);
-	if (existing) {
-		console.log(`[Scanner] Waiting for previous ${scannerType} scan to complete...`);
-		await existing.catch(() => {}); // Don't fail if previous scan errored
-	}
-
-	let resolve: () => void;
-	const lockPromise = new Promise<void>(r => { resolve = r; });
-	scannerLocks.set(scannerType, lockPromise);
-
-	try {
-		return await fn();
-	} finally {
-		resolve!();
-		if (scannerLocks.get(scannerType) === lockPromise) {
-			scannerLocks.delete(scannerType);
-		}
-	}
+function withScannerLock<T>(scannerType: string, fn: () => Promise<T>): Promise<T> {
+	return scannerLock.run(scannerType, fn);
 }
 
 // Track in-progress scans per image to prevent duplicate scans
@@ -143,7 +127,7 @@ const registryFallback = new RegistryFallbackMemory();
 /** Scanner queue depth — for the metrics endpoint. `inProgress` = distinct
  *  image scans running/deduped; `locked` = scanner types holding the serial lock. */
 export function getScannerStats(): { inProgress: number; locked: number } {
-	return { inProgress: inProgressScans.size, locked: scannerLocks.size };
+	return { inProgress: inProgressScans.size, locked: scannerLock.activeTypes() };
 }
 
 // Pinned scanner images — avoid :latest after the March 2026 Trivy supply chain attack
