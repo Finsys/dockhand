@@ -303,7 +303,7 @@ export const PUT: RequestHandler = async (event) => {
  * resp-200: {success:boolean!, authDisabled:boolean}
  * resp-400: User id is required
  * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
- * resp-403: Permission denied (missing users:remove)
+ * resp-403: Permission denied (missing users:remove), or the user is an admin and the caller is not
  * resp-404: User not found
  * resp-409: This is the last admin user — pass confirmDisableAuth=true to proceed
  * resp-500: Failed to delete the user
@@ -339,6 +339,13 @@ export const DELETE: RequestHandler = async (event) => {
 
 		// Check if user is admin via role
 		const userIsAdmin = await userHasAdminRole(id);
+
+		// users:remove can belong to a non-admin role; deleting an Admin account (and, for
+		// the last one, switching authentication off) stays with administrators, as the
+		// edit route already keeps modifying one.
+		if (auth.authEnabled && userIsAdmin && !auth.isAdmin) {
+			return json({ error: 'Cannot delete an admin account' }, { status: 403 });
+		}
 
 		// Check if this is the last admin user AND auth is enabled
 		// Only warn if auth is currently ON (deleting last admin will turn it off)

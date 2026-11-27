@@ -37,7 +37,7 @@ export function nextLogId(): number {
 // chunk to prepend.
 export function parseLines(
 	raw: string,
-	carryover: string,
+	carryover = '',
 	extra: Partial<LogEntry> = {}
 ): { entries: LogEntry[]; carryover: string } {
 	const combined = carryover + raw;
@@ -50,6 +50,12 @@ export function parseLines(
 		entries.push({ id: nextId++, timestamp, text, ...extra });
 	}
 	return { entries, carryover: tail };
+}
+
+// A complete logs response, not a stream chunk: a last line without a newline (a process
+// that exited mid-line) is still a line, so it is kept instead of carried over.
+export function parseSnapshot(raw: string, extra: Partial<LogEntry> = {}): LogEntry[] {
+	return parseLines(raw + '\n', '', extra).entries;
 }
 
 // Merge grouped-mode entries into one timeline ordered by Docker's ISO

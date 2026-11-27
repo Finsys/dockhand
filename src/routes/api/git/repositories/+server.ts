@@ -11,8 +11,8 @@ import { auditGitRepository } from '$lib/server/audit';
 /**
  * @openapi
  * summary: List all git repositories (repositories are global, not scoped to an environment)
- * resp-200: array<{id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}>
- * resp-200-example: [{"id":1,"name":"homelab","url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}]
+ * resp-200: array<{id:integer!, name:string!, url:string!, branch:string!, credentialId:integer, hasWebhookSecret:boolean!}>
+ * resp-200-example: [{"id":1,"name":"homelab","url":"https://github.com/example/homelab.git","branch":"main","credentialId":2,"hasWebhookSecret":true}]
  * resp-403: Caller lacks the git:view permission
  * resp-500: Failed to read git repositories
  */
@@ -26,7 +26,13 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		// Note: envId parameter is kept for backwards compatibility but repositories
 		// are now global (not tied to environments). Use git stacks for env-specific deployments.
 		const repositories = await getGitRepositories();
-		return json(repositories);
+		// The webhook secret authenticates the public deploy-trigger endpoint, so keep it
+		// out of the response; expose only whether one is set.
+		const safeRepos = repositories.map(({ webhookSecret, ...rest }) => ({
+			...rest,
+			hasWebhookSecret: !!webhookSecret
+		}));
+		return json(safeRepos);
 	} catch (error) {
 		console.error('Failed to get git repositories:', error);
 		return json({ error: 'Failed to get git repositories' }, { status: 500 });
@@ -39,7 +45,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  * description: credentialId from GET /api/git/credentials.
  * body: {name:string!, url:string!, branch:string, credentialId:integer}
  * body-example: {"name":"homelab","url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}
- * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
+ * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer, hasWebhookSecret:boolean!}
  * resp-400: Missing name/url, an invalid credentialId, or a duplicate repository name
  * resp-403: Caller lacks the git:create permission
  * resp-500: Failed to create the git repository
@@ -83,7 +89,8 @@ export const POST: RequestHandler = async (event) => {
 		// Audit log
 		await auditGitRepository(event, 'create', repository.id, repository.name);
 
-		return json(repository);
+		const { webhookSecret, ...safeRepo } = repository;
+		return json({ ...safeRepo, hasWebhookSecret: !!webhookSecret });
 	} catch (error: any) {
 		console.error('Failed to create git repository:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {

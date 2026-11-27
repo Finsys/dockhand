@@ -10,6 +10,8 @@ import {
 import { authorize } from '$lib/server/authorize';
 import { auditNotification } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
+import { maskAppriseUrl } from '$lib/server/notifications/events-core';
+import { smtpHostReason } from '$lib/server/notifications/smtp-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -39,13 +41,12 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Notification setting not found' }, { status: 404 });
 		}
 
-		// Don't expose passwords
+		// Withhold secrets: the SMTP password, and the Apprise URLs (bot tokens in path).
 		const safeSetting = {
 			...setting,
-			config: setting.type === 'smtp' ? {
-				...setting.config,
-				password: setting.config.password ? '********' : undefined
-			} : setting.config
+			config: setting.type === 'smtp'
+				? { ...setting.config, password: setting.config.password ? '********' : undefined }
+				: { ...setting.config, urls: Array.isArray(setting.config.urls) ? setting.config.urls.map(maskAppriseUrl) : setting.config.urls }
 		};
 
 		return json(safeSetting);
@@ -62,7 +63,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * body: {name:string, enabled:boolean, config:{host:string, port:integer, secure:boolean, username:string, password:string, from_email:string, from_name:string, to_emails:array<string>, urls:array<string>}, eventTypes:array<string>, event_types:array<string>}
  * body-example: {"name":"Ops Alerts","enabled":false,"config":{"host":"smtp.example.com","port":587,"from_email":"dockhand@example.com","to_emails":["ops@example.com"],"password":"********"},"eventTypes":["container_unhealthy","container_oom"]}
  * resp-200: {id:integer!, type:string!, name:string!, enabled:boolean!, config:{}, eventTypes:array<string>}
- * resp-400: Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL)
+ * resp-400: Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is cloud-metadata (169.254/16) or reserved)
  * resp-403: Permission denied (requires the notifications:edit permission)
  * resp-404: Notification setting not found
  * resp-500: Failed to update notification setting
@@ -97,13 +98,36 @@ export const PUT: RequestHandler = async (event) => {
 				if (!smtpConfig.host || !smtpConfig.port || !smtpConfig.from_email || !smtpConfig.to_emails?.length) {
 					return json({ error: 'SMTP config requires host, port, from_email, and to_emails' }, { status: 400 });
 				}
+				const hostReason = smtpHostReason(smtpConfig.host);
+				if (hostReason) {
+					return json({ error: `Invalid SMTP host: ${hostReason}` }, { status: 400 });
+				}
 				// If password is masked, keep the existing one
 				if (smtpConfig.password === '********') {
 					smtpConfig.password = (existing.config as SmtpConfig).password;
 				}
 			} else if (existing.type === 'apprise') {
 				const appriseConfig = config as AppriseConfig;
-				if (!appriseConfig.urls?.length) {
+				// The GET masks each URL to "scheme://********". On save, restore the stored
+				// value for a masked entry (the user did not change it) while keeping edited
+				// and newly added URLs - per entry, so a partial edit or a deletion is not
+				// lost. Match a masked entry to a stored URL by its masked form, consuming
+				// each stored URL once so duplicate schemes still map one-to-one. A masked
+				// entry that matches no unused stored URL (a copied placeholder line) is
+				// dropped - never persist the bare "scheme://********", which Apprise cannot
+				// deliver to.
+				const stored = (existing.config as AppriseConfig).urls ?? [];
+				const used = new Set<number>();
+				appriseConfig.urls = (appriseConfig.urls ?? [])
+					.map((u) => {
+						if (!(u.includes('://********') || u === '********')) return u;
+						const i = stored.findIndex((s, idx) => !used.has(idx) && maskAppriseUrl(s) === u);
+						if (i === -1) return null;
+						used.add(i);
+						return stored[i];
+					})
+					.filter((u): u is string => u !== null);
+				if (!appriseConfig.urls.length) {
 					return json({ error: 'Webhook config requires at least one URL' }, { status: 400 });
 				}
 			}
@@ -128,13 +152,12 @@ export const PUT: RequestHandler = async (event) => {
 		// Audit log
 		await auditNotification(event, 'update', updated.id, updated.name, diff);
 
-		// Don't expose passwords in response
+		// Withhold secrets from the response, the same way the GET does.
 		const safeSetting = {
 			...updated,
-			config: updated.type === 'smtp' ? {
-				...updated.config,
-				password: updated.config.password ? '********' : undefined
-			} : updated.config
+			config: updated.type === 'smtp'
+				? { ...updated.config, password: updated.config.password ? '********' : undefined }
+				: { ...updated.config, urls: Array.isArray(updated.config.urls) ? updated.config.urls.map(maskAppriseUrl) : updated.config.urls }
 		};
 
 		return json(safeSetting);

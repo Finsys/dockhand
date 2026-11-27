@@ -300,7 +300,7 @@ export interface EnvFileRow {
  * back through `envValueFromText`, which resolves the file's syntax and leaves a
  * `${NAME}` reference as the user wrote it.
  *
- * Deploy-time reading is `parseEnvFileContent` in git.ts and is NOT this: it resolves
+ * Deploy-time reading is `parseEnvFileContent` in env-file-content-core.ts and is NOT this: it resolves
  * references too, which is right for a service and wrong for a form.
  */
 export function parseEnvFileForForm(content: string): EnvFileRow[] {

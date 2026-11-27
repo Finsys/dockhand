@@ -181,7 +181,7 @@
 			<TogglePill
 				bind:checked={authEnabled}
 				onchange={(checked) => handleAuthEnabledToggle(checked)}
-				disabled={authLoading || authSaving || !$canAccess('settings', 'edit')}
+				disabled={authLoading || authSaving || !$isAdmin}
 			/>
 		</div>
 		<p class="text-xs text-muted-foreground mt-1">
@@ -232,7 +232,9 @@
 	<!-- Behind this is the identity-provider configuration, which /api/auth/oidc holds
 	     to settings:view. Without the tab, a refused read renders as an empty list that
 	     reads like "nothing is configured" - a confident wrong answer. -->
-	{#if $canAccess('settings', 'view')}
+	<!-- /api/auth/oidc is admin-only (adminClaim decides who becomes admin on login), so
+	     this tab follows that, like LDAP - a settings:view non-admin would get an empty list. -->
+	{#if $isAdmin}
 		<button
 			class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md transition-all {authSubTab ===
 			'sso'
@@ -312,7 +314,7 @@
 								value={neverExpire ? 'never' : 'timed'}
 								options={[{ value: 'timed', label: m.settings_auth_session_timed() }, { value: 'never', label: m.settings_auth_session_never_expire() }]}
 								onchange={(v) => neverExpire = v === 'never'}
-								disabled={!$canAccess('settings', 'edit')}
+								disabled={!$isAdmin}
 							/>
 							<span class="text-xs text-muted-foreground">
 								{neverExpire ? m.settings_auth_session_never_expire_hint() : m.settings_auth_session_timed_hint()}
@@ -330,7 +332,7 @@
 									e.currentTarget.value = String(sessionTimeout);
 								}}
 								class="w-32"
-								disabled={neverExpire || !$canAccess('settings', 'edit')}
+								disabled={neverExpire || !$isAdmin}
 							/>
 							<span class="text-sm text-muted-foreground">{m.settings_auth_session_seconds()}</span>
 							<span class="text-xs text-muted-foreground">
@@ -341,7 +343,7 @@
 					<div class="space-y-1.5 border-t border-border/60 pt-4">
 						<div class="flex items-center gap-3">
 							<Label class="text-sm">{m.settings_auth_passkeys_label()}</Label>
-							<TogglePill bind:checked={passkeysEnabled} disabled={!$canAccess('settings', 'edit')} />
+							<TogglePill bind:checked={passkeysEnabled} disabled={!$isAdmin} />
 						</div>
 						<p class="text-xs text-muted-foreground">
 							{m.settings_auth_passkeys_description()}
@@ -356,7 +358,7 @@
 							</div>
 						{/if}
 					</div>
-					{#if $canAccess('settings', 'edit')}
+					{#if $isAdmin}
 						<Button size="sm" onclick={saveAuthSettings} disabled={authSaving}>
 							{#if authSaving}
 								<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
@@ -392,7 +394,7 @@
 {/if}
 
 <!-- SSO / OIDC Subtab -->
-{#if authSubTab === 'sso' && $canAccess('settings', 'view')}
+{#if authSubTab === 'sso' && $isAdmin}
 	<div class="flex-1 min-h-0 overflow-y-auto">
 		<SsoSubTab {roles} />
 	</div>

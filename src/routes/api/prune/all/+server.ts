@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { pruneAll } from '$lib/server/docker';
+import { invalidateDiskUsage } from '$lib/server/disk-usage-cache';
 import { authorize } from '$lib/server/authorize';
 import { audit } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
@@ -28,7 +29,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	try {
-		const result = await pruneAll(envIdNum);
+		const result = await pruneAll(envIdNum).finally(() => invalidateDiskUsage(envIdNum));
 
 		// Audit log - single entry for prune all operation
 		await audit(event, 'prune', 'settings', {

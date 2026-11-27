@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getGitRepository } from '$lib/server/db';
 import { deployFromRepository } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * @openapi
@@ -11,7 +12,7 @@ import { authorize } from '$lib/server/authorize';
  * resp-200: {success:boolean!, error:string}
  * resp-200-example: {"success":true}
  * resp-400: The id path segment is not a valid integer
- * resp-403: Caller lacks the git:edit permission
+ * resp-403: Caller lacks git:edit, or stacks:create and stacks:start on the repository's environment, or access to that environment (an Enterprise non-admin needs the repository to have one)
  * resp-404: No repository exists with that ID
  * resp-500: The deployment failed
  */
@@ -30,6 +31,19 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 		const repository = await getGitRepository(id);
 		if (!repository) {
 			return json({ error: 'Repository not found' }, { status: 404 });
+		}
+
+		// This runs a compose deploy on the repository's environment (Dockhand's own daemon
+		// when it has none), so it needs the same stack rights as a git-stack deploy there.
+		const envId = repository.environmentId ?? undefined;
+		if (
+			auth.authEnabled &&
+			(!(await auth.can('stacks', 'create', envId)) || !(await auth.can('stacks', 'start', envId)))
+		) {
+			return json({ error: 'Permission denied' }, { status: 403 });
+		}
+		if (await deniesEnvScope(auth, envId)) {
+			return json({ error: 'Access denied to this environment' }, { status: 403 });
 		}
 
 		const result = await deployFromRepository(id);

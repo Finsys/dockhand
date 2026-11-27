@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials } from '../src/lib/server/git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials, isSshRepoUrl, incompatibleCredentialReason } from '../src/lib/server/git-url-safety';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,6 +40,71 @@ describe('assertSafeRepoUrl — rejects dangerous URLs, allows every legit schem
 			expect(() => assertSafeRepoUrl(url)).toThrow();
 		});
 	}
+});
+
+describe('isSshRepoUrl - detects SSH transport (ssh:// and scp-like)', () => {
+	test('ssh:// URL is SSH', () => {
+		expect(isSshRepoUrl('ssh://user@srvgit.int:5522/path')).toBe(true);
+		expect(isSshRepoUrl('ssh://git@github.com/org/repo.git')).toBe(true);
+	});
+	test('scp-like git@host:path is SSH', () => {
+		expect(isSshRepoUrl('git@github.com:org/repo.git')).toBe(true);
+		expect(isSshRepoUrl('user@host.example:path/to/repo')).toBe(true);
+	});
+	test('scp-like host:path WITHOUT a user is SSH (new URL does not throw on it)', () => {
+		expect(isSshRepoUrl('srvgit.int:org/repo.git')).toBe(true);
+		expect(isSshRepoUrl('gitea.local:org/repo')).toBe(true);
+	});
+	test('uppercase SSH:// scheme is SSH (case-insensitive)', () => {
+		expect(isSshRepoUrl('SSH://git@github.com/org/repo.git')).toBe(true);
+		expect(isSshRepoUrl('Ssh://host/repo')).toBe(true);
+	});
+	test('git@ fast-path (git@host:path is scp-like SSH)', () => {
+		expect(isSshRepoUrl('git@gitlab.com:group/sub/repo.git')).toBe(true);
+	});
+	test('https and http URLs are NOT SSH', () => {
+		expect(isSshRepoUrl('https://github.com/org/repo.git')).toBe(false);
+		expect(isSshRepoUrl('http://gitea.local/org/repo.git')).toBe(false);
+		expect(isSshRepoUrl('HTTPS://github.com/org/repo.git')).toBe(false);
+	});
+	test('https with a port is NOT SSH (colon is after the scheme slashes)', () => {
+		expect(isSshRepoUrl('https://gitea.local:8080/org/repo.git')).toBe(false);
+	});
+	test('git:// (anonymous) is NOT ssh', () => {
+		expect(isSshRepoUrl('git://host/repo.git')).toBe(false);
+	});
+	test('a Windows drive path is NOT ssh (C:\\ or C:/)', () => {
+		expect(isSshRepoUrl('C:\\repos\\thing')).toBe(false);
+		expect(isSshRepoUrl('C:/repos/thing')).toBe(false);
+	});
+	test('a bare relative path is NOT ssh (no colon)', () => {
+		expect(isSshRepoUrl('/srv/git/repo.git')).toBe(false);
+		expect(isSshRepoUrl('./local/repo')).toBe(false);
+	});
+});
+
+describe('incompatibleCredentialReason - rejects ssh:// with password credential', () => {
+	test('ssh:// + password is rejected with a clear reason', () => {
+		const r = incompatibleCredentialReason('ssh://user@srvgit.int:5522/path', 'password');
+		expect(r).toBeTruthy();
+		expect(r).toContain('SSH');
+	});
+	test('scp-like + password is rejected', () => {
+		expect(incompatibleCredentialReason('git@github.com:org/repo.git', 'password')).toBeTruthy();
+	});
+	test('ssh:// + ssh key credential is allowed', () => {
+		expect(incompatibleCredentialReason('ssh://git@github.com/org/repo.git', 'ssh')).toBeNull();
+	});
+	test('ssh:// + no credential is allowed (not a password mismatch)', () => {
+		expect(incompatibleCredentialReason('ssh://git@github.com/org/repo.git', 'none')).toBeNull();
+		expect(incompatibleCredentialReason('ssh://git@github.com/org/repo.git', null)).toBeNull();
+	});
+	test('https + password is allowed (the supported combo)', () => {
+		expect(incompatibleCredentialReason('https://github.com/org/repo.git', 'password')).toBeNull();
+	});
+	test('https + ssh key is allowed (unusual but not this guard concern)', () => {
+		expect(incompatibleCredentialReason('https://github.com/org/repo.git', 'ssh')).toBeNull();
+	});
 });
 
 describe('assertSafeGitRef — rejects option-like refs, allows real branch names', () => {
@@ -165,14 +230,44 @@ describe('repoFilePath - a committed symlink cannot reach Dockhand secrets', () 
 	symlinkSync(join(data, '.encryption_key'), join(repo, 'evil', '.env'));
 
 	test('a link to the encryption key or into /proc is refused', () => {
-		expect(() => repoFilePath(repo, 'key.env', 'Env file path')).toThrow('not allowed');
-		expect(() => repoFilePath(repo, 'root/proc/self/environ', 'Env file path')).toThrow('not allowed');
-		expect(() => repoFilePath(repo, `root${data}/db/dockhand.db`, 'Compose path')).toThrow('not allowed');
+		// Refused either as "outside the repository" (containment on the resolved target) or
+		// "not allowed" (the forbidden-location guard); both are a refusal, which is the point.
+		expect(() => repoFilePath(repo, 'key.env', 'Env file path')).toThrow(/outside the repository|not allowed/);
+		expect(() => repoFilePath(repo, 'root/proc/self/environ', 'Env file path')).toThrow(/outside the repository|not allowed/);
+		expect(() => repoFilePath(repo, `root${data}/db/dockhand.db`, 'Compose path')).toThrow(/outside the repository|not allowed/);
 	});
 
-	test('a link to an ordinary file outside the clone keeps working', () => {
-		expect(repoFilePath(repo, 'shared.env', 'Env file path')).toBe(join(repo, 'shared.env'));
-		expect(repoFilePath(repo, 'root/etc/hosts', 'Compose path')).toBe(join(repo, 'root', 'etc', 'hosts'));
+	test('a link to an ordinary file OUTSIDE the clone is refused', () => {
+		// A committed link that resolves outside the clone is read back verbatim through the
+		// env-file API, so it discloses any host file the server can read - another stack's
+		// .env (cross-environment in scoped RBAC), /etc files, a home dir. The real target
+		// must stay inside the clone; a link reaching an ordinary outside file is refused too,
+		// not only one reaching Dockhand's own secrets.
+		expect(() => repoFilePath(repo, 'shared.env', 'Env file path')).toThrow('outside the repository');
+		expect(() => repoFilePath(repo, 'root/etc/hosts', 'Compose path')).toThrow('outside the repository');
+	});
+
+	test('a link to another file INSIDE the clone keeps working', () => {
+		// The containment is on the resolved target, so an in-repo link is unaffected.
+		symlinkSync(join(repo, 'app', 'compose.yaml'), join(repo, 'app', 'linked-compose.yaml'));
+		expect(repoFilePath(repo, 'app/linked-compose.yaml', 'Compose path')).toBe(join(repo, 'app', 'linked-compose.yaml'));
+	});
+
+	test('a CHAINED link (in-repo link whose target is itself an escaping link) is refused', () => {
+		// chainA -> chainB (in-repo), chainB -> outside/shared.env (escapes). Following only one
+		// hop would stop at chainB (in-repo) and wrongly allow it; the OS follows the whole chain,
+		// so the guard must too.
+		symlinkSync(join(repo, 'chainB.env'), join(repo, 'chainA.env'));
+		symlinkSync(join(outside, 'shared.env'), join(repo, 'chainB.env'));
+		expect(() => repoFilePath(repo, 'chainA.env', 'Env file path')).toThrow('outside the repository');
+		expect(() => repoFilePath(repo, 'chainB.env', 'Env file path')).toThrow('outside the repository');
+	});
+
+	test('a two-hop link that stays INSIDE the clone keeps working', () => {
+		// link2 -> link1 -> app/compose.yaml, both hops in-repo: the resolved target is in-repo.
+		symlinkSync(join(repo, 'app', 'compose.yaml'), join(repo, 'hop1'));
+		symlinkSync(join(repo, 'hop1'), join(repo, 'hop2'));
+		expect(repoFilePath(repo, 'hop2', 'Compose path')).toBe(join(repo, 'hop2'));
 	});
 
 	test('the base .env beside a compose file is held to the same rule', () => {

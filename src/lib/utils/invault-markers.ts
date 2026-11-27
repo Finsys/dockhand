@@ -62,7 +62,7 @@ export function resolvedRefVarNames(
  * A provider that gains an inline syntax belongs here as well as in its own
  * isReference.
  */
-export const INLINE_REF_PREFIXES = ['op://', 'keepass://', 'azurekv://', 'pass://'] as const;
+export const INLINE_REF_PREFIXES = ['op://', 'keepass://', 'azurekv://', 'pass://', 'bws://'] as const;
 
 /**
  * Whether a value is an inline provider reference rather than a literal.

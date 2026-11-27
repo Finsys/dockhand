@@ -24,7 +24,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
-	import { parseLines, renderLineHtml, sortByTimestampStable, type LogEntry } from '$lib/utils/log-entry';
+	import { parseLines, parseSnapshot, renderLineHtml, sortByTimestampStable, type LogEntry } from '$lib/utils/log-entry';
 	import { m } from '$lib/paraglide/messages.js';
 
 	function renderTimestamp(ts: string | undefined): string {
@@ -913,8 +913,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			const until = getUntilParam();
 			const response = await fetch(appendEnvParam(`/api/containers/${selectedContainer.id}/logs?tail=${t}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId));
 			const data = await response.json();
-			const { entries } = parseLines(data.logs || '', '');
-			logs = entries;
+			logs = parseSnapshot(data.logs || '');
 			scrollToBottom(true);
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
@@ -1026,7 +1025,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 				groupedContainerInfo = new Map([...groupedContainerInfo, [containerId, { name: containerName, color }]]);
 
 				if (data.logs) {
-					const { entries } = parseLines(data.logs, '', { containerId, containerName, color });
+					const entries = parseSnapshot(data.logs, { containerId, containerName, color });
 					// Stopped logs are historical: sort the merged buffer by timestamp so
 					// each container's block interleaves into one timeline instead of being
 					// appended as a separate per-container chunk (#1406).

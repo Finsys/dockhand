@@ -7,9 +7,41 @@
 		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
 		<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
 		<link rel="manifest" href="/site.webmanifest" crossorigin="use-credentials" />
+		<script>
+			// Same rule as theme-toggle.svelte, applied before the bundle loads so the page never flashes white.
+			// The chosen dark theme's own background is applied to the boot screen too, so it matches the app
+			// (not the default navy) before app.css loads. Backgrounds mirror the .dark.theme-dark-* rules in
+			// app.css; app-boot-theme.test.ts fails if they drift.
+			try {
+				var t = localStorage.getItem('theme');
+				var isDark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+				if (isDark) {
+					document.documentElement.classList.add('dark');
+					var darkBg = {
+						'default': '214.4 61.4% 17.3%', 'catppuccin': '240 21% 15%', 'dracula': '231 15% 18%',
+						'rose-pine': '249 22% 12%', 'rose-pine-moon': '246 24% 17%', 'tokyo-night': '235 21% 14%',
+						'nord': '220 16% 22%', 'one-dark': '220 13% 18%', 'gruvbox': '0 0% 16%',
+						'solarized': '192 100% 11%', 'everforest': '150 10% 16%', 'kanagawa': '225 17% 14%',
+						'monokai': '70 8% 15%', 'monokai-pro': '220 10% 18%', 'material': '200 19% 18%',
+						'palenight': '229 27% 20%', 'github': '215 21% 11%'
+					};
+					var id = (JSON.parse(localStorage.getItem('dockhand-theme') || '{}').darkTheme) || 'default';
+					document.documentElement.style.setProperty('--app-boot-bg', darkBg[id] || darkBg['default']);
+				}
+			} catch (e) {}
+		</script>
+		<style>
+			#app-boot { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; background: #fff; }
+			html.dark #app-boot { background: hsl(var(--app-boot-bg, 214.4 61.4% 17.3%)); }
+			#app-boot img { position: absolute; width: 40px; height: 40px; opacity: 0.85; }
+			#app-boot div { width: 64px; height: 64px; border-radius: 50%; border: 3px solid rgba(128, 128, 128, 0.2); border-top-color: hsl(217.2 91.2% 59.8%); animation: app-boot-spin 0.9s linear infinite; }
+			@keyframes app-boot-spin { to { transform: rotate(360deg); } }
+		</style>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
+		<!-- Shown while the bundle downloads; the root layout removes it once mounted. -->
+		<div id="app-boot" role="status" aria-label="Loading"><img src="/logo.svg" alt="" /><div></div></div>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

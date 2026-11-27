@@ -118,8 +118,13 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
  * @openapi
  * summary: List all available notification event types, grouped into categories
  * resp-200: {eventTypes:array<{id:string!, label:string}>, categories:{container:array<string>, autoUpdate:array<string>, gitStack:array<string>, stack:array<string>, security:array<string>, system:array<string>}}
+ * resp-401: Not authenticated
  */
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Not authenticated' }, { status: 401 });
+	}
 	return json({
 		eventTypes: NOTIFICATION_EVENT_TYPES,
 		categories: {

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.56",
+    "version": "1.0.59",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -1693,10 +1693,7 @@
             }
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:view)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "500": {
             "description": "Failed to read the OIDC configurations"
@@ -1757,10 +1754,7 @@
             "description": "A required field is missing (name, issuerUrl, clientId, clientSecret, redirectUri)"
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:edit)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "500": {
             "description": "Failed to create the OIDC configuration"
@@ -1904,10 +1898,7 @@
             "description": "Invalid configuration id (not a number)"
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:view)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "404": {
             "description": "OIDC configuration not found"
@@ -1981,10 +1972,7 @@
             "description": "Invalid configuration id (not a number)"
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:edit)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "404": {
             "description": "OIDC configuration not found"
@@ -2098,10 +2086,7 @@
             "description": "Invalid configuration id (not a number)"
           },
           "401": {
-            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
-          },
-          "403": {
-            "description": "Permission denied (missing settings:edit)"
+            "description": "Not authorized (auth is enabled and the caller is not an admin)"
           },
           "404": {
             "description": "OIDC configuration not found"
@@ -2256,6 +2241,52 @@
           }
         },
         "security": []
+      }
+    },
+    "/api/auth/oidc/backchannel-logout": {
+      "post": {
+        "operationId": "post_api_auth_oidc_backchannel-logout",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Receive an OIDC Back-Channel Logout token from the identity provider and end the matching server-side session(s). Called by the IdP, not by browser clients. Public (its auth is the signed logout_token itself).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Logout accepted (idempotent; ends the session(s) the token names, no body)"
+          },
+          "400": {
+            "description": "The logout_token was missing, malformed, from an unknown issuer, or failed verification"
+          },
+          "429": {
+            "description": "Too many failed verification attempts from this client"
+          },
+          "500": {
+            "description": "The session deletion failed; the IdP should retry"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "logout_token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "logout_token"
+                ]
+              },
+              "example": {
+                "logout_token": "string"
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/oidc/callback": {
@@ -2777,7 +2808,7 @@
             "description": "Authentication required (auth is enabled and the caller is not authenticated)"
           },
           "403": {
-            "description": "Permission denied (missing settings:edit)"
+            "description": "Permission denied (caller is not an administrator)"
           },
           "500": {
             "description": "Failed to update the auth settings"
@@ -7161,7 +7192,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The raw Docker inspect object for the container"
+            "description": "The raw Docker inspect object for the container. For a non-admin, the env values of Dockhand's own container are masked"
           },
           "403": {
             "description": "Permission denied, or (enterprise) no access to the requested environment"
@@ -7288,7 +7319,7 @@
         ],
         "responses": {
           "200": {
-            "description": "compose keeps only user-set env; composeFullEnv keeps every env var (incl. image-inherited); stackProject is the compose project the container already belongs to, or null",
+            "description": "compose keeps only user-set env; composeFullEnv keeps every env var (incl. image-inherited); stackProject is the compose project the container already belongs to, or null. For a non-admin, the env values of Dockhand's own container are masked",
             "content": {
               "application/json": {
                 "schema": {
@@ -7409,7 +7440,7 @@
             "description": "Not authenticated"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "500": {
             "description": "Failed to create the exec instance"
@@ -7513,7 +7544,7 @@
             "description": "Not authenticated"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "500": {
             "description": "Failed to run the command"
@@ -7614,7 +7645,7 @@
             "description": "Directory listing (entries with name, type, size and permission metadata)"
           },
           "403": {
-            "description": "Permission denied (needs containers:exec)"
+            "description": "Permission denied (needs containers:exec), or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Container not found"
@@ -7701,7 +7732,7 @@
             "description": "Path or mode missing, an invalid chmod mode, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, read-only file system, or operation not permitted"
+            "description": "Permission denied, read-only file system, or operation not permitted, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Path not found"
@@ -7818,7 +7849,7 @@
             "description": "Path or owner missing, an invalid owner spec, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, read-only file system, or operation not permitted"
+            "description": "Permission denied, read-only file system, or operation not permitted, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Path not found"
@@ -7934,7 +7965,7 @@
             "description": "Path is missing, the target is a directory, or the container is not running"
           },
           "403": {
-            "description": "Permission denied to read the file (needs containers:exec)"
+            "description": "Permission denied to read the file (needs containers:exec), or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "File not found"
@@ -8021,7 +8052,7 @@
             "description": "Path is missing, content is missing/not a string, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, or the target file system is read-only"
+            "description": "Permission denied, or the target file system is read-only, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Target directory not found"
@@ -8134,7 +8165,7 @@
             "description": "Path missing, type not \"file\" or \"directory\", or the container is not running"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Parent directory not found"
@@ -8253,7 +8284,7 @@
             "description": "Path missing, a refused critical-path delete, a non-empty directory, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, or read-only file system"
+            "description": "Permission denied, or read-only file system, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Path not found"
@@ -8325,7 +8356,7 @@
             "description": "Path is missing"
           },
           "403": {
-            "description": "Permission denied (requires containers:exec, like reading a file)"
+            "description": "Permission denied (requires containers:exec, like reading a file), or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "File not found"
@@ -8407,7 +8438,7 @@
             "description": "oldPath or newPath missing, or the container is not running"
           },
           "403": {
-            "description": "Permission denied, or read-only file system"
+            "description": "Permission denied, or read-only file system, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Source path not found"
@@ -8533,7 +8564,7 @@
             "description": "Target path missing, or no files provided"
           },
           "403": {
-            "description": "Permission denied to write to the path"
+            "description": "Permission denied to write to the path, or the target is Dockhand's own container and the caller is not an administrator"
           },
           "404": {
             "description": "Target directory not found"
@@ -8598,7 +8629,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The raw Docker inspect object for the container"
+            "description": "The raw Docker inspect object for the container. For a non-admin, the env values of Dockhand's own container are masked"
           },
           "403": {
             "description": "Permission denied"
@@ -9105,7 +9136,7 @@
             }
           },
           "403": {
-            "description": "Permission denied, or (enterprise) no access to the requested environment"
+            "description": "Permission denied, or (enterprise) no access to the requested environment, or the target is Dockhand's own container and the caller is not an administrator"
           }
         },
         "security": [
@@ -11259,7 +11290,7 @@
             "description": "Invalid name, invalid connectionType, or host missing for direct/hawser-standard"
           },
           "403": {
-            "description": "Permission denied (RBAC 'environments:create' missing)"
+            "description": "Permission denied (RBAC 'environments:create' missing, or a non-admin under Enterprise RBAC)"
           },
           "409": {
             "description": "An environment with this name already exists"
@@ -11421,7 +11452,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "Update an environment; renaming also renames its on-disk stacks/git-repos directories",
+        "summary": "Update an environment; renaming also renames its on-disk stacks/git-repos directories and repoints the stack paths stored under them",
         "parameters": [
           {
             "name": "id",
@@ -11496,7 +11527,7 @@
             "description": "Environment not found"
           },
           "409": {
-            "description": "Rename target directory already exists, or the on-disk rename failed (e.g. EXDEV across filesystems)"
+            "description": "Another environment already has the new name, the rename target directory already exists, or the on-disk rename failed (e.g. EXDEV across filesystems)"
           },
           "500": {
             "description": "Unexpected error while updating the environment"
@@ -11832,6 +11863,9 @@
         "responses": {
           "200": {
             "description": "Binary image/webp response body, Cache-Control public max-age=3600"
+          },
+          "403": {
+            "description": "Caller lacks the environments:view permission, or is denied access to this environment"
           },
           "404": {
             "description": "No custom icon set for this environment"
@@ -13729,10 +13763,10 @@
             }
           },
           "400": {
-            "description": "Host is required for direct/hawser-standard connection types"
+            "description": "Host is required for direct/hawser-standard connection types, the protocol is not http or https, the port is out of range, or the host is not a plain hostname or IP address"
           },
           "403": {
-            "description": "The caller cannot access the environment named by environmentId"
+            "description": "The caller lacks environments:create and environments:edit, or cannot access, or lacks environments:edit on, the environment named by environmentId"
           }
         },
         "security": [
@@ -13743,7 +13777,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token.",
+        "description": "Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token. Needs environments:edit on that environment, and the stored secrets are only reused while host, port and protocol match the saved ones.",
         "requestBody": {
           "required": true,
           "content": {
@@ -14581,13 +14615,17 @@
                       },
                       "credentialId": {
                         "type": "integer"
+                      },
+                      "hasWebhookSecret": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
                       "id",
                       "name",
                       "url",
-                      "branch"
+                      "branch",
+                      "hasWebhookSecret"
                     ]
                   }
                 },
@@ -14597,7 +14635,8 @@
                     "name": "homelab",
                     "url": "https://github.com/example/homelab.git",
                     "branch": "main",
-                    "credentialId": 2
+                    "credentialId": 2,
+                    "hasWebhookSecret": true
                   }
                 ]
               }
@@ -14648,13 +14687,17 @@
                     },
                     "credentialId": {
                       "type": "integer"
+                    },
+                    "hasWebhookSecret": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "id",
                     "name",
                     "url",
-                    "branch"
+                    "branch",
+                    "hasWebhookSecret"
                   ]
                 },
                 "example": {
@@ -14662,7 +14705,8 @@
                   "name": "string",
                   "url": "string",
                   "branch": "string",
-                  "credentialId": 0
+                  "credentialId": 0,
+                  "hasWebhookSecret": true
                 }
               }
             }
@@ -14763,6 +14807,9 @@
                     "credentialId": {
                       "type": "integer"
                     },
+                    "hasWebhookSecret": {
+                      "type": "boolean"
+                    },
                     "stacksUsing": {
                       "type": "array",
                       "items": {
@@ -14776,6 +14823,7 @@
                     "name",
                     "url",
                     "branch",
+                    "hasWebhookSecret",
                     "stacksUsing"
                   ]
                 },
@@ -14785,6 +14833,7 @@
                   "url": "string",
                   "branch": "string",
                   "credentialId": 0,
+                  "hasWebhookSecret": true,
                   "stacksUsing": [
                     {}
                   ]
@@ -14853,13 +14902,17 @@
                     },
                     "credentialId": {
                       "type": "integer"
+                    },
+                    "hasWebhookSecret": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "id",
                     "name",
                     "url",
-                    "branch"
+                    "branch",
+                    "hasWebhookSecret"
                   ]
                 },
                 "example": {
@@ -14867,7 +14920,8 @@
                   "name": "string",
                   "url": "string",
                   "branch": "string",
-                  "credentialId": 0
+                  "credentialId": 0,
+                  "hasWebhookSecret": true
                 }
               }
             }
@@ -15034,7 +15088,7 @@
             "description": "The id path segment is not a valid integer"
           },
           "403": {
-            "description": "Caller lacks the git:edit permission"
+            "description": "Caller lacks git:edit, or stacks:create and stacks:start on the repository's environment, or access to that environment (an Enterprise non-admin needs the repository to have one)"
           },
           "404": {
             "description": "No repository exists with that ID"
@@ -15388,10 +15442,10 @@
             "description": "Invalid stack name, or secretProviderId is not a number/null"
           },
           "403": {
-            "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)"
+            "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "409": {
-            "description": "A git stack with this name already exists in the environment"
+            "description": "A stack with this name already exists in the environment"
           },
           "500": {
             "description": "Failed to create the git stack"
@@ -15429,6 +15483,9 @@
                   },
                   "webhookSecret": {
                     "type": "string"
+                  },
+                  "takeOverExternalStack": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -15441,7 +15498,8 @@
                 "repositoryId": 0,
                 "secretProviderId": 0,
                 "webhookEnabled": true,
-                "webhookSecret": "string"
+                "webhookSecret": "string",
+                "takeOverExternalStack": true
               }
             }
           }
@@ -15707,6 +15765,72 @@
           }
         ],
         "description": "Clients sending `Accept: application/json` get a synchronous, buffered SSE-as-JSON result; otherwise a jobId is returned immediately and progress is delivered out-of-band."
+      }
+    },
+    "/api/git/stacks/{id}/detach": {
+      "post": {
+        "operationId": "post_api_git_stacks_id_detach",
+        "tags": [
+          "git"
+        ],
+        "summary": "Convert a git-managed stack to a local stack",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Git stack ID (from GET /api/git/stacks)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid git stack ID"
+          },
+          "403": {
+            "description": "Caller lacks the stacks:edit permission for the stack environment"
+          },
+          "404": {
+            "description": "Git stack not found"
+          },
+          "409": {
+            "description": "No deployed compose file is available; deploy the Git stack before conversion"
+          },
+          "500": {
+            "description": "Failed to convert the stack to a local source"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/git/stacks/{id}/env-files": {
@@ -16034,6 +16158,9 @@
                     },
                     "error": {
                       "type": "string"
+                    },
+                    "output": {
+                      "type": "string"
                     }
                   }
                 },
@@ -16094,6 +16221,9 @@
                       "type": "boolean"
                     },
                     "error": {
+                      "type": "string"
+                    },
+                    "output": {
                       "type": "string"
                     }
                   }
@@ -16383,6 +16513,9 @@
         "responses": {
           "200": {
             "description": "Successful response"
+          },
+          "401": {
+            "description": "Not authenticated"
           },
           "426": {
             "description": "This endpoint requires a WebSocket upgrade (ws:// or wss://)"
@@ -16898,6 +17031,9 @@
           },
           "400": {
             "description": "The ref is not a valid selfh.st reference"
+          },
+          "401": {
+            "description": "Not authenticated"
           }
         },
         "security": [
@@ -16946,6 +17082,9 @@
           },
           "400": {
             "description": "The request body is missing a refs array"
+          },
+          "401": {
+            "description": "Not authenticated"
           }
         },
         "security": [
@@ -16998,6 +17137,9 @@
         "responses": {
           "200": {
             "description": "The raw selfh.st index.json array (application/json)"
+          },
+          "401": {
+            "description": "Not authenticated"
           },
           "503": {
             "description": "The manifest is unavailable (never cached and the upstream fetch failed)"
@@ -18226,6 +18368,9 @@
               }
             }
           },
+          "401": {
+            "description": "Not authenticated"
+          },
           "404": {
             "description": "LICENSE.txt could not be found/read"
           }
@@ -18279,6 +18424,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Not authenticated"
           },
           "404": {
             "description": "PRIVACY.txt could not be found/read"
@@ -18486,7 +18634,7 @@
             "description": "Server-Sent Events stream (text/event-stream) emitting heartbeat and per-container log events"
           },
           "400": {
-            "description": "No containers specified"
+            "description": "No containers specified, or a container id is invalid"
           },
           "403": {
             "description": "Permission denied (requires the containers:logs permission)"
@@ -19330,7 +19478,7 @@
             }
           },
           "400": {
-            "description": "Missing or invalid fields — type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL"
+            "description": "Missing or invalid fields - type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is cloud-metadata (169.254/16) or reserved"
           },
           "403": {
             "description": "Permission denied (requires the notifications:create permission)"
@@ -19638,7 +19786,7 @@
             }
           },
           "400": {
-            "description": "Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL)"
+            "description": "Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is cloud-metadata (169.254/16) or reserved)"
           },
           "403": {
             "description": "Permission denied (requires the notifications:edit permission)"
@@ -20111,6 +20259,9 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Not authenticated"
           }
         },
         "security": [
@@ -22502,7 +22653,7 @@
             }
           },
           "400": {
-            "description": "Invalid id, or a duplicate registry name"
+            "description": "Invalid id, a duplicate registry name, or a URL pointing at loopback/cloud-metadata (SSRF)"
           },
           "403": {
             "description": "Caller lacks the registries:edit permission"
@@ -24691,6 +24842,9 @@
           "400": {
             "description": "hideSystemJobs is not a boolean"
           },
+          "401": {
+            "description": "Not authenticated"
+          },
           "500": {
             "description": "Unexpected error while saving the setting"
           }
@@ -24880,7 +25034,7 @@
         "tags": [
           "secret-providers"
         ],
-        "summary": "Create a secret provider (Vault, Infisical, Doppler, 1Password Connect)",
+        "summary": "Create a secret provider of any supported type",
         "parameters": [],
         "responses": {
           "201": {
@@ -25245,7 +25399,7 @@
         ],
         "responses": {
           "200": {
-            "description": "ok=true returns the key names found via the bulk selector and the resolved op:// refs; ok=false folds a provider error in (still 200) so a slow or auth-gated provider never breaks the editor",
+            "description": "ok=true returns the key names found via the bulk selector and the resolved op:// refs; for a provider that decrypts the stack's env file (SOPS), `stack`+`env` name a git stack and bulkKeys are the names its synced env file decrypts to (needs stacks:view there). ok=false folds a provider error in (still 200) so a slow or auth-gated provider never breaks the editor",
             "content": {
               "application/json": {
                 "schema": {
@@ -25291,7 +25445,7 @@
             "description": "Invalid ID or unknown provider type"
           },
           "403": {
-            "description": "Permission denied (needs secrets:view)"
+            "description": "Permission denied (needs secrets:view, and stacks:view for a stack probe)"
           },
           "404": {
             "description": "Secret provider not found"
@@ -25320,6 +25474,12 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "stack": {
+                    "type": "string"
+                  },
+                  "env": {
+                    "type": "integer"
                   }
                 }
               },
@@ -25863,7 +26023,7 @@
             "description": "Successful response"
           },
           "403": {
-            "description": "Permission denied (needs settings:edit)"
+            "description": "Permission denied (needs settings:edit; the scanner and backup helper keys - images, default scanner args, scanner network mode and DNS - need an administrator)"
           },
           "500": {
             "description": "Failed to save settings"
@@ -27224,7 +27384,7 @@
             "description": "Invalid request (e.g. missing name/compose, or secretProviderId wrong type)"
           },
           "403": {
-            "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)"
+            "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "500": {
             "description": "Failed to create or deploy the stack"
@@ -27405,7 +27565,7 @@
             "description": "Compose down failed and force was not set"
           },
           "403": {
-            "description": "Permission denied, or access denied to this environment"
+            "description": "Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "404": {
             "description": "Compose file not found for this stack"
@@ -27422,6 +27582,181 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/stacks/{name}/attach": {
+      "post": {
+        "operationId": "post_api_stacks_name_attach",
+        "tags": [
+          "stacks"
+        ],
+        "summary": "Convert an internal stack to Git management",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stack name (from GET /api/stacks)"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID the stack belongs to (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Git stack created; returns the git stack record, or a job response when deployNow starts deployment"
+          },
+          "400": {
+            "description": "Invalid conversion request or repository configuration"
+          },
+          "403": {
+            "description": "Caller lacks stacks:edit or required secrets:view permission, or access denied to this environment (enterprise), or the environment is missing or out of scope (Enterprise non-admin)"
+          },
+          "404": {
+            "description": "Stack not found"
+          },
+          "500": {
+            "description": "Failed to convert stack to Git management"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stackName": {
+                    "type": "string"
+                  },
+                  "repositoryId": {
+                    "type": "integer"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "repoName": {
+                    "type": "string"
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "credentialId": {
+                    "type": "integer"
+                  },
+                  "composePath": {
+                    "type": "string"
+                  },
+                  "envFilePath": {
+                    "type": "string"
+                  },
+                  "autoUpdate": {
+                    "type": "boolean"
+                  },
+                  "autoUpdateSchedule": {
+                    "type": "string"
+                  },
+                  "autoUpdateCron": {
+                    "type": "string"
+                  },
+                  "webhookEnabled": {
+                    "type": "boolean"
+                  },
+                  "webhookSecret": {
+                    "type": "string"
+                  },
+                  "contextDir": {
+                    "type": "string"
+                  },
+                  "buildOnDeploy": {
+                    "type": "boolean"
+                  },
+                  "noBuildCache": {
+                    "type": "boolean"
+                  },
+                  "repullImages": {
+                    "type": "boolean"
+                  },
+                  "forceRedeploy": {
+                    "type": "boolean"
+                  },
+                  "secretProviderId": {
+                    "type": "integer"
+                  },
+                  "envVars": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "isSecret": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "key"
+                      ]
+                    }
+                  },
+                  "deployNow": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "example": {
+                "stackName": "string",
+                "repositoryId": 0,
+                "url": "string",
+                "repoName": "string",
+                "branch": "string",
+                "credentialId": 0,
+                "composePath": "string",
+                "envFilePath": "string",
+                "autoUpdate": true,
+                "autoUpdateSchedule": "string",
+                "autoUpdateCron": "string",
+                "webhookEnabled": true,
+                "webhookSecret": "string",
+                "contextDir": "string",
+                "buildOnDeploy": true,
+                "noBuildCache": true,
+                "repullImages": true,
+                "forceRedeploy": true,
+                "secretProviderId": 0,
+                "envVars": [
+                  {
+                    "key": "string",
+                    "value": "string",
+                    "isSecret": true
+                  }
+                ],
+                "deployNow": true
+              }
+            }
+          }
+        }
       }
     },
     "/api/stacks/{name}/check-path-change": {
@@ -27621,7 +27956,7 @@
             "description": "Invalid request (e.g. missing content, or secretProviderId wrong type)"
           },
           "403": {
-            "description": "Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)"
+            "description": "Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "500": {
             "description": "Failed to save or deploy the compose file"
@@ -27838,7 +28173,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied (requires stacks:start, or environment access denied on enterprise)"
+            "description": "Permission denied (requires stacks:start, or environment access denied on enterprise), or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -28296,7 +28631,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied, or access denied to this environment"
+            "description": "Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -28469,7 +28804,7 @@
             "description": "Invalid variables payload"
           },
           "403": {
-            "description": "Permission denied (needs stacks:edit)"
+            "description": "Permission denied (needs stacks:edit), or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "500": {
             "description": "Failed to save env vars"
@@ -28665,7 +29000,7 @@
             "description": "Invalid body (content string required) or refusal to write a masked \"***\" placeholder"
           },
           "403": {
-            "description": "Permission denied (requires stacks:edit, or environment access denied on enterprise), or the env file path is a protected location"
+            "description": "Permission denied (requires stacks:edit, or environment access denied on enterprise), or the env file path is a protected location, or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "500": {
             "description": "Failed to save environment file"
@@ -28828,6 +29163,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "envValues": {
+                    "type": "object",
+                    "properties": {}
                   }
                 }
               },
@@ -29153,7 +29492,7 @@
             "description": "oldDir and newComposePath are required, or the source directory does not exist"
           },
           "403": {
-            "description": "Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory"
+            "description": "Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory, or the environment is missing or out of scope (Enterprise non-admin)"
           },
           "404": {
             "description": "No stack source row for this name and environment"
@@ -29246,7 +29585,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied (requires stacks:restart, or environment access denied on enterprise)"
+            "description": "Permission denied (requires stacks:restart, or environment access denied on enterprise), or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -29312,7 +29651,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied, or access denied to this environment"
+            "description": "Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -29378,7 +29717,7 @@
             "description": "Invalid stack name"
           },
           "403": {
-            "description": "Permission denied, or access denied to this environment"
+            "description": "Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)"
           }
         },
         "security": [
@@ -32019,7 +32358,7 @@
             "description": "Authentication required (auth is enabled and the caller is not authenticated)"
           },
           "403": {
-            "description": "Permission denied (missing users:remove)"
+            "description": "Permission denied (missing users:remove), or the user is an admin and the caller is not"
           },
           "404": {
             "description": "User not found"
@@ -33377,10 +33716,20 @@
           "vulnerabilities"
         ],
         "summary": "Return the total finding count, severity summary, and distinct image/container/stack filter values for an environment",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "groupBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Group the counts by \"container\", \"image\" or \"stack\""
+          }
+        ],
         "responses": {
           "200": {
-            "description": "An empty metadata object is returned when no environment resolves; a permission failure returns the status from the access check",
+            "description": "Without groupBy: total, summary, and the filter values under options (an empty metadata object when no environment resolves). With groupBy: only groupBy and groups (empty when no environment resolves); a container group has id, name, image, an image group id, name, containers, a stack group name, images, each with critical, high, medium, low and total. A permission failure returns the status from the access check",
             "content": {
               "application/json": {
                 "schema": {
@@ -33393,32 +33742,40 @@
                       "type": "object",
                       "properties": {}
                     },
-                    "images": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
+                    "options": {
+                      "type": "object",
+                      "properties": {
+                        "images": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "containers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "stacks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
                       }
                     },
-                    "containers": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
+                    "groupBy": {
+                      "type": "string"
                     },
-                    "stacks": {
+                    "groups": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "properties": {}
                       }
                     }
-                  },
-                  "required": [
-                    "total",
-                    "summary",
-                    "images",
-                    "containers",
-                    "stacks"
-                  ]
+                  }
                 },
                 "example": {
                   "total": 12,
@@ -33428,18 +33785,23 @@
                     "medium": 5,
                     "low": 3
                   },
-                  "images": [
-                    "nginx:latest"
-                  ],
-                  "containers": [
-                    "web"
-                  ],
-                  "stacks": [
-                    "frontend"
-                  ]
+                  "options": {
+                    "images": [
+                      "nginx:latest"
+                    ],
+                    "containers": [
+                      "web"
+                    ],
+                    "stacks": [
+                      "frontend"
+                    ]
+                  }
                 }
               }
             }
+          },
+          "400": {
+            "description": "groupBy is not container, image or stack"
           }
         },
         "security": [
@@ -33449,7 +33811,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "With groupBy (container, image or stack), returns {groupBy, groups} instead - each scanned container, image or stack with its critical/high/medium/low/total counts, most severe first. A clean one is listed with zeroes; one whose image was never scanned is not listed. A stack counts each image once."
       }
     },
     "/api/vulnerabilities/export": {

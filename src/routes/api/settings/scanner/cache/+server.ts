@@ -18,7 +18,13 @@ export const DELETE: RequestHandler = async ({ cookies }) => {
 	}
 
 	try {
-		const envs = await getEnvironments();
+		const allEnvs = await getEnvironments();
+
+		// Only touch environments the caller may access: an env-scoped settings:edit role
+		// must not clear the cache (and reach the Docker daemon) of environments outside
+		// its scope. null = all environments (admin / unscoped).
+		const accessibleIds = await auth.getAccessibleEnvironmentIds();
+		const envs = accessibleIds === null ? allEnvs : allEnvs.filter((e) => accessibleIds.includes(e.id));
 
 		// Clean local cache (volumes + bind mount dirs)
 		const result = await cleanupScannerCache();

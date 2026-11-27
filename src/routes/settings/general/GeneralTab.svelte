@@ -12,7 +12,7 @@
 	import { STACK_LOG_OPERATIONS, type StackLogOperation } from '$lib/utils/stack-log-operations';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
-	import { canAccess, authStore } from '$lib/stores/auth';
+	import { canAccess, isAdmin, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
 	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
@@ -737,6 +737,19 @@ services:
 							     page is where personal choices live, and this one goes with them. -->
 							{#if !$authStore.authEnabled}
 								<LanguageSelector />
+							{:else}
+								<!-- Language is per-user; with auth on it lives in the profile.
+								     Show a pointer in the selector's spot so it does not look
+								     like the option vanished. -->
+								<div class="space-y-1.5">
+									<div class="flex items-center gap-2 text-sm font-medium">
+										<Globe class="w-4 h-4 text-muted-foreground" />
+										{m.settings_general_language_label()}
+									</div>
+									<p class="text-xs text-muted-foreground">
+										{m.settings_general_language_in_profile()} <a href="/profile" class="text-primary hover:underline font-medium">{m.settings_general_theme_defaults_link()}</a>.
+									</p>
+								</div>
 							{/if}
 							<!-- With auth on the toggles edit the GLOBAL defaults, so they wait for
 							     those to load; binding globalValue=undefined first would show the
@@ -748,10 +761,10 @@ services:
 								<IndentGuidesToggle globalValue={$authStore.authEnabled ? globalIndentGuides : undefined} />
 							{/if}
 							{#if $authStore.authEnabled}
-								<div class="text-xs text-muted-foreground flex items-start gap-1.5 mt-2 p-2 bg-muted/50 rounded-md">
-									<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+								<div class="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2 mt-2 p-2.5 bg-amber-500/10 border border-amber-500/40 rounded-md">
+									<Info class="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
 									<div>
-										<p>{m.settings_general_theme_defaults_before()} <strong>{m.settings_general_theme_defaults_strong()}</strong> {m.settings_general_theme_defaults_middle()} <em>{m.settings_general_theme_defaults_you()}</em> {m.settings_general_theme_defaults_after()} <a href="/profile" class="text-primary hover:underline">{m.settings_general_theme_defaults_link()}</a>.</p>
+										<p>{m.settings_general_theme_defaults_before()} <strong>{m.settings_general_theme_defaults_strong()}</strong> {m.settings_general_theme_defaults_middle()} <em>{m.settings_general_theme_defaults_you()}</em> {m.settings_general_theme_defaults_after()} <a href="/profile" class="text-primary hover:underline font-medium">{m.settings_general_theme_defaults_link()}</a>.</p>
 									</div>
 								</div>
 							{/if}
@@ -1045,7 +1058,7 @@ services:
 							id="grype-image"
 							value={defaultGrypeImage}
 							onblur={handleGrypeImageBlur}
-							disabled={!$canAccess('settings', 'edit')}
+							disabled={!$isAdmin}
 							placeholder={DEFAULT_GRYPE_IMAGE}
 						/>
 						<div class="flex items-center gap-2 flex-wrap">
@@ -1055,7 +1068,7 @@ services:
 									type="button"
 									class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-600 hover:bg-green-500/20 transition-colors"
 									onclick={() => applyScannerVersion('grype')}
-									disabled={!$canAccess('settings', 'edit')}
+									disabled={!$isAdmin}
 								>
 									{m.settings_general_scanner_use_version({ version: newerScanners.grype })}
 								</button>
@@ -1070,7 +1083,7 @@ services:
 							id="trivy-image"
 							value={defaultTrivyImage}
 							onblur={handleTrivyImageBlur}
-							disabled={!$canAccess('settings', 'edit')}
+							disabled={!$isAdmin}
 							placeholder={DEFAULT_TRIVY_IMAGE}
 						/>
 						<div class="flex items-center gap-2 flex-wrap">
@@ -1080,7 +1093,7 @@ services:
 									type="button"
 									class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-600 hover:bg-green-500/20 transition-colors"
 									onclick={() => applyScannerVersion('trivy')}
-									disabled={!$canAccess('settings', 'edit')}
+									disabled={!$isAdmin}
 								>
 									{m.settings_general_scanner_use_version({ version: newerScanners.trivy })}
 								</button>
@@ -1100,7 +1113,7 @@ services:
 							id="grype-args"
 							value={defaultGrypeArgs}
 							onblur={handleGrypeArgsBlur}
-							disabled={!$canAccess('settings', 'edit')}
+							disabled={!$isAdmin}
 							placeholder={DEFAULT_GRYPE_ARGS}
 						/>
 						<p class="text-xs text-muted-foreground">{splitAtName(m.settings_general_scanner_args_hint)[0]}<code class="bg-muted px-1 rounded">{'{image}'}</code>{splitAtName(m.settings_general_scanner_args_hint)[1]}</p>
@@ -1111,7 +1124,7 @@ services:
 							id="trivy-args"
 							value={defaultTrivyArgs}
 							onblur={handleTrivyArgsBlur}
-							disabled={!$canAccess('settings', 'edit')}
+							disabled={!$isAdmin}
 							placeholder={DEFAULT_TRIVY_ARGS}
 						/>
 						<p class="text-xs text-muted-foreground">{splitAtName(m.settings_general_scanner_args_hint)[0]}<code class="bg-muted px-1 rounded">{'{image}'}</code>{splitAtName(m.settings_general_scanner_args_hint)[1]}</p>
@@ -1138,7 +1151,7 @@ services:
 								value={defaultScannerNetworkMode}
 								onValueChange={handleScannerNetworkModeChange}
 							>
-								<Select.Trigger id="scanner-network-mode" class="w-full" disabled={!$canAccess('settings', 'edit')}>
+								<Select.Trigger id="scanner-network-mode" class="w-full" disabled={!$isAdmin}>
 									<span>{defaultScannerNetworkMode || m.settings_general_scanner_network_default()}</span>
 								</Select.Trigger>
 								<Select.Content>
@@ -1156,7 +1169,7 @@ services:
 								id="scanner-dns"
 								value={defaultScannerDns.join(', ')}
 								onblur={handleScannerDnsBlur}
-								disabled={!$canAccess('settings', 'edit')}
+								disabled={!$isAdmin}
 							/>
 							<p class="text-xs text-muted-foreground">{m.settings_general_scanner_dns_hint()}</p>
 						</div>

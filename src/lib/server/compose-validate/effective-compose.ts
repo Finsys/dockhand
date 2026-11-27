@@ -23,8 +23,8 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resolveComposeDockerHost, buildComposeBaseArgs } from '../compose-docker-args';
-import { parseCompose } from './parse';
-import { extractMaterializableEnvFiles } from './env-file-paths';
+import { extractMaterializableEnvFiles, loadForScratchCheck, referencesOutsideScratchDir } from './env-file-paths';
+import { stripReservedEnvKeys } from '../env-key-guard';
 import type { Finding } from './types';
 import { isPlaceholderArtefact, PLACEHOLDER } from '$lib/utils/validate-provider-keys';
 
@@ -61,20 +61,21 @@ export async function renderEffectiveCompose(
 		const file = join(dir, 'docker-compose.yml');
 		await writeFile(file, composeContent, 'utf8');
 
+		// Config runs inside Dockhand: a file reference leaving the scratch dir would read
+		// Dockhand's own files and echo them back. Degrade to the local parser instead, also
+		// when the file does not parse here and its references cannot be checked.
+		const doc = loadForScratchCheck(composeContent);
+		if (!doc || referencesOutsideScratchDir(doc)) return { ok: false, findings: [] };
+
 		// Pre-create referenced env_file(s) as empty files so `docker compose config` resolves
 		// them. The user's real env file lives in their stack dir, not this scratch dir, so
 		// without this a valid `env_file: - .env` is falsely reported "env file ... not found".
 		// Only temp-dir-safe relative paths are materialized; interpolation values still come
 		// from envVars (passed as process env), so empty files don't skew other findings.
-		try {
-			const parsed = parseCompose(composeContent);
-			for (const rel of extractMaterializableEnvFiles(parsed.doc)) {
-				const target = join(dir, rel);
-				await mkdir(dirname(target), { recursive: true });
-				await writeFile(target, '', { flag: 'wx' }).catch(() => undefined); // don't overwrite
-			}
-		} catch {
-			// A compose that won't parse is handled by the local parser; config will report it too.
+		for (const rel of extractMaterializableEnvFiles(doc)) {
+			const target = join(dir, rel);
+			await mkdir(dirname(target), { recursive: true });
+			await writeFile(target, '', { flag: 'wx' }).catch(() => undefined); // don't overwrite
 		}
 
 		const composeDockerHost = resolveComposeDockerHost(dockerHost, undefined);
@@ -158,6 +159,22 @@ export function parseConfigErrors(stderr: string): Finding[] {
 	return findings;
 }
 
+/**
+ * Env for the `docker compose config` child. The stack's env vars (incl. secrets) are
+ * injected so `${VAR}` interpolation resolves as it will at deploy time; the keys that
+ * steer which binary runs are stripped and PATH is set after the merge, as the deploy
+ * spawn does. COMPOSE_FILE and COMPOSE_ENV_FILES are dropped too: they name files config
+ * would read outside the scratch dir. Other COMPOSE_* keys (COMPOSE_PROFILES) stay.
+ */
+const FILE_SELECTING_KEYS = new Set(['COMPOSE_FILE', 'COMPOSE_ENV_FILES']);
+
+export function composeConfigEnv(envVars?: Record<string, string>): Record<string, string> {
+	const env = Object.fromEntries(
+		Object.entries(stripReservedEnvKeys(envVars)).filter(([k]) => !FILE_SELECTING_KEYS.has(k))
+	);
+	return { ...env, PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin' };
+}
+
 /** Spawn helper: shell:false, bounded output + lifetime, returns code/stdout/stderr. */
 function execDocker(
 	exe: string,
@@ -177,10 +194,7 @@ function execDocker(
 			cwd,
 			shell: false,
 			stdio: ['ignore', 'pipe', 'pipe'],
-			// The stack's env vars (incl. secrets) are injected so `${VAR}` interpolation
-			// resolves the same way it will at deploy time - otherwise config reports a
-			// spurious "VAR is not set" for every variable Dockhand supplies via shell env.
-			env: { PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', ...(envVars ?? {}) }
+			env: composeConfigEnv(envVars)
 		});
 
 		const timeout = setTimeout(() => {

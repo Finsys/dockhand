@@ -8,6 +8,7 @@
 import { homedir } from 'node:os';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { assertSafeContainerPath } from './container-path-core';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { Readable } from 'node:stream';
@@ -16,10 +17,12 @@ import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
 import { toWebReadableStream } from './node-readable-stream';
 import { buildImagePruneFilters, pruneAllUnused, holderFailureWarning, type ImagePruneResult } from './image-prune-core';
+import { containerImageNamer, containersPerImage } from './image-usage-core';
 import { demuxDockerStream } from './docker-demux-core';
 import { isExpectedConnectionError, isQuietDockerFailure, transportTimeoutError } from './docker-probe-core';
 import {
 	computeRequestTimeoutMs,
+	edgeRequestTimeoutMs,
 	isPrunePath,
 	isStopPath,
 	stopTimeoutMs
@@ -28,7 +31,7 @@ import { helperWaitDeadline, helperExitFromState, helperFailureDetail, needsDaem
 import { cancelReaderOnAbort } from './reader-abort-core';
 import { configuredMacAddress, endpointForRecreate } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
-import { mapContainerNetworks } from '$lib/utils/network-identity';
+import { mapContainerNetworks, recreateEndpointAliases } from '$lib/utils/network-identity';
 import type { Environment } from './db';
 import { getSetting } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
@@ -39,7 +42,7 @@ import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs, imageReleaseAge
 import { manualPullAgeWarning, verifiedImagePullPlan } from './minimum-release-age-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
 import { containerMountBindings, containerMountOptions, type StructuredMount } from '../utils/container-mounts';
-import { resolveNanoCpusConflict, resolvePodmanUsernsMode } from './hostconfig-recreate';
+import { resolveNanoCpusConflict, applyPodmanUsernsMode, stripDefaultMemorySwappiness } from './hostconfig-recreate';
 import { isUnknownNetworkKeyError, retryEndpointKey } from './podman-network-key';
 import { expectedEvents, EXPECTED_EVENT_TTL_MS } from './expected-events-core';
 import { decideRespawnOutcome, isExactNameMatch, isSystemdManagedUnit } from './systemd-recreate-core';
@@ -47,6 +50,7 @@ import { decideRespawnOutcome, isExactNameMatch, isSystemdManagedUnit } from './
 import { parseImageReference } from './registry/image-ref';
 import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
 export { parseImageReference } from './registry/image-ref';
+import { HELPER_CONTAINER_LABELS } from './container-labels';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth, isSafeRegistryHost } from './registry-auth';
 import { registryAuthHeader } from './registry/auth-header';
@@ -62,7 +66,7 @@ import {
 	type RegistryPorts
 } from './registry/manifest-digest';
 import { classifyManifest, type ArtifactKind } from './semver/manifest-artifact';
-import { isSystemContainer, classifyEmptyDigestImage, indexChildDigests, multiArchVerdict, readWithRetry, cachedIndexReader, type MultiArchVerdict } from './scheduler/tasks/update-utils';
+import { isSystemContainer, classifyEmptyDigestImage, indexChildDigests, multiArchVerdict, runningPlatformChildDigest, readWithRetry, cachedIndexReader, type MultiArchVerdict, type RunningDigestResult } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
 import { getInstanceId } from './backups/identity';
 import { isOwnedBackupHelper } from './backups/reap-core';
@@ -1164,6 +1168,12 @@ export async function listContainers(all = true, envId?: number | null): Promise
 		}
 	}
 
+	const imageName = await containerImageNamer(
+		containers,
+		(c) => trackedImageReference(c.Image, c.Labels),
+		() => dockerJsonRequest<any[]>('/images/json?manifests=1', {}, envId)
+	);
+
 	return containers.map((container) => {
 		// Extract network info with IP addresses
 		const networks: { [networkName: string]: { ipAddress: string } } = {};
@@ -1212,7 +1222,7 @@ export async function listContainers(all = true, envId?: number | null): Promise
 		return {
 			id: container.Id,
 			name: container.Names[0]?.replace(/^\//, '') || 'unnamed',
-			image: trackedImageReference(container.Image, container.Labels),
+			image: imageName(container),
 			imageId: container.ImageID || '',
 			state: container.State,
 			status: container.Status,
@@ -1286,9 +1296,15 @@ function stopTimeoutEnvSecs(): number | null {
  * path as `?t=`, put there by stopContainer, so no second inspect is needed.
  */
 function edgeTimeoutMs(path: string, streaming: boolean): number {
-	if (streaming || path === '/_hawser/compose' || isPrunePath(path)) return 300000;
-	if (isStopPath(path)) return stopTimeoutMs(stopTimeoutFromPath(path), stopTimeoutEnvSecs());
-	return 30000;
+	return edgeRequestTimeoutMs(
+		{
+			path,
+			composeTimeoutSecs: parseInt(process.env.COMPOSE_TIMEOUT || '900'),
+			stopTimeoutSecs: stopTimeoutFromPath(path),
+			stopEnvSecs: stopTimeoutEnvSecs()
+		},
+		streaming
+	);
 }
 
 export async function stopContainer(
@@ -2468,11 +2484,7 @@ export async function recreateContainerFromInspect(
 	}
 
 	// Strip default MemorySwappiness — Podman + cgroupv2 rejects it.
-	// Docker returns -1, Podman returns 0 when unset.
-	const swappiness = createConfig.HostConfig?.MemorySwappiness;
-	if (swappiness == null || swappiness === -1 || swappiness === 0) {
-		delete createConfig.HostConfig.MemorySwappiness;
-	}
+	stripDefaultMemorySwappiness(createConfig.HostConfig);
 
 	// NanoCpus and CpuPeriod/CpuQuota are two ways to express the same CPU limit and are
 	// mutually exclusive at create time. Podman's inspect reports BOTH, so passing the whole
@@ -2484,16 +2496,7 @@ export async function recreateContainerFromInspect(
 	// Podman lowers `--userns keep-id` to UsernsMode:"private" in inspect, which create then
 	// rejects without inline mappings (#1409). Restore the original intent from the annotation
 	// so keep-id survives the recreate; Docker (UsernsMode != "private") is untouched.
-	const usernsFix = resolvePodmanUsernsMode(createConfig.HostConfig?.UsernsMode, config.Annotations);
-	if (usernsFix && createConfig.HostConfig) {
-		if ('mode' in usernsFix) {
-			createConfig.HostConfig.UsernsMode = usernsFix.mode;
-			log?.(`Restored UsernsMode "${usernsFix.mode}" from Podman annotation (was "private")`);
-		} else {
-			delete createConfig.HostConfig.UsernsMode;
-			log?.('Dropped UsernsMode "private" — Podman rejects it without inline UID/GID mappings');
-		}
-	}
+	applyPodmanUsernsMode(createConfig.HostConfig, config.Annotations, log);
 
 	// container:<name> mode shares the network namespace — Docker rejects
 	// networking-related fields on the dependent container since they're
@@ -2554,6 +2557,13 @@ export async function recreateContainerFromInspect(
 		};
 	}
 
+	// The compose service alias is restored on the primary network, as the single update
+	// does: once missing, it would otherwise be carried forward by every later update and the
+	// stack's service-name DNS stays broken. The other networks pass through as-is.
+	const attachedNetworkNames = Object.keys(networks);
+	const recreateEndpoint = (netName: string, endpoint: any) =>
+		endpointForRecreate(recreateEndpointAliases(netName, { ...endpoint }, networkMode, attachedNetworkNames, config.Labels));
+
 	// Docker can only connect to one network at creation. Pass the first network
 	// from the old container's settings to avoid getting a random bridge IP.
 	// Skip for shared network modes — EndpointsConfig conflicts with container:/host/none modes.
@@ -2562,7 +2572,7 @@ export async function recreateContainerFromInspect(
 		// from the IP, the replacement gets a new address and the carried MAC then
 		// collides with whoever inherits the old one (#1618). Only a configured MAC, or one
 		// derived from an IP the endpoint pins, survives; otherwise Docker derives a fresh one.
-		const endpointConfig = endpointForRecreate({ ...initialNetworkConfig });
+		const endpointConfig = recreateEndpoint(initialNetworkName, initialNetworkConfig);
 		createConfig.NetworkingConfig = {
 			EndpointsConfig: {
 				[initialNetworkName]: endpointConfig
@@ -2602,7 +2612,7 @@ export async function recreateContainerFromInspect(
 			if (nc.NetworkID) {
 				try {
 					// Same rule as the creation endpoint above.
-					const settings = endpointForRecreate({ ...nc });
+					const settings = recreateEndpoint(netName, nc);
 					await connectContainerToNetworkRaw(nc.NetworkID, newContainerId, settings, envId);
 				} catch (netError: any) {
 					log?.(`Warning: Failed to connect to network "${netName}": ${netError.message}`);
@@ -2732,18 +2742,11 @@ export async function createContainerFromMetadata(
 	delete createConfig.MacAddress;
 
 	// Strip default MemorySwappiness (Podman + cgroupv2 rejects it)
-	const swappiness = createConfig.HostConfig?.MemorySwappiness;
-	if (swappiness == null || swappiness === -1 || swappiness === 0) {
-		delete createConfig.HostConfig.MemorySwappiness;
-	}
+	stripDefaultMemorySwappiness(createConfig.HostConfig);
 
 	// Podman keep-id -> UsernsMode:"private" in inspect, rejected on create (#1409).
 	// Restore the intent from the annotation; Docker (UsernsMode != "private") untouched.
-	const usernsFix = resolvePodmanUsernsMode(createConfig.HostConfig?.UsernsMode, config.Annotations);
-	if (usernsFix && createConfig.HostConfig) {
-		if ('mode' in usernsFix) createConfig.HostConfig.UsernsMode = usernsFix.mode;
-		else delete createConfig.HostConfig.UsernsMode;
-	}
+	applyPodmanUsernsMode(createConfig.HostConfig, config.Annotations);
 
 	// container:<name> mode: clean up conflicting network fields
 	if (networkMode.startsWith('container:')) {
@@ -3206,13 +3209,7 @@ export async function listImages(envId?: number | null): Promise<ImageInfo[]> {
 
 	// Build a map of imageId -> container count
 	// Docker may return -1 for Containers field on some hosts, so we compute it ourselves
-	const imageContainerCount = new Map<string, number>();
-	for (const container of containers) {
-		const imageId = container.ImageID || container.Image;
-		if (imageId) {
-			imageContainerCount.set(imageId, (imageContainerCount.get(imageId) || 0) + 1);
-		}
-	}
+	const imageContainerCount = await containersPerImage(images, containers, () => dockerJsonRequest<any[]>('/images/json?manifests=1', {}, envId), false);
 
 	return images.map((image) => ({
 		id: image.Id,
@@ -3314,9 +3311,13 @@ export async function getImageReleaseAgeWarning(imageName: string, envId?: numbe
 	}
 }
 
-/** Scheduled pulls enforce the cooldown; explicit pulls only report an advisory. */
-export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null, enforceReleaseAge = false): Promise<{ imageId: string; digest: string; reference: string } | undefined> {
-	if (!enforceReleaseAge) {
+/**
+ * releaseAge: 'enforce' refuses an image still inside the minimum image age (automatic updates),
+ * 'advise' pulls anyway with a warning (user-requested pulls), 'skip' waives the age but still
+ * pulls the verified digest (a container labelled dockhand.skip.cooldown=true).
+ */
+export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null, releaseAge: 'enforce' | 'advise' | 'skip' = 'advise'): Promise<{ imageId: string; digest: string; reference: string } | undefined> {
+	if (releaseAge === 'advise') {
 		const warning = await getImageReleaseAgeWarning(imageName, envId);
 		if (warning) {
 			console.warn(`[Pull] ${warning}`);
@@ -3326,8 +3327,12 @@ export async function pullImage(imageName: string, onProgress?: (data: any) => v
 		return undefined;
 	}
 
-	const digest = await verifyImageReleaseAge(imageName, envId);
+	const digest = releaseAge === 'skip'
+		? await getRegistryManifestDigest(imageName, envId)
+		: await verifyImageReleaseAge(imageName, envId);
 	if (!digest) {
+		// Without a registry digest a skipped cooldown still updates, by tag.
+		if (releaseAge === 'skip') console.warn(`[Pull] Registry digest for ${imageName} unavailable; pulling by tag`);
 		await pullImageFromRegistry(imageName, onProgress, envId);
 		return undefined;
 	}
@@ -3481,6 +3486,37 @@ export async function imageManifestDigest(id: string, envId?: number | null): Pr
 
 
 /**
+ * The digest of the image a container is ACTUALLY running, for the daemon's platform, read
+ * from `GET /images/{id}/json?manifests=true` (containerd image store, API 1.48+). Unlike the
+ * image's RepoDigests index, this does not float when a sibling tag is later pulled, so the
+ * update check uses it as the authoritative local side. Tri-state (`RunningDigestResult`):
+ * - `{ digest }`      the running platform child was resolved.
+ * - `{ noSignal }`    the daemon answered but reports no per-arch manifest for this platform
+ *                     (classic store / API < 1.48 answer 200 with no `Manifests`) - the caller
+ *                     falls back to the RepoDigests-index comparison. This is NOT an error.
+ * - `{ unknown }`     the request FAILED (a transient 5xx / connection error); the read is
+ *                     undecidable, so the caller must surface `unknown`, never guess `same`.
+ */
+export async function runningPlatformDigest(
+	id: string,
+	platform: { os: string; architecture: string; variant?: string },
+	envId?: number | null
+): Promise<RunningDigestResult> {
+	let data: { Manifests?: unknown };
+	try {
+		data = await dockerJsonRequest<{ Manifests?: unknown }>(
+			`/images/${encodeURIComponent(id)}/json?manifests=true`, {}, envId
+		);
+	} catch (e) {
+		// A genuine failure (daemon reachable but 5xx, or connection error) is undecidable, not
+		// "no signal" - do not let it collapse into the RepoDigests fallback and guess "same".
+		return { unknown: true, reason: e instanceof Error ? e.message : String(e) };
+	}
+	const digest = runningPlatformChildDigest(data?.Manifests, platform);
+	return digest ? { digest } : { noSignal: true };
+}
+
+/**
  * Find registry credentials from Dockhand's stored registries for an image's registry
  * host and repo. Matching rules: pickRegistryCredentials (longest stored path wins).
  */
@@ -3573,6 +3609,14 @@ export async function getRegistryAuth(
 	// Parse registry URL to extract host and organization path
 	const parsed = parseRegistryUrl(registry.url);
 
+	// SSRF guard: a registry URL is user-supplied, so block a host that points at
+	// loopback or cloud metadata before any browsing request is built. A self-hosted
+	// registry on a LAN is still allowed (same policy as the update-check path).
+	const hostSafety = isSafeRegistryHost(parsed.host);
+	if (!hostSafety.ok) {
+		throw new Error(`Registry host is not allowed: ${hostSafety.reason}`);
+	}
+
 	// V2 API endpoints are always at the registry host root
 	const baseUrl = `${parsed.protocol}://${parsed.host}`;
 
@@ -3613,6 +3657,13 @@ export interface HarborCatalogResult {
 export async function isHarborRegistry(registryUrl: string): Promise<boolean> {
 	const parsed = parseRegistryUrl(registryUrl);
 	const host = parsed.host;
+
+	// This is the first registry-browsing fetch, so apply the SSRF guard here too: a host
+	// pointing at loopback or cloud metadata is never probed (treated as not-Harbor; the
+	// token flow refuses it as well). A LAN host stays allowed.
+	if (!isSafeRegistryHost(host).ok) {
+		return false;
+	}
 
 	const cached = harborDetectionCache.get(host);
 	if (cached && Date.now() - cached.ts < HARBOR_CACHE_TTL) {
@@ -3755,6 +3806,7 @@ export async function harborListRepositories(
 	pageSize: number = 100
 ): Promise<HarborCatalogResult> {
 	const parsed = parseRegistryUrl(registry.url);
+	if (!isSafeRegistryHost(parsed.host).ok) throw new Error('Registry host is not allowed');
 	const baseUrl = `${parsed.protocol}://${parsed.host}/api/v2.0`;
 	const headers = harborHeaders(registry);
 
@@ -3801,6 +3853,7 @@ export async function harborSearchRepositories(
 	limit: number = 25
 ): Promise<string[]> {
 	const parsed = parseRegistryUrl(registry.url);
+	if (!isSafeRegistryHost(parsed.host).ok) throw new Error('Registry host is not allowed');
 	const baseUrl = `${parsed.protocol}://${parsed.host}/api/v2.0`;
 	const headers = harborHeaders(registry);
 
@@ -3964,7 +4017,8 @@ async function localImageMatchesRegistry(
 	imageName: string,
 	localDigests: string[],
 	envId?: number | null,
-	registryDigest?: string
+	registryDigest?: string,
+	runningImageId?: string
 ): Promise<MultiArchVerdict> {
 	const { registry, repo, tag } = parseImageReference(imageName);
 	if (!isSafeRegistryHost(registry).ok) return { kind: 'unknown', reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
@@ -3976,19 +4030,27 @@ async function localImageMatchesRegistry(
 		const [token, scheme] = await credentials();
 		return readWithRetry(() => readManifestIndex(registry, repo, reference, token, scheme), sleep);
 	}, indexByDigest, `${registry}/${repo}`);
+	// Read the daemon platform once, cached, shared across the verdict's reads.
+	let platformResult: { os: string; architecture: string; variant?: string } | null | undefined;
+	const platform = async () => {
+		if (platformResult !== undefined) return platformResult;
+		try {
+			const info = await dockerJsonRequest('/info', { signal: AbortSignal.timeout(8000) }, envId) as { OSType?: string; Architecture?: string };
+			platformResult = imagePlatform(info?.OSType, info?.Architecture);
+		} catch {
+			platformResult = null;
+		}
+		return platformResult;
+	};
 	return multiArchVerdict({
 		tag,
 		currentDigest: registryDigest,
 		localDigests,
+		// Resolved LAZILY inside the verdict, only after the child-match short-circuit, and only
+		// for a running image we were given - so an up-to-date pin costs no ?manifests=true call.
+		runningDigest: runningImageId ? (p) => runningPlatformDigest(runningImageId, p, envId) : undefined,
 		readIndex,
-		platform: async () => {
-			try {
-				const info = await dockerJsonRequest('/info', { signal: AbortSignal.timeout(8000) }, envId) as { OSType?: string; Architecture?: string };
-				return imagePlatform(info?.OSType, info?.Architecture);
-			} catch {
-				return null;
-			}
-		}
+		platform
 	});
 }
 
@@ -4146,7 +4208,7 @@ async function checkTagForUpdate(
 		// child digest never equals the index digest, and an index that moved while the
 		// daemon-platform image stayed the same is not an update either. A registry that
 		// cannot be read to decide is an error, never a guessed update.
-		const multiArch = await localImageMatchesRegistry(imageName, localDigests, envId, registryDigest);
+		const multiArch = await localImageMatchesRegistry(imageName, localDigests, envId, registryDigest, currentImageId);
 		if (multiArch.kind === 'same') {
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], localDigests };
 		}
@@ -4903,9 +4965,10 @@ globalThis.__terminalResizeContainer = async (containerId, cols, rows, envId) =>
 	await resizeContainer(containerId, cols, rows, envId);
 };
 
-// System disk usage
-export async function getDiskUsage(envId?: number | null) {
-	return dockerJsonRequest('/system/df', {}, envId);
+// System disk usage. Prefer getCachedDiskUsage() from '$lib/server/disk-usage-cache':
+// /system/df can take tens of seconds on NAS storage, so callers should share one scan.
+export async function getDiskUsage(envId?: number | null, signal?: AbortSignal) {
+	return dockerJsonRequest('/system/df', signal ? { signal } : {}, envId);
 }
 
 // Prune operations
@@ -4916,6 +4979,7 @@ export async function pruneContainers(envId?: number | null) {
 function pruneAllUnusedImages(envId?: number | null): Promise<ImagePruneResult> {
 	return pruneAllUnused({
 		listImages: (filters) => dockerJsonRequest(filters ? `/images/json?filters=${filters}` : '/images/json', {}, envId),
+		listImagesWithManifests: () => dockerJsonRequest('/images/json?manifests=1', {}, envId),
 		listContainers: () => dockerJsonRequest('/containers/json?all=true', {}, envId),
 		prune: () => dockerJsonRequest<ImagePruneResult>(`/images/prune?filters=${buildImagePruneFilters(false)}`, { method: 'POST' }, envId),
 		remove: (ref) => dockerJsonRequest(`/images/${encodeURIComponent(ref)}`, { method: 'DELETE' }, envId),
@@ -5250,6 +5314,8 @@ export async function runContainer(options: {
 		Image: options.image,
 		Cmd: options.cmd,
 		Env: options.env || [],
+		// A helper like runContainerWithStreaming's (scanner version checks): silent, hidden.
+		Labels: { ...HELPER_CONTAINER_LABELS },
 		Tty: false,
 		HostConfig: {
 			Binds: options.binds || [],
@@ -5388,9 +5454,9 @@ export async function runContainerWithStreaming(options: {
 		Env: options.env || [],
 		// Every helper spawned here (backup/restore/probe, image scanner) is ephemeral and exits
 		// on purpose, so it must NOT fire a "Container died/exited" notification like a user's
-		// container would. dockhand.notify=false makes the event handler skip it
-		// (isNotifyDisabledByLabel). Caller labels win if they set notify explicitly.
-		Labels: { 'dockhand.notify': 'false', ...(options.labels || {}) },
+		// container would, and it is hidden from container lists (HELPER_CONTAINER_LABELS).
+		// Caller labels win if they set either explicitly.
+		Labels: { ...HELPER_CONTAINER_LABELS, ...(options.labels || {}) },
 		Tty: false,
 		HostConfig: {
 			Binds: options.binds || [],
@@ -6102,8 +6168,8 @@ export async function listContainerDirectory(
 	envId?: number | null,
 	useSimpleLs?: boolean
 ): Promise<{ path: string; entries: FileEntry[] }> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Commands to try in order of preference (includes /usr/sbin/ls for Wolfi/busybox images)
 	const commands = useSimpleLs
@@ -6146,8 +6212,8 @@ export async function getContainerArchive(
 	path: string,
 	envId?: number | null
 ): Promise<Response> {
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	const response = await dockerFetch(
 		`/containers/${containerId}/archive?path=${encodeURIComponent(safePath)}`,
@@ -6172,8 +6238,8 @@ export async function putContainerArchive(
 	tarData: ArrayBuffer | Uint8Array,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	const response = await dockerFetch(
 		`/containers/${containerId}/archive?path=${encodeURIComponent(safePath)}`,
@@ -6202,8 +6268,8 @@ export async function statContainerPath(
 	path: string,
 	envId?: number | null
 ): Promise<{ name: string; size: number; mode: number; mtime: string; linkTarget?: string; isDir: boolean }> {
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	const response = await dockerFetch(
 		`/containers/${containerId}/archive?path=${encodeURIComponent(safePath)}`,
@@ -6238,8 +6304,8 @@ export async function readContainerFile(
 	path: string,
 	envId?: number | null
 ): Promise<string> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Use cat to read file content
 	const output = await execInContainer(containerId, ['cat', safePath], envId);
@@ -6256,8 +6322,8 @@ export async function writeContainerFile(
 	content: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Get directory and filename
 	const parts = safePath.split('/');
@@ -6339,8 +6405,8 @@ export async function createContainerFile(
 	path: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Use touch to create empty file
 	await execInContainer(containerId, ['touch', safePath], envId);
@@ -6354,8 +6420,8 @@ export async function createContainerDirectory(
 	path: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Use mkdir -p to create directory (and parents if needed)
 	await execInContainer(containerId, ['mkdir', '-p', safePath], envId);
@@ -6369,8 +6435,8 @@ export async function deleteContainerPath(
 	path: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Safety check: don't allow deleting root or critical paths
 	const dangerousPaths = ['/', '/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/var', '/root', '/home'];
@@ -6391,9 +6457,9 @@ export async function renameContainerPath(
 	newPath: string,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize paths to prevent command injection
-	const safeOldPath = oldPath.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
-	const safeNewPath = newPath.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safeOldPath = assertSafeContainerPath(oldPath);
+	const safeNewPath = assertSafeContainerPath(newPath);
 
 	// Use mv to rename
 	await execInContainer(containerId, ['mv', safeOldPath, safeNewPath], envId);
@@ -6409,8 +6475,8 @@ export async function chmodContainerPath(
 	recursive: boolean = false,
 	envId?: number | null
 ): Promise<void> {
-	// Sanitize path to prevent command injection
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 
 	// Validate mode (should be octal like 755 or symbolic like u+x)
 	if (!/^[0-7]{3,4}$/.test(mode) && !/^[ugoa]*[+-=][rwxXst]+$/.test(mode)) {
@@ -6433,7 +6499,7 @@ export async function chownContainerPath(
 	recursive: boolean = false,
 	envId?: number | null
 ): Promise<void> {
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	const safePath = assertSafeContainerPath(path);
 	// `--` stops chown reading a path that begins with `-` as an option.
 	const cmd = recursive ? ['chown', '-R', owner, '--', safePath] : ['chown', owner, '--', safePath];
 	await execInContainer(containerId, cmd, envId, 'root');
@@ -6797,8 +6863,8 @@ export async function listVolumeDirectory(
 ): Promise<{ path: string; entries: FileEntry[]; containerId: string }> {
 	const containerId = await getOrCreateVolumeHelperContainer(volumeName, envId, readOnly);
 
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 	const fullPath = `${VOLUME_MOUNT_PATH}${safePath.startsWith('/') ? safePath : '/' + safePath}`;
 
 	// Use simple ls since busybox doesn't support --time-style
@@ -6826,8 +6892,8 @@ export async function getVolumeArchive(
 ): Promise<{ response: Response; containerId: string }> {
 	const containerId = await getOrCreateVolumeHelperContainer(volumeName, envId, readOnly);
 
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 	const fullPath = `${VOLUME_MOUNT_PATH}${safePath.startsWith('/') ? safePath : '/' + safePath}`;
 
 	const response = await dockerFetch(
@@ -6856,7 +6922,7 @@ export async function statVolumePath(
 	readOnly: boolean = true
 ): Promise<{ name: string; size: number; mode: number; mtime: string; linkTarget?: string; isDir: boolean }> {
 	const containerId = await getOrCreateVolumeHelperContainer(volumeName, envId, readOnly);
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	const safePath = assertSafeContainerPath(path);
 	const fullPath = `${VOLUME_MOUNT_PATH}${safePath.startsWith('/') ? safePath : '/' + safePath}`;
 	return statContainerPath(containerId, fullPath, envId);
 }
@@ -6873,8 +6939,8 @@ export async function readVolumeFile(
 ): Promise<string> {
 	const containerId = await getOrCreateVolumeHelperContainer(volumeName, envId, readOnly);
 
-	// Sanitize path
-	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
+	// Reject a malformed path (null byte, ".." traversal); legal filename characters pass through.
+	const safePath = assertSafeContainerPath(path);
 	const fullPath = `${VOLUME_MOUNT_PATH}${safePath.startsWith('/') ? safePath : '/' + safePath}`;
 
 	// Use cat to read file content

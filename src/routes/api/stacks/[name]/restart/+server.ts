@@ -5,6 +5,7 @@ import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import { isValidStackName } from '$lib/server/stack-name-guard';
 import type { RequestHandler } from './$types';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * @openapi
@@ -14,7 +15,7 @@ import type { RequestHandler } from './$types';
  * query: mode:string Restart mode — "recreate" recreates containers (new IDs, re-pull), "ordered" does a stop+start honoring depends_on ordering (same IDs), anything else is a plain in-place restart
  * resp-400: Invalid stack name
  * resp-200: Server-Sent-Events job stream with a final result event ({success, output})
- * resp-403: Permission denied (requires stacks:restart, or environment access denied on enterprise)
+ * resp-403: Permission denied (requires stacks:restart, or environment access denied on enterprise), or the environment is missing or out of scope (Enterprise non-admin)
  */
 export const POST: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
@@ -29,7 +30,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	// Environment access check (enterprise only)
-	if (envIdNum && auth.isEnterprise && !(await auth.canAccessEnvironment(envIdNum))) {
+	if (await deniesEnvScope(auth, envIdNum)) {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 

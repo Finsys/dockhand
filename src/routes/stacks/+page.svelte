@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import { matchesStackFilter } from '$lib/utils/grid-filters';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { goto, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
@@ -17,7 +17,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText, Tag, Copy, Check, Pin } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText, Tag, Copy, Check, Pin } from 'lucide-svelte';
 	import { formatPorts } from '$lib/utils/port-format';
 	import { formatUptime } from '$lib/i18n/time';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
@@ -116,7 +116,21 @@
 	let stackModalReadonly = $state(false);
 	let stackModalGitInfo = $state<{ commit?: string; url?: string; branch?: string } | null>(null);
 	let editingGitStack = $state<any>(null);
+	let convertingStackName = $state<string | null>(null);
+	let untrackedStackName = $state<string | null>(null);
 	let envId = $state<number | null>(null);
+
+	// Whether the open edit modal may offer "Convert to Git". Kept as a stable $derived so
+	// the modal's button does not flicker out during a render pass where the inline guard
+	// transiently reads an empty editingStackName.
+	let editStackConvertHandler = $derived.by<(() => void) | null>(() => {
+		if (!editingStackName) return null;
+		const sourceType = getStackSource(editingStackName).sourceType;
+		const allowed =
+			(sourceType === 'internal' && $canAccess('stacks', 'edit')) ||
+			(sourceType === 'external' && $canAccess('stacks', 'create'));
+		return allowed ? () => convertLocalStackToGit(editingStackName) : null;
+	});
 
 	// User-defined tags: assignments (name -> tagId[]) + catalog + filter.
 	let tagsMap = $state<Record<string, number[]>>({});
@@ -262,9 +276,16 @@
 
 	// Version-update (semver) release-notes modal — opened from a container's Tag badge.
 	let versionModalContainer = $state<StackContainer | null>(null);
-	function openVersionModal(container: StackContainer) {
+	let versionModalStack = $state<ComposeStackInfo | null>(null);
+	function openVersionModal(container: StackContainer, stack: ComposeStackInfo) {
 		versionModalContainer = container;
+		versionModalStack = stack;
 	}
+	const versionModalComposeStack = $derived(
+		versionModalStack && getStackSource(versionModalStack.name).sourceType === 'internal' && $canAccess('stacks', 'edit')
+			? versionModalStack.name
+			: null
+	);
 	let envHasScanning = $state(false);
 	let envVulnerabilityCriteria = $state<'never' | 'any' | 'critical_high' | 'critical' | 'more_than_current'>('never');
 
@@ -485,7 +506,7 @@
 	// Status filter state
 	const STATUS_FILTER_STORAGE_KEY = 'dockhand-stacks-status-filter';
 	const COOLING_DOWN_FILTER_VALUE = 'cooling-down';
-	let statusFilter = $state<string[]>([]);
+	let statusFilter = $state<string[]>(loadStatusFilter());
 
 	// Stack status types with icons and colors
 	const stackStatusTypes = [
@@ -528,18 +549,18 @@
 		return s?.icon || Layers;
 	}
 
-	function loadStatusFilter() {
+	function loadStatusFilter(): string[] {
+		if (typeof window === 'undefined') return [];
 		try {
 			const stored = localStorage.getItem(STATUS_FILTER_STORAGE_KEY);
 			if (stored) {
 				const parsed = JSON.parse(stored);
-				if (Array.isArray(parsed)) {
-					statusFilter = parsed;
-				}
+				if (Array.isArray(parsed)) return parsed;
 			}
 		} catch {
 			// Ignore localStorage errors
 		}
+		return [];
 	}
 
 	function saveStatusFilter() {
@@ -1167,8 +1188,10 @@
 		return stack.status;
 	}
 
-	async function openGitModal(gitStack: any = undefined) {
+	async function openGitModal(gitStack?: any, stackName?: string | null, isUntracked = false) {
 		editingGitStack = gitStack || null;
+		convertingStackName = isUntracked ? null : stackName || null;
+		untrackedStackName = isUntracked ? stackName || null : null;
 		// Fetch repositories and credentials before opening modal
 		try {
 			const [reposRes, credsRes] = await Promise.all([
@@ -1183,6 +1206,47 @@
 			gitCredentials = [];
 		}
 		showGitModal = true;
+	}
+
+	async function convertGitStackToLocal(stackName: string, gitStackId: number) {
+		operationError = null;
+		try {
+			const response = await fetch(appendEnvParam(`/api/git/stacks/${gitStackId}/detach`, envId), {
+				method: 'POST'
+			});
+
+			if (!response.ok) {
+				let errorMsg = m.stacks_git_error_convert_local_failed();
+				try {
+					const data = await response.json();
+					errorMsg = data.error || errorMsg;
+				} catch {
+					// ignore parse errors
+				}
+				showErrorDialog(m.stacks_git_error_convert_title({ name: stackName }), errorMsg);
+				return;
+			}
+
+			toast.success(m.stacks_git_toast_convert_local_success({ name: stackName }));
+			showGitModal = false;
+			editingGitStack = null;
+			await fetchStacks();
+		} catch (error) {
+			console.error('Failed to convert stack to local source:', error);
+			const errorMsg = error instanceof Error ? error.message : m.stacks_git_error_convert_local_failed();
+			showErrorDialog(m.stacks_git_error_convert_title({ name: stackName }), errorMsg);
+		}
+	}
+
+	async function convertLocalStackToGit(stackName: string) {
+		const isUntracked = getStackSource(stackName).sourceType === 'external';
+		operationError = null;
+		showEditModal = false;
+		editingStackName = '';
+		// Let the edit dialog finish closing (its focus/escape layer) before opening the
+		// git dialog, so a dropdown-item selection inside it does not dismiss the new one.
+		await tick();
+		await openGitModal(null, stackName, isUntracked);
 	}
 
 	async function startStack(name: string) {
@@ -1720,7 +1784,6 @@
 
 	onMount(() => {
 		loadExpandedState();
-		loadStatusFilter();
 		loadLayoutMode();
 
 		// Initial fetch is handled by $effect - no need to duplicate here
@@ -2153,7 +2216,7 @@
 					{/if}
 					{#if (stack.coolingDownCount ?? 0) > 0}
 						<Tooltip.Root>
-							<Tooltip.Trigger class="inline-flex items-center gap-0.5 self-center shrink-0 text-muted-foreground">
+							<Tooltip.Trigger class="inline-flex items-center gap-0.5 self-center shrink-0 text-amber-500">
 								<Clock class="w-3.5 h-3.5" />
 								<span class="text-2xs font-medium leading-none">{stack.coolingDownCount}</span>
 							</Tooltip.Trigger>
@@ -2693,12 +2756,12 @@
 												</Tooltip.Content>
 											</Tooltip.Root>
 										{:else if container.coolingDown && $appSettings.highlightUpdates}
-											<!-- An update exists but the image is too young to apply. Muted,
-											     not amber: there is nothing for the user to act on yet. The
-											     hours left are shown inline beside the clock. -->
+											<!-- An update exists but the image is too young to apply. Amber,
+											     like the other update markers, so a held update is as visible as
+											     an available one; the hours left are shown inline beside the clock. -->
 											<Tooltip.Root>
 												<Tooltip.Trigger
-													class="inline-flex items-center gap-1 text-muted-foreground text-xs tabular-nums"
+													class="inline-flex items-center gap-1 text-amber-500 text-xs tabular-nums"
 												>
 													<Clock class="w-3.5 h-3.5 shrink-0" />
 													{#if container.coolingDownHours}{m.containers_list_cooldown_hours({ count: container.coolingDownHours })}{/if}
@@ -2706,7 +2769,7 @@
 												<Tooltip.Content side="right" class="w-72 p-3">
 													<div class="space-y-1.5">
 														<p class="font-medium text-sm flex items-start gap-1.5">
-															<Clock class="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+															<Clock class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 															<span>{m.containers_list_update_held_title({ count: container.coolingDownHours ?? 0 })}</span>
 														</p>
 													</div>
@@ -2733,7 +2796,7 @@
 											<VersionUpdateBadge
 												newerVersion={container.newerVersion}
 												variant="pill"
-												onclick={() => openVersionModal(container)}
+												onclick={() => openVersionModal(container, stack)}
 											/>
 										{/if}
 										<span class="flex-1"></span>
@@ -2959,7 +3022,7 @@
 												onclick={(e) => { e.stopPropagation(); showContainerLogs(container); }}
 												class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer {currentLogsContainerId === container.id ? 'bg-muted text-blue-500' : ''}"
 											>
-												<FileText class="w-3.5 h-3.5 {currentLogsContainerId === container.id ? 'text-blue-500' : 'text-muted-foreground hover:text-foreground'}" />
+												<ScrollText class="w-3.5 h-3.5 {currentLogsContainerId === container.id ? 'text-blue-500' : 'text-muted-foreground hover:text-foreground'}" />
 											</button>
 											<button
 												type="button"
@@ -3186,12 +3249,15 @@
 		stackModalGitInfo = null;
 		loadTags(envId);
 	}}
+	onConvertToGit={editStackConvertHandler}
 	onSuccess={fetchStacks}
 />
 
 <GitStackModal
 	bind:open={showGitModal}
 	gitStack={editingGitStack}
+	convertStackName={convertingStackName}
+	{untrackedStackName}
 	environmentId={envId}
 	icon={editingGitStack ? (stackSources[editingGitStack.stackName]?.icon ?? null) : null}
 	repositories={gitRepositories}
@@ -3200,7 +3266,10 @@
 		showGitModal = false;
 		editingGitStack = null;
 		loadTags(envId);
+		convertingStackName = null;
+		untrackedStackName = null;
 	}}
+	onConvertToLocal={editingGitStack ? () => convertGitStackToLocal(editingGitStack.stackName, editingGitStack.id) : null}
 	onSaved={fetchStacks}
 />
 
@@ -3259,6 +3328,9 @@
 	bind:container={versionModalContainer}
 	newerVersion={versionModalContainer?.newerVersion ?? null}
 	{envId}
+	composeStack={versionModalComposeStack}
+	canRedeploy={!!versionModalStack && !getStackSystemType(versionModalStack)}
+	onComposeUpdated={fetchStacks}
 />
 
 <BatchOperationModal

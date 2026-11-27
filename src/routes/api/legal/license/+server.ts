@@ -1,5 +1,6 @@
 import { json, text } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { authorize } from '$lib/server/authorize';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -9,9 +10,14 @@ import { join } from 'node:path';
  * query: format:string Set to "text" to return the raw license as text/plain instead of JSON
  * resp-200: {content:string!}
  * resp-200-desc: The license text (as {content} JSON, or raw text/plain when format=text)
+ * resp-401: Not authenticated
  * resp-404: LICENSE.txt could not be found/read
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Not authenticated' }, { status: 401 });
+	}
 	try {
 		const licensePath = join(process.cwd(), 'LICENSE.txt');
 		const content = readFileSync(licensePath, 'utf-8');

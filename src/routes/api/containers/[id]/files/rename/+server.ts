@@ -3,6 +3,7 @@ import { renameContainerPath } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * POST /api/containers/{id}/files/rename - Rename/move a path in a container
@@ -16,7 +17,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!, oldPath:string!, newPath:string!}
  * resp-200-example: {"success":true,"oldPath":"/app/config.yaml","newPath":"/app/config.old.yaml"}
  * resp-400: oldPath or newPath missing, or the container is not running
- * resp-403: Permission denied, or read-only file system
+ * resp-403: Permission denied, or read-only file system, or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: Source path not found
  * resp-409: Destination already exists
  * resp-500: Failed to rename the path
@@ -33,6 +34,12 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 	// Permission check with environment context
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	try {

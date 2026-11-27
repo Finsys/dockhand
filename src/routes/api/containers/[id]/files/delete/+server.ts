@@ -3,6 +3,7 @@ import { deleteContainerPath } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * DELETE /api/containers/{id}/files/delete - Delete a path in a container
@@ -15,7 +16,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!, path:string!}
  * resp-200-example: {"success":true,"path":"/app/tmp/old.log"}
  * resp-400: Path missing, a refused critical-path delete, a non-empty directory, or the container is not running
- * resp-403: Permission denied, or read-only file system
+ * resp-403: Permission denied, or read-only file system, or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: Path not found
  * resp-500: Failed to delete the path
  */
@@ -32,6 +33,12 @@ export const DELETE: RequestHandler = async ({ params, url, cookies }) => {
 	// Permission check with environment context
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	try {

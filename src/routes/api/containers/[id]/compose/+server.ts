@@ -5,6 +5,8 @@ import { getSecretKeysToMask } from '$lib/server/db';
 import { getStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { getOwnContainerId } from '$lib/server/host-path';
+import { maskOwnContainerEnv, maskEnvValues } from '$lib/server/own-container-core';
 import { inspectToCompose, type DockerInspect } from '$lib/utils/inspect-to-compose';
 
 /**
@@ -15,7 +17,7 @@ import { inspectToCompose, type DockerInspect } from '$lib/utils/inspect-to-comp
  * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * resp-200: {compose:string, composeFullEnv:string, serviceName:string, stackProject:string}
- * resp-200-desc: compose keeps only user-set env; composeFullEnv keeps every env var (incl. image-inherited); stackProject is the compose project the container already belongs to, or null
+ * resp-200-desc: compose keeps only user-set env; composeFullEnv keeps every env var (incl. image-inherited); stackProject is the compose project the container already belongs to, or null. For a non-admin, the env values of Dockhand's own container are masked
  * resp-403: Permission denied
  * resp-500: Failed to inspect the container
  */
@@ -34,6 +36,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 	try {
 		const containerData = (await inspectContainer(params.id, envIdNum)) as DockerInspect;
+		const ownEnvMasked = maskOwnContainerEnv(containerData, getOwnContainerId(), !auth.authEnabled || auth.isAdmin);
 
 		const labels = containerData.Config?.Labels ?? {};
 		const stackProject = labels['com.docker.compose.project'] ?? null;
@@ -68,6 +71,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			if (imageRef) {
 				const imageData: any = await inspectImage(imageRef, envIdNum);
 				imageEnv = imageData?.Config?.Env ?? null;
+				// Masked alike, so the subtraction matches on keys only: comparing values here would
+				// tell a non-admin whether a secret equals what a retagged image carries.
+				if (ownEnvMasked && imageEnv) imageEnv = maskEnvValues(imageEnv);
 				imageEntrypoint = imageData?.Config?.Entrypoint ?? null;
 				imageCmd = imageData?.Config?.Cmd ?? null;
 				imageLabels = imageData?.Config?.Labels ?? null;

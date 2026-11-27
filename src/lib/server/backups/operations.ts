@@ -28,8 +28,12 @@ import {
 	type Outcome,
 } from './operations-core';
 
-/** How often (ms) progress updates are persisted. */
-const PROGRESS_INTERVAL_MS = 1000;
+/**
+ * How often (ms) restic's `% done` lines are persisted. Each append rewrites the whole
+ * log column, so the write cost grows with the log; a long backup must append rarely.
+ * The live UI and docker logs still get every line.
+ */
+const PROGRESS_INTERVAL_MS = 60_000;
 
 export interface OpenOptions {
 	kind: OperationKind;

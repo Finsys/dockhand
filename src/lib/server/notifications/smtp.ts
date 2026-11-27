@@ -1,10 +1,19 @@
 /** SMTP email notifications via nodemailer. */
 import nodemailer from 'nodemailer';
 import type { SmtpConfig } from '../db';
-import type { NotificationPayload, NotificationResult } from './shared';
+import { resolvedHostReason, type NotificationPayload, type NotificationResult } from './shared';
+import { buildSmtpHtml, smtpHostReason } from './smtp-core';
 
 export async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPayload): Promise<NotificationResult> {
 	try {
+		// Reject link-local metadata and reserved ranges, by address and by where a name
+		// points; a relay on loopback or the LAN is allowed. The connection is the sink,
+		// so the guard sits here too, not only at save time.
+		const hostReason = smtpHostReason(config.host) ?? await resolvedHostReason(config.host, undefined, { allowLoopback: true });
+		if (hostReason) {
+			return { success: false, error: `SMTP error: ${hostReason}` };
+		}
+
 		const transporter = nodemailer.createTransport({
 			host: config.host,
 			port: config.port,
@@ -18,19 +27,9 @@ export async function sendSmtpNotification(config: SmtpConfig, payload: Notifica
 			} : undefined
 		});
 
-		const envBadge = payload.environmentName
-			? `<span style="display: inline-block; background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">${payload.environmentName}</span>`
-			: '';
 		const envText = payload.environmentName ? ` [${payload.environmentName}]` : '';
 
-		const html = `
-			<div style="font-family: sans-serif; padding: 20px;">
-				<h2 style="margin: 0 0 10px 0;">${payload.title}${envBadge}</h2>
-				<p style="margin: 0; white-space: pre-wrap;">${payload.message}</p>
-				<hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-				<p style="margin: 0; font-size: 12px; color: #666;">Sent by Dockhand</p>
-			</div>
-		`;
+		const html = buildSmtpHtml(payload.title, payload.message, payload.environmentName);
 
 		await transporter.sendMail({
 			from: config.from_name ? `"${config.from_name}" <${config.from_email}>` : config.from_email,

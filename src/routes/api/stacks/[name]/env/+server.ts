@@ -4,10 +4,11 @@ import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecre
 import { findStackDir } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, readFileSync } from 'node:fs';
-import { isForbiddenStackPath } from '$lib/server/fs-guard';
+import { isForbiddenStackPath, isProtectedPath } from '$lib/server/fs-guard';
 import { join, dirname } from 'node:path';
 import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 import type { RequestHandler } from './$types';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * GET /api/stacks/[name]/env?env=X
@@ -87,7 +88,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		} else {
 			// Internal/adopted stacks: non-secrets from file, secrets from DB
 			// The stored path is client-chosen; never read or write a protected location through it.
-			if (envFilePath && isForbiddenStackPath(envFilePath)) {
+			// isProtectedPath adds /etc,/root so a stored envPath cannot read a home dir.
+			if (envFilePath && (isForbiddenStackPath(envFilePath) || isProtectedPath(envFilePath))) {
 				return json({ error: 'Env file path is not allowed' }, { status: 403 });
 			}
 			if (envFilePath && existsSync(envFilePath)) {
@@ -145,7 +147,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * body: {variables:array<{key:string!, value:string!, isSecret:boolean}>!}
  * body-example: {"variables":[{"key":"DB_HOST","value":"db","isSecret":false},{"key":"DB_PASSWORD","value":"s3cret","isSecret":true}]}
  * resp-400: Invalid variables payload
- * resp-403: Permission denied (needs stacks:edit)
+ * resp-403: Permission denied (needs stacks:edit), or the environment is missing or out of scope (Enterprise non-admin)
  * resp-500: Failed to save env vars
  */
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
@@ -159,7 +161,7 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 	}
 
 	// Environment access check (enterprise only)
-	if (envIdNum && auth.isEnterprise && !await auth.canAccessEnvironment(envIdNum)) {
+	if (await deniesEnvScope(auth, envIdNum)) {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 

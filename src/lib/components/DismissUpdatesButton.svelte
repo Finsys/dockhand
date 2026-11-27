@@ -46,7 +46,7 @@
 			</span>
 		{/if}
 		{#if coolingDownCount > 0}
-			<span class="flex items-center gap-0.5 text-muted-foreground" title={m.updates_cooling_down_title({ count: coolingDownCount })}>
+			<span class="flex items-center gap-0.5" title={m.updates_cooling_down_title({ count: coolingDownCount })}>
 				<Clock class="w-3 h-3" />
 				<span class="text-xs font-medium tabular-nums">{coolingDownCount}</span>
 			</span>

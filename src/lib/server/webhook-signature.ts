@@ -1,6 +1,18 @@
 import crypto from 'node:crypto';
 
 /**
+ * Constant-time string equality. Returns false on a length mismatch (lengths leak anyway)
+ * and otherwise compares in time independent of where the first difference is, so a secret
+ * compared against an attacker-supplied value does not leak via timing.
+ */
+export function timingSafeStringEqual(a: string, b: string): boolean {
+	const aBuf = Buffer.from(a);
+	const bBuf = Buffer.from(b);
+	if (aBuf.length !== bBuf.length) return false;
+	return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+/**
  * Verify a git webhook signature against the configured secret.
  *
  * Two provider families share these two wire formats:
@@ -25,8 +37,5 @@ export function verifyWebhookSignature(payload: string, signature: string | null
 	}
 
 	// GitLab token: exact match, constant-time.
-	const sigBuf = Buffer.from(signature);
-	const secretBuf = Buffer.from(secret);
-	if (sigBuf.length !== secretBuf.length) return false;
-	return crypto.timingSafeEqual(sigBuf, secretBuf);
+	return timingSafeStringEqual(signature, secret);
 }

@@ -14,6 +14,7 @@ import {
 	appendScheduleExecutionLog
 } from '../../db';
 import { pruneImages } from '../../docker';
+import { invalidateDiskUsage } from '../../disk-usage-cache';
 import { prunedImageCount } from '../../../utils/pruned-image-count';
 import { sendEventNotification } from '../../notifications';
 
@@ -71,7 +72,8 @@ export async function runImagePrune(
 		await log(`Starting image prune (mode: ${pruneMode}, env id ${envId})`);
 
 		// Execute prune
-		const result = await pruneImages(dangling, envId);
+		// A prune that fails part way may still have freed space.
+		const result = await pruneImages(dangling, envId).finally(() => invalidateDiskUsage(envId));
 
 		// Extract space reclaimed and images removed from result; the one-by-one prune
 		// on an engine with a broken label filter does not know the space.

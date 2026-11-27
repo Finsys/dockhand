@@ -10,6 +10,7 @@ import { createRunRecorder } from '$lib/server/deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
 import { parseEnvFileContent } from '$lib/server/git';
 import type { RequestHandler } from './$types';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * @openapi
@@ -92,7 +93,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  * query: env:integer Target environment id (takes precedence over envId/environmentId in the body)
  * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean, envId:integer, environmentId:integer, pull:boolean, respectPullPolicy:boolean, build:boolean, pullBase:boolean, forceRecreate:boolean}
  * resp-400: Invalid request (e.g. missing name/compose, or secretProviderId wrong type)
- * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
+ * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)
  * resp-500: Failed to create or deploy the stack
  */
 export const POST: RequestHandler = async (event) => {
@@ -119,7 +120,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	// Environment access check (enterprise only)
-	if (envIdNum && auth.isEnterprise && !(await auth.canAccessEnvironment(envIdNum))) {
+	if (await deniesEnvScope(auth, envIdNum)) {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 

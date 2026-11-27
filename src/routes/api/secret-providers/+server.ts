@@ -30,7 +30,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 /**
  * @openapi
- * summary: Create a secret provider (Vault, Infisical, Doppler, 1Password Connect)
+ * summary: Create a secret provider of any supported type
  * body: {name:string!, type:string!, config:object!}
  * resp-201: {id:integer!, name:string!, type:string!}
  * resp-400: Name and type are required, unknown provider type, config missing, or a provider with this name already exists

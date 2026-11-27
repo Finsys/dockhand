@@ -13,17 +13,14 @@ import {
 	listImages,
 	listVolumes,
 	listNetworks,
-	getDockerInfo,
-	getDiskUsage
+	getDockerInfo
 } from '$lib/server/docker';
+import { getCachedDiskUsage } from '$lib/server/disk-usage-cache';
 import { listComposeStacks } from '$lib/server/stacks';
 import { countLivePending, countImageUpdates, countLivePinnedDigest, countPinnedDigest, countLiveNewerVersion, countNewerVersion } from '$lib/server/pending-updates-core';
 import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 import { authorize } from '$lib/server/authorize';
 import { parseLabels } from '$lib/utils/label-colors';
-
-// Skip disk usage collection (Synology NAS performance fix)
-const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
 
 // Helper to add timeout to promises
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -221,14 +218,15 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				envStats.online = true;
 
 				// Fetch all data in parallel (with 10 second timeout per operation)
-				// Disk usage can be disabled with SKIP_DF_COLLECTION for Synology NAS devices
+				// Disk usage comes from the shared cache (one /system/df per env, 5 min TTL);
+				// it returns null when SKIP_DF_COLLECTION is set
 				const [containers, images, volumes, networks, stacks, diskUsage] = await Promise.all([
 					withTimeout(listContainers(true, env.id).catch(() => []), 10000, []),
 					withTimeout(listImages(env.id).catch(() => []), 10000, []),
 					withTimeout(listVolumes(env.id).catch(() => []), 10000, []),
 					withTimeout(listNetworks(env.id).catch(() => []), 10000, []),
 					withTimeout(listComposeStacks(env.id).catch(() => []), 10000, []),
-					SKIP_DF_COLLECTION ? Promise.resolve(null) : withTimeout(getDiskUsage(env.id).catch(() => null), 10000, null)
+					getCachedDiskUsage(env.id, 10000)
 				]);
 
 				// Process containers

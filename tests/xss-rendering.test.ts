@@ -82,4 +82,28 @@ describe('renderDescription (template description XSS, M3)', () => {
 		expect(out).not.toContain('<script>');
 		expect(out).toContain('Plain');
 	});
+
+	// The tag stripper only removes complete <...> pairs, so an unterminated tag must come out
+	// as escaped text and must not pick up the attributes of the link after it.
+	const withoutAnchors = (html: string) => html.replace(/<a href="[^"]*" target="_blank" rel="noopener" class="[^"]*">|<\/a>/g, '');
+
+	test('an unterminated tag before a link stays text', () => {
+		const out = renderDescription('<img src=x onerror=alert(1) [docs](https://example.com)');
+		expect(withoutAnchors(out)).not.toContain('<');
+		expect(out).toContain('&lt;img src=x onerror=alert(1)');
+		expect(out).toContain('<a href="https://example.com"');
+	});
+
+	test('an unterminated tag on its own stays text', () => {
+		const out = renderDescription('hello <svg onload=alert(1)');
+		expect(out).toBe('hello &lt;svg onload=alert(1)');
+	});
+
+	test('text around and between links is escaped, links survive', () => {
+		const out = renderDescription('a "q" & [one](https://a.example) mid [two](/rel) end <b');
+		expect(withoutAnchors(out)).not.toMatch(/[<>"]/);
+		expect(out).toContain('>one</a>');
+		expect(out).toContain('<a href="/rel"');
+		expect(out).toContain('&amp;');
+	});
 });

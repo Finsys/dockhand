@@ -9,10 +9,17 @@ import { saveEnvironmentIcon, deleteEnvironmentIcon, getEnvironmentIconBuffer } 
  * summary: Get the custom icon image for an environment (raw image/webp bytes, not JSON)
  * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: Binary image/webp response body, Cache-Control public max-age=3600
+ * resp-403: Caller lacks the environments:view permission, or is denied access to this environment
  * resp-404: No custom icon set for this environment
  */
-export const GET: RequestHandler = async ({ params }) => {
+export const GET: RequestHandler = async ({ params, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !(await auth.can('environments', 'view'))) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
 	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 	const buffer = getEnvironmentIconBuffer(id);
 
 	if (!buffer) {

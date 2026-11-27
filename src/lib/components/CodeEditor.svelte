@@ -13,6 +13,7 @@
 	import { themeStore } from '$lib/stores/theme';
 	import { getEditorThemeExtension } from '$lib/utils/editor-theme-extensions';
 	import { gutterBackgroundFor } from '$lib/utils/gutter-contrast';
+	import { REF_START, BARE_REF_START } from '$lib/utils/compose-var-ref';
 	import { get } from 'svelte/store';
 	import { shell } from '@codemirror/legacy-modes/mode/shell';
 	import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
@@ -348,15 +349,15 @@
 		for (const marker of markers) {
 			// Find all occurrences of this variable in the text
 			// Match ${VAR_NAME} or ${VAR_NAME:-...} or $VAR_NAME patterns
-			// Use negative lookbehind (?<!\$) to skip escaped $$ (Docker Compose escape syntax)
+			// REF_START skips an escaped `$${` but not a reference after whole `$$` pairs
 			const patterns = [
-				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:-([^}]*)\\}`, 'g'), hasDefault: true },
-				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}-([^}]*)\\}`, 'g'), hasDefault: true },
-				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\?[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\?[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\+[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\+[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`${REF_START}\\{${marker.name}\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`${REF_START}\\{${marker.name}:-([^}]*)\\}`, 'g'), hasDefault: true },
+				{ regex: new RegExp(`${REF_START}\\{${marker.name}-([^}]*)\\}`, 'g'), hasDefault: true },
+				{ regex: new RegExp(`${REF_START}\\{${marker.name}:\\?[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`${REF_START}\\{${marker.name}\\?[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`${REF_START}\\{${marker.name}:\\+[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`${REF_START}\\{${marker.name}\\+[^}]*\\}`, 'g'), hasDefault: false },
 			];
 
 			for (const { regex, hasDefault } of patterns) {
@@ -433,16 +434,16 @@
 			// Check if this line contains any of our marked variables
 			for (const marker of markers) {
 				// Match ${VAR_NAME} or ${VAR_NAME:-...} patterns
-				// Use regex with negative lookbehind to skip escaped $$ (Docker Compose escape syntax)
+				// REF_START skips an escaped `$${` but not a reference after whole `$$` pairs
 				const varPatterns = [
-					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\}`),
-					new RegExp(`(?<!\\$)\\$\\{${marker.name}:-`),
-					new RegExp(`(?<!\\$)\\$\\{${marker.name}-`),
-					new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\?`),
-					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\?`),
-					new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\+`),
-					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\+`),
-					new RegExp(`(?<![A-Za-z0-9\\$])\\$${marker.name}(?![a-zA-Z0-9_])`)
+					new RegExp(`${REF_START}\\{${marker.name}\\}`),
+					new RegExp(`${REF_START}\\{${marker.name}:-`),
+					new RegExp(`${REF_START}\\{${marker.name}-`),
+					new RegExp(`${REF_START}\\{${marker.name}:\\?`),
+					new RegExp(`${REF_START}\\{${marker.name}\\?`),
+					new RegExp(`${REF_START}\\{${marker.name}:\\+`),
+					new RegExp(`${REF_START}\\{${marker.name}\\+`),
+					new RegExp(`${BARE_REF_START}${marker.name}(?![a-zA-Z0-9_])`)
 				];
 
 				const hasVariable = varPatterns.some(p => p.test(line));

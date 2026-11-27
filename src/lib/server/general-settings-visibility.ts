@@ -73,3 +73,22 @@ export function visibleGeneralSettings<T extends object>(
 	}
 	return visible;
 }
+
+/**
+ * Images, arguments and network settings of the scanner and backup helper containers. The scanner runs with the
+ * Docker socket and the backup helper with the backed-up volumes and the repository password,
+ * in every environment, so writing them needs an administrator.
+ */
+export const ADMIN_ONLY_WRITE_SETTINGS = [
+	'defaultBackupImage',
+	'defaultGrypeArgs',
+	'defaultGrypeImage',
+	'defaultScannerDns',
+	'defaultScannerNetworkMode',
+	'defaultTrivyArgs',
+	'defaultTrivyImage'
+] as const;
+
+export function writesAdminOnlySetting(body: Record<string, unknown>): boolean {
+	return ADMIN_ONLY_WRITE_SETTINGS.some((key) => body[key] !== undefined);
+}

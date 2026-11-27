@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -12,7 +13,7 @@
 	import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 	import { classifyMarker, isInlineProviderRef, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown, EllipsisVertical } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import DeploysPanel from './DeploysPanel.svelte';
@@ -77,10 +78,11 @@
 		readonly?: boolean; // View compose content without allowing local changes
 		gitInfo?: { commit?: string; url?: string; branch?: string } | null; // Git provenance for read-only git stacks
 		onClose: () => void;
+		onConvertToGit?: (() => void) | null;
 		onSuccess: () => void; // Called after create or save
 	}
 
-	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onConvertToGit = null, onSuccess }: Props = $props();
 
 	let gitCommitCopied = $state<'ok' | 'error' | null>(null);
 	let gitUrlCopied = $state<'ok' | 'error' | null>(null);
@@ -1186,7 +1188,11 @@
 			return undefined;
 		})();
 		const refPairs = inlineRefPairs();
-		if (!selector && refPairs.length === 0) {
+		// SOPS has no selector: the server decrypts this stack's env file instead.
+		const stackProbe = selectedProviderType === 'sops' && mode === 'edit' && stackName
+			? { stack: stackName, env: $currentEnvironment?.id ?? null }
+			: {};
+		if (!selector && refPairs.length === 0 && !('stack' in stackProbe)) {
 			providerKeySet = new Set();
 			probeError = null;
 			updateEditorMarkers();
@@ -1197,7 +1203,7 @@
 			const response = await fetch(`/api/secret-providers/${formSecretProviderId}/probe`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ selector, refs: refPairs.map((p) => p.ref) })
+				body: JSON.stringify({ selector, refs: refPairs.map((p) => p.ref), ...stackProbe })
 			});
 			if (seq !== probeSeq) return; // a newer probe superseded this one
 			const data = await response.json();
@@ -1549,12 +1555,19 @@
 			const envId = $currentEnvironment?.id ?? null;
 			// Use 'new' as placeholder stack name for new stacks
 			const stackNameForValidation = mode === 'edit' ? stackName : (newStackName.trim() || 'new');
-			// Pass current UI env vars for validation
+			// Pass current UI env vars and non-secret values for validation
 			const currentVars = envVars.filter(v => v.key.trim()).map(v => v.key.trim());
+			const currentEnvValues: Record<string, string> = {};
+			for (const v of envVars) {
+				const k = v.key.trim();
+				if (k && !v.isSecret && v.value) {
+					currentEnvValues[k] = v.value;
+				}
+			}
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackNameForValidation)}/env/validate`, envId), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ compose: content, variables: currentVars })
+				body: JSON.stringify({ compose: content, variables: currentVars, envValues: currentEnvValues })
 			});
 
 			if (response.ok) {
@@ -2260,15 +2273,34 @@
 					</div>
 				</div>
 
-				<!-- Close button -->
-				<button
-					onclick={tryClose}
-					class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-				>
-					<X class="w-4 h-4" />
-				</button>
-			</div>
-		</Dialog.Header>
+				<div class="flex items-center gap-1">
+					{#if !readonly && mode === 'edit' && onConvertToGit}
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger>
+								<button
+									class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+									aria-label={m.stacks_modal_more_actions()}
+								>
+									<EllipsisVertical class="w-4 h-4" />
+								</button>
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Content align="end" class="w-44 border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+								<DropdownMenu.Item class="flex items-center gap-2 cursor-pointer text-sm" onSelect={onConvertToGit} disabled={saving || loading}>
+									<GitGraph class="w-4 h-4 shrink-0" />
+									{m.stacks_git_convert_to_git()}
+								</DropdownMenu.Item>
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					{/if}
+					<!-- Close button -->
+					<button
+						onclick={tryClose}
+						class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+					>
+						<X class="w-4 h-4" />
+					</button>
+				</div>
+			</Dialog.Header>
 
 		<!-- View tabs — left-aligned underline bar under the header, matched to
 		     GitStackModal for a consistent look across the stack modals. -->

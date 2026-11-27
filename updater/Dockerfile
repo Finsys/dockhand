@@ -10,7 +10,7 @@ ARG TARGETARCH
 
 WORKDIR /work
 
-ARG APKO_VERSION=1.4.13
+ARG APKO_VERSION=1.4.15
 RUN apk add --no-cache curl \
     && ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
     && curl -sL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_${ARCH}.tar.gz" \

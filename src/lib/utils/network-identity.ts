@@ -51,6 +51,17 @@ export function isPrimaryNetworkName(
 	return attachedNames.length === 1 && attachedNames[0] === netName;
 }
 
+/**
+ * Whether `netName` is the daemon's default bridge, the network of NetworkMode "bridge"
+ * (or "default"), named "podman" in a Podman inspect. Docker refuses network-scoped
+ * aliases there ("network-scoped aliases are only supported for user-defined networks"),
+ * so a compose service that sets `network_mode: bridge` has no service alias to restore:
+ * adding one fails the recreate.
+ */
+export function isDefaultBridge(netName: string, networkMode: string): boolean {
+	return (networkMode === 'bridge' || networkMode === 'default') && (netName === 'bridge' || netName === 'default' || netName === 'podman');
+}
+
 /** The per-network settings a recreate has to carry over for one endpoint. */
 export interface EndpointSettings {
 	aliases?: string[];
@@ -156,7 +167,7 @@ export function mapContainerNetworks(
 		}
 
 		primarySeen = true;
-		assignPrimary(out, endpoint, containerId, compose);
+		assignPrimary(out, endpoint, containerId, isDefaultBridge(netName, networkMode) ? undefined : compose);
 	}
 
 	return out;
@@ -178,6 +189,42 @@ function assignPrimary(
 	if (settings?.ipv4Address) out.primaryIpv4Address = settings.ipv4Address;
 	if (settings?.ipv6Address) out.primaryIpv6Address = settings.ipv6Address;
 	if (endpoint?.GwPriority) out.primaryGwPriority = endpoint.GwPriority;
+}
+
+/**
+ * A raw inspect endpoint with the compose service alias put back, for a recreate that
+ * passes the endpoint through as-is. Other containers of the stack reach this one by its
+ * service name, so a recreate must not carry a missing alias forward.
+ */
+export function withComposeAliases<T extends { Aliases?: string[] | null }>(
+	endpoint: T,
+	labels?: Record<string, string> | null
+): T {
+	const project = labels?.['com.docker.compose.project'];
+	const service = labels?.['com.docker.compose.service'];
+	if (!project || !service) return endpoint;
+	// Only the alias compose itself sets: the update must leave the endpoint as compose made it.
+	const aliases = endpoint.Aliases ? [...endpoint.Aliases] : [];
+	if (!aliases.includes(service)) aliases.push(service);
+	return { ...endpoint, Aliases: aliases };
+}
+
+/**
+ * One endpoint of a recreate: the primary network gets the compose service alias back,
+ * as the single update does; any other network (one connected by hand, a shared one) is
+ * left as it was, so no service alias lands where compose would not put it. Nor does the
+ * default bridge get one, which Docker refuses.
+ */
+export function recreateEndpointAliases<T extends { Aliases?: string[] | null }>(
+	netName: string,
+	endpoint: T,
+	networkMode: string,
+	attachedNames: readonly string[],
+	labels?: Record<string, string> | null
+): T {
+	return isPrimaryNetworkName(netName, networkMode, attachedNames) && !isDefaultBridge(netName, networkMode)
+		? withComposeAliases(endpoint, labels)
+		: endpoint;
 }
 
 /**

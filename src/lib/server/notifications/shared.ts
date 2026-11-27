@@ -6,7 +6,9 @@
  * each provider only depends on this module.
  */
 
-import { isSafeNotificationUrl } from '../url-safety';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import { isSafeNotificationUrl, ipCategory, embeddedV4 } from '../url-safety';
 
 export interface NotificationPayload {
 	title: string;
@@ -57,6 +59,10 @@ export async function notificationFetch(input: string | URL, init: RequestInit =
 	if (!safe.ok) {
 		throw new Error(`Notification endpoint rejected: ${safe.reason ?? 'unsafe URL'}`);
 	}
+	const resolvedReason = await resolvedHostReason(new URL(target).hostname);
+	if (resolvedReason) {
+		throw new Error(`Notification endpoint rejected: ${resolvedReason}`);
+	}
 	const response = await fetch(input, {
 		...init,
 		redirect: 'manual',
@@ -70,6 +76,39 @@ export async function notificationFetch(input: string | URL, init: RequestInit =
 		throw new Error(`Notification endpoint rejected: refusing to follow redirect (status ${response.status})`);
 	}
 	return response;
+}
+
+/** Cloud metadata endpoints (AWS/GCP/Azure, AWS ECS task metadata, AWS IPv6). */
+const METADATA_ADDRESSES = new Set(['169.254.169.254', '169.254.170.2', 'fd00:ec2::254']);
+
+/**
+ * The literal-host checks cannot see where a NAME points. Resolve it and refuse it when
+ * any address is loopback (unless allowLoopback, used by SMTP), reserved or a cloud metadata
+ * endpoint. The rest of 169.254/16
+ * stays allowed: Podman maps host.containers.internal there. A name that does not
+ * resolve is left to the connection to fail. IP literals are judged by the callers.
+ */
+export async function resolvedHostReason(
+	host: string,
+	lookupAll: (host: string) => Promise<string[]> = async (h) => (await lookup(h, { all: true })).map((a) => a.address),
+	{ allowLoopback = false }: { allowLoopback?: boolean } = {}
+): Promise<string | null> {
+	const name = host.trim().replace(/^\[|\]$/g, '');
+	if (!name || isIP(name.replace(/%.*$/, ''))) return null;
+	let addresses: string[];
+	try {
+		addresses = await lookupAll(name);
+	} catch {
+		return null;
+	}
+	for (const address of addresses) {
+		const cat = ipCategory(address);
+		const a = address.toLowerCase();
+		if ((cat === 'loopback' && !allowLoopback) || cat === 'reserved' || METADATA_ADDRESSES.has(embeddedV4(a) ?? a)) {
+			return `${name} resolves to a blocked address (${address})`;
+		}
+	}
+	return null;
 }
 
 /** Drain a response body to release the underlying socket/TLS connection. */

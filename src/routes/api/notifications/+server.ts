@@ -8,6 +8,8 @@ import {
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditNotification } from '$lib/server/audit';
+import { maskAppriseUrl } from '$lib/server/notifications/events-core';
+import { smtpHostReason } from '$lib/server/notifications/smtp-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -25,13 +27,13 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 	try {
 		const settings = await getNotificationSettings();
-		// Don't expose passwords
+		// Withhold secrets: the SMTP password, and the Apprise URLs (which embed bot
+		// tokens / webhook secrets in their path).
 		const safeSettings = settings.map(s => ({
 			...s,
-			config: s.type === 'smtp' ? {
-				...s.config,
-				password: s.config.password ? '********' : undefined
-			} : s.config
+			config: s.type === 'smtp'
+				? { ...s.config, password: s.config.password ? '********' : undefined }
+				: { ...s.config, urls: Array.isArray(s.config.urls) ? s.config.urls.map(maskAppriseUrl) : s.config.urls }
 		}));
 		return json(safeSettings);
 	} catch (error) {
@@ -46,7 +48,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * body: {type:string!, name:string!, enabled:boolean, config:{host:string, port:integer, secure:boolean, username:string, password:string, from_email:string, from_name:string, to_emails:array<string>, urls:array<string>}, eventTypes:array<string>, event_types:array<string>}
  * body-example: {"type":"smtp","name":"Ops Alerts","enabled":true,"config":{"host":"smtp.example.com","port":587,"secure":false,"from_email":"dockhand@example.com","to_emails":["ops@example.com"],"password":"***"},"eventTypes":["container_unhealthy"]}
  * resp-200: {id:integer!, type:string!, name:string!, enabled:boolean!, config:{}, eventTypes:array<string>}
- * resp-400: Missing or invalid fields — type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL
+ * resp-400: Missing or invalid fields - type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL, or the SMTP host is cloud-metadata (169.254/16) or reserved
  * resp-403: Permission denied (requires the notifications:create permission)
  * resp-500: Failed to create notification setting
  */
@@ -77,6 +79,10 @@ export const POST: RequestHandler = async (event) => {
 			if (!smtpConfig.host || !smtpConfig.port || !smtpConfig.from_email || !smtpConfig.to_emails?.length) {
 				return json({ error: 'SMTP config requires host, port, from_email, and to_emails' }, { status: 400 });
 			}
+			const hostReason = smtpHostReason(smtpConfig.host);
+			if (hostReason) {
+				return json({ error: `Invalid SMTP host: ${hostReason}` }, { status: 400 });
+			}
 		} else if (type === 'apprise') {
 			const appriseConfig = config as AppriseConfig;
 			if (!appriseConfig.urls?.length) {
@@ -95,14 +101,10 @@ export const POST: RequestHandler = async (event) => {
 		// Audit log
 		await auditNotification(event, 'create', setting.id, setting.name);
 
-		// Don't expose passwords in response
-		const safeSetting = setting.type === 'smtp' ? {
-			...setting,
-			config: {
-				...setting.config,
-				password: setting.config.password ? '********' : undefined
-			}
-		} : setting;
+		// Withhold secrets from the response, the same way the GET does.
+		const safeSetting = setting.type === 'smtp'
+			? { ...setting, config: { ...setting.config, password: setting.config.password ? '********' : undefined } }
+			: { ...setting, config: { ...setting.config, urls: Array.isArray(setting.config.urls) ? setting.config.urls.map(maskAppriseUrl) : setting.config.urls } };
 		return json(safeSetting);
 	} catch (error: any) {
 		console.error('Error creating notification setting:', error);

@@ -11,7 +11,8 @@
  *     blocked because /proc/self, /proc/1, etc. all leak the same secrets and
  *     nothing legitimate is browsed there.
  *   - /etc, /root - system account/secret files (/etc/shadow, /etc/passwd, root's
- *     home). Nothing a compose file lives in.
+ *     home). Nothing a compose file lives in, except inside DATA_DIR: the operator
+ *     chose it and Dockhand keeps its stacks there (DATA_DIR=/root/docker).
  *   - any path segment named .ssh (private keys / known_hosts) or .git (its
  *     config embeds remote credentials), at any depth and in any case, also when
  *     the segment is a symlink. This blocks the credential
@@ -74,8 +75,11 @@ function isProtectedSegment(name: string): boolean {
  * other than what readlink names), through a component named .ssh or .git (also
  * when that component is a symlink), a `..` after a missing component, a component
  * that cannot be inspected, or a symlink loop.
+ *
+ * Exported so other import-light path guards (e.g. git-url-safety's repo containment)
+ * resolve a committed symlink CHAIN the same way, instead of a partial one-hop walk.
  */
-function safeResolve(p: string): string | null {
+export function safeResolve(p: string): string | null {
 	const pending = (isAbsolute(p) ? p : process.cwd() + sep + p).split(sep);
 	let resolved: string = sep;
 	let links = 0;
@@ -161,7 +165,13 @@ function judge(requestedPath: string, roots: readonly string[]): boolean {
 		return true;
 	}
 	// Match each root both literally and symlink-resolved (e.g. macOS /etc -> /private/etc).
-	if (roots.some((root) => isInside(resolved, root) || isInside(resolved, resolveTarget(root)))) {
+	// DATA_DIR is exempt from the roots (its secrets are refused above), but only when it
+	// sits strictly below them: a DATA_DIR of /root, /etc or / would exempt the whole root.
+	const dataDir = resolveTarget(resolve(getDataDir()));
+	const inDataDir =
+		isInside(resolved, dataDir) &&
+		!roots.some((root) => isInside(root, dataDir) || isInside(resolveTarget(root), dataDir));
+	if (!inDataDir && roots.some((root) => isInside(resolved, root) || isInside(resolved, resolveTarget(root)))) {
 		return true;
 	}
 	return resolved.split(sep).some(isProtectedSegment);

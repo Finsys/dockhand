@@ -53,17 +53,23 @@ export async function assertInstanceOwned(
 	// by another Dockhand instance (a physically-copied or shared repo) is a restorable orphan
 	// (#1351, promised by the manual). Either way we confirm the id exists and is a Dockhand
 	// snapshot (has a dockhand:instance= tag), so a foreign app's snapshot can't be targeted.
-	const filterArgs = enterprise ? ['--tag', instanceTagFilter(instanceId)] : [];
+	// restic 0.20 errors out when a --tag filter accompanies an explicit snapshot id, so we
+	// query by id alone and apply the instance scoping on the parsed tags below (restic 0.19
+	// already ignored the filter here, so this is how ownership was really decided anyway).
 	const run = await restic.runLocal(destination, [
-		'snapshots', '--json', '--no-lock', ...filterArgs, snapshotId,
+		'snapshots', '--json', '--no-lock', snapshotId,
 	]);
 	if (run.exitCode !== 0) {
 		throw new BackupError('RESTIC', `could not verify snapshot ownership: ${run.stderr.trim() || 'restic failed'}`);
 	}
 	const snaps = parseSnapshots(run.stdout);
 	const match = snaps.find((s) => s.id === snapshotId || s.shortId === snapshotId);
-	if (!match || !(match.tags || []).some((t) => t.startsWith('dockhand:instance='))) {
-		// Not a Dockhand snapshot in this repo (or, for enterprise, not this instance's) -> refuse.
+	// Must be a Dockhand snapshot; ENTERPRISE additionally requires THIS instance's tag
+	// (env-scoped installs don't share repos), NON-ENTERPRISE accepts any instance (orphan).
+	const ownershipOk = enterprise
+		? (match?.tags || []).includes(instanceTagFilter(instanceId))
+		: (match?.tags || []).some((t) => t.startsWith('dockhand:instance='));
+	if (!match || !ownershipOk) {
 		throw new BackupError('VALIDATION', 'snapshot not found for this installation', { snapshotId });
 	}
 	return match.tags;
@@ -122,13 +128,16 @@ export async function resolveSnapshotEnvId(
 	snapshotId: string,
 ): Promise<{ envId: number | null | undefined; resolved: boolean }> {
 	if (!isValidSnapshotId(snapshotId)) return { envId: undefined, resolved: false };
+	// Query by id alone (restic 0.20 rejects a --tag filter next to an explicit id) and
+	// apply the instance scoping on the parsed tags: a snapshot that isn't this install's
+	// resolves to "unresolved" so the caller fails closed.
 	const run = await restic.runLocal(destination, [
-		'snapshots', '--json', '--no-lock', '--tag', instanceTagFilter(instanceId), snapshotId,
+		'snapshots', '--json', '--no-lock', snapshotId,
 	]);
 	if (run.exitCode !== 0) return { envId: undefined, resolved: false };
 	const snaps = parseSnapshots(run.stdout);
 	const match = snaps.find((s) => s.id === snapshotId || s.shortId === snapshotId);
-	if (!match) return { envId: undefined, resolved: false };
+	if (!match || !(match.tags || []).includes(instanceTagFilter(instanceId))) return { envId: undefined, resolved: false };
 	const envId = readEnvIdFromTags(match.tags);
 	if (envId === null) return { envId: undefined, resolved: false }; // tag absent/malformed -> fail closed
 	if (envId === 'local') return { envId: null, resolved: true };    // unscoped snapshot

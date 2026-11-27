@@ -17,6 +17,7 @@ import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 // Stack name validation: Docker Compose requires lowercase; must start with a
 // letter or number, and contain only lowercase letters, numbers, hyphens, underscores
@@ -43,7 +44,14 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	try {
 
 		const stacks = await getGitStacks(envIdNum);
-		return json(stacks);
+		// The webhook secret authenticates the public deploy-trigger endpoints, so it must
+		// not travel to a viewer. Expose only whether one is set; the real value stays in
+		// the DB where webhook verification reads it directly.
+		const safeStacks = stacks.map(({ webhookSecret, ...rest }) => ({
+			...rest,
+			hasWebhookSecret: !!webhookSecret
+		}));
+		return json(safeStacks);
 	} catch (error) {
 		console.error('Failed to get git stacks:', error);
 		return json({ error: 'Failed to get git stacks' }, { status: 500 });
@@ -53,10 +61,10 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Create a git-deployed stack (from an existing repo or new repo url/branch)
- * body: {stackName:string!, environmentId:integer, repositoryId:integer, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
+ * body: {stackName:string!, environmentId:integer, repositoryId:integer, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string,takeOverExternalStack:boolean}
  * resp-400: Invalid stack name, or secretProviderId is not a number/null
- * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
- * resp-409: A git stack with this name already exists in the environment
+ * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view), or the environment is missing or out of scope (Enterprise non-admin)
+ * resp-409: A stack with this name already exists in the environment
  * resp-500: Failed to create the git stack
  */
 export const POST: RequestHandler = async (event) => {
@@ -69,6 +77,9 @@ export const POST: RequestHandler = async (event) => {
 		// Permission check with environment context
 		if (auth.authEnabled && !await auth.can('stacks', 'create', data.environmentId || undefined)) {
 			return json({ error: 'Permission denied' }, { status: 403 });
+		}
+		if (await deniesEnvScope(auth, typeof data.environmentId === 'number' ? data.environmentId : undefined)) {
+			return json({ error: 'Access denied to this environment' }, { status: 403 });
 		}
 
 		if (!data.stackName || typeof data.stackName !== 'string') {
@@ -108,7 +119,7 @@ export const POST: RequestHandler = async (event) => {
 
 		// Check for name conflicts with existing stacks (regular/external/git)
 		const existing = await getStackSource(trimmedStackName, data.environmentId || null);
-		if (existing) {
+		if (existing && !(data.takeOverExternalStack === true && existing.sourceType === 'external')) {
 			return json({ error: 'A stack with this name already exists on this environment' }, { status: 409 });
 		}
 
@@ -183,6 +194,10 @@ export const POST: RequestHandler = async (event) => {
 			forceRedeploy: data.forceRedeploy ?? false
 		});
 
+		// The webhook secret must not travel back in any response; expose only the flag.
+		const { webhookSecret: _newSecret, ...safeGitStackRest } = gitStack;
+		const safeGitStack = { ...safeGitStackRest, hasWebhookSecret: !!_newSecret };
+
 		// Create stack_sources entry so the stack appears in the list immediately
 		await upsertStackSource({
 			stackName: trimmedStackName,
@@ -230,20 +245,20 @@ export const POST: RequestHandler = async (event) => {
 					});
 					await auditGitStack(event, 'deploy', gitStack.id, gitStack.stackName, gitStack.environmentId);
 					send('result', {
-						...gitStack,
+						...safeGitStack,
 						deployResult: deployResult
 					});
 				} catch (error) {
 					console.error('Failed to deploy git stack:', error);
 					send('result', {
-						...gitStack,
+						...safeGitStack,
 						deployResult: { success: false, error: 'Failed to deploy git stack' }
 					});
 				}
 			}, request);
 		}
 
-		return json(gitStack);
+		return json(safeGitStack);
 	} catch (error: any) {
 		console.error('Failed to create git stack:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {

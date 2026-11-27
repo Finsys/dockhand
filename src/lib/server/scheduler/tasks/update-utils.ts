@@ -116,6 +116,35 @@ export function platformChildDigest(
 }
 
 /**
+ * The digest of the image the container is ACTUALLY running, from a containerd image store's
+ * `GET /images/{id}/json?manifests=true` `Manifests[]`. The running platform's child is the
+ * entry that is an `image` (not an `attestation`) AND locally `Available` AND matches the
+ * daemon platform. Unlike the image's RepoDigests index, this does NOT float when a sibling
+ * tag is later pulled, so it is the correct "what is running" signal for the update check.
+ *
+ * Returns null when the array is absent/empty or no available image entry matches - the
+ * classic (non-containerd) store and pre-1.48 daemons report no `Manifests`, so the caller
+ * falls back to the RepoDigests-index comparison. Pure + defensive for unit testing.
+ */
+export function runningPlatformChildDigest(
+	manifests: unknown,
+	platform: { os: string; architecture: string; variant?: string }
+): string | null {
+	if (!Array.isArray(manifests)) return null;
+	for (const entry of manifests) {
+		const e = entry as { Kind?: unknown; Available?: unknown; Descriptor?: { digest?: unknown; platform?: { os?: unknown; architecture?: unknown; variant?: unknown } } };
+		if (e?.Kind !== 'image' || e?.Available !== true) continue;
+		const p = e.Descriptor?.platform;
+		const digest = e.Descriptor?.digest;
+		if (!p || typeof digest !== 'string' || !digest) continue;
+		if (p.os !== platform.os || p.architecture !== platform.architecture) continue;
+		if (typeof p.variant === 'string' && p.variant && platform.variant && p.variant !== platform.variant) continue;
+		return digest;
+	}
+	return null;
+}
+
+/**
  * Whether two multi-arch indexes carry the SAME image for one platform. A tag republished
  * with only another architecture or the attestations rebuilt moves the index digest while
  * the platform image is byte-for-byte unchanged, so comparing index digests reports a
@@ -185,22 +214,59 @@ export type MultiArchVerdict = { kind: 'same' } | { kind: 'different' } | { kind
  * or new attestations). A per-arch pin always reaches this point, because HEAD returns the
  * index digest, never the child.
  */
+/**
+ * The per-arch image a container is ACTUALLY running, resolved lazily for a platform:
+ * - `{ digest }`      the running platform child (containerd store) - the authoritative local side.
+ * - `{ noSignal: true }` the daemon genuinely cannot report it (classic store / API < 1.48,
+ *                      a 200 with no Manifests) - fall back to the RepoDigests index loop.
+ * - `{ unknown, reason }` the lookup FAILED (a transient 5xx / connection error) - the read is
+ *                      undecidable, so the verdict is `unknown`, never a guessed `same`.
+ */
+export type RunningDigestResult =
+	| { digest: string }
+	| { noSignal: true }
+	| { unknown: true; reason: string };
+
 export async function multiArchVerdict(opts: {
 	tag: string;
 	/** The index digest the tag resolved to; read by it rather than the tag when known. */
 	currentDigest?: string;
 	localDigests: string[];
+	/** Resolve the running platform child LAZILY, only after the child-match short-circuit has
+	 * been ruled out (so an up-to-date pin costs no daemon round-trip). Omitted = no running
+	 * digest available (fall back to the index loop), matching a caller that cannot read it. */
+	runningDigest?: (platform: { os: string; architecture: string; variant?: string }) => Promise<RunningDigestResult>;
 	readIndex: (reference: string) => Promise<IndexRead>;
 	platform: () => Promise<{ os: string; architecture: string; variant?: string } | null>;
 }): Promise<MultiArchVerdict> {
 	const current = await opts.readIndex(opts.currentDigest ?? opts.tag);
 	if (!current.ok) return { kind: 'unknown', reason: current.reason };
 	if (current.body === null) return { kind: 'different' };
+
+	// A per-arch pin that is a child of the current index is up to date regardless of store,
+	// and costs no platform read or running-digest lookup - keep it first.
 	if (localDigestIsIndexChild(opts.localDigests, current.body)) return { kind: 'same' };
 	if (indexChildDigests(current.body).length === 0) return { kind: 'different' };
 
 	const platform = await opts.platform();
 	if (!platform) return { kind: 'unknown', reason: 'could not read the daemon platform' };
+
+	// Authoritative path: the daemon can tell us the per-arch image the container actually runs.
+	// Compare it to the tag's current platform child. This does not float with a sibling-tag
+	// pull, so a moved RepoDigests index can no longer alias us onto a child we are not running
+	// and report a false "same". Only a daemon that genuinely cannot answer (noSignal) falls
+	// back to the index loop; a failed lookup is `unknown`, never a guessed verdict.
+	if (opts.runningDigest) {
+		const running = await opts.runningDigest(platform);
+		if ('unknown' in running) return { kind: 'unknown', reason: running.reason };
+		if ('digest' in running) {
+			const currentChild = platformChildDigest(current.body, platform);
+			if (currentChild === null) return { kind: 'different' };
+			return currentChild === running.digest ? { kind: 'same' } : { kind: 'different' };
+		}
+		// noSignal: fall through to the RepoDigests index loop below.
+	}
+
 	let failure: string | null = null;
 	for (const digest of opts.localDigests) {
 		const local = await opts.readIndex(digest);

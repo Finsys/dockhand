@@ -3,7 +3,8 @@ import { unixSocketRequest, httpsAgentRequest } from '$lib/server/docker';
 import type { DockerClientConfig } from '$lib/server/docker';
 import { getEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
-import { isSafeNotificationUrl } from '$lib/server/url-safety';
+import { resolveTestTarget } from '$lib/server/env-test-target';
+import { fillStoredSecrets } from '$lib/server/env-test-secrets';
 import { memorySupportFromInfo } from '$lib/utils/memory-support';
 import type { RequestHandler } from './$types';
 
@@ -56,38 +57,43 @@ function buildDockerClientConfig(config: TestConnectionRequest): DockerClientCon
  *
  * @openapi
  * summary: Test a Docker/Hawser connection configuration WITHOUT saving it as an environment
- * description: Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token.
+ * description: Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token. Needs environments:edit on that environment, and the stored secrets are only reused while host, port and protocol match the saved ones.
  * body: {connectionType:string!, socketPath:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, hawserToken:string, environmentId:integer}
  * body-example: {"connectionType":"socket","socketPath":"/var/run/docker.sock"}
  * resp-200: {success:boolean!, info:{serverVersion:string, containers:integer, images:integer, name:string, memoryLimitSupported:boolean, showMemoryWarning:boolean}, hawser:{}}
  * resp-200-desc: success:false with a human-readable error message is also returned as HTTP 200 (connection failures are not transport errors)
- * resp-400: Host is required for direct/hawser-standard connection types
- * resp-403: The caller cannot access the environment named by environmentId
+ * resp-400: Host is required for direct/hawser-standard connection types, the protocol is not http or https, the port is out of range, or the host is not a plain hostname or IP address
+ * resp-403: The caller lacks environments:create and environments:edit, or cannot access, or lacks environments:edit on, the environment named by environmentId
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	try {
 		const config: TestConnectionRequest = await request.json();
 
+		// Testing a connection is part of adding or editing an environment.
+		const auth = await authorize(cookies);
+		if (auth.authEnabled && !(await auth.can('environments', 'create')) && !(await auth.can('environments', 'edit'))) {
+			return json({ success: false, error: 'Access denied' }, { status: 403 });
+		}
+
 		// Fill unchanged secrets from the stored environment when editing (#1483): the client
 		// never receives hawserToken / tlsKey, so an untouched field arrives empty. Only fall
-		// back for a BLANK field, so a freshly typed token/key still wins.
+		// back for a BLANK field, so a freshly typed token/key still wins, and only for the
+		// stored host/port/protocol, so the secret cannot be sent anywhere else.
 		if (config.environmentId) {
-			// Gate the id: without this, any authenticated user could name another
-			// environment's id and have its stored token sent to a body-supplied host,
-			// exfiltrating a secret they may have no access to (env-scoped RBAC).
-			const auth = await authorize(cookies);
-			if (!(await auth.canAccessEnvironment(config.environmentId))) {
+			// Reusing a stored secret is an edit of that environment, not a view of it.
+			if (
+				!(await auth.canAccessEnvironment(config.environmentId)) ||
+				!(await auth.can('environments', 'edit', config.environmentId))
+			) {
 				return json({ success: false, error: 'Access denied' }, { status: 403 });
 			}
 			const stored = await getEnvironment(config.environmentId);
-			if (stored) {
-				if (!config.hawserToken) config.hawserToken = stored.hawserToken || undefined;
-				if (!config.tlsKey) config.tlsKey = stored.tlsKey || undefined;
-			}
+			if (stored) fillStoredSecrets(config, stored);
 		}
 
 		// Build fetch options based on connection type
 		let response: Response;
+		let origin = '';
 
 		if (config.connectionType === 'socket') {
 			const socketPath = config.socketPath || '/var/run/docker.sock';
@@ -102,23 +108,14 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				isEdgeMode: true
 			});
 		} else {
-			// Direct or Hawser Standard - HTTP/HTTPS connection
-			const protocol = config.protocol || 'http';
-			const host = config.host;
-			const port = config.port || 2375;
-
-			if (!host) {
-				return json({ success: false, error: 'Host is required' }, { status: 400 });
+			// Direct or Hawser Standard - HTTP/HTTPS connection. Both requests below dial
+			// the target judged here.
+			const target = await resolveTestTarget(config);
+			if (!target.ok) {
+				if (target.badRequest) return json({ success: false, error: target.error }, { status: 400 });
+				return json({ success: false, error: target.error }, { status: 200 });
 			}
-
-			// SSRF guard: host/port come straight from the request body. A remote
-			// Docker/Hawser daemon legitimately lives on a LAN, so allow private
-			// ranges but block loopback + cloud metadata (169.254.169.254) + reserved
-			// so this tester can't be used to probe the control plane or metadata IMDS.
-			const hostSafety = isSafeNotificationUrl(`${protocol}://${host}:${port}`);
-			if (!hostSafety.ok) {
-				return json({ success: false, error: `Host not allowed: ${hostSafety.reason}` }, { status: 200 });
-			}
+			origin = target.origin;
 
 			const headers: Record<string, string> = {
 				'Content-Type': 'application/json'
@@ -132,9 +129,10 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			if (tlsConfig) {
 				response = await httpsAgentRequest(tlsConfig, '/info', {}, false, headers);
 			} else {
-				const url = `http://${host}:${port}/info`;
-				response = await fetch(url, {
+				// A redirect would dial a host nobody checked.
+				response = await fetch(`${origin}/info`, {
 					headers,
+					redirect: 'manual',
 					signal: AbortSignal.timeout(10000),
 					keepalive: false
 				});
@@ -150,9 +148,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 		// For Hawser Standard, also try to fetch Hawser info
 		let hawserInfo = null;
-		if (config.connectionType === 'hawser-standard' && config.host) {
+		if (config.connectionType === 'hawser-standard' && origin) {
 			try {
-				const protocol = config.protocol || 'http';
 				const hawserHeaders: Record<string, string> = {};
 				if (config.hawserToken) {
 					hawserHeaders['X-Hawser-Token'] = config.hawserToken;
@@ -163,9 +160,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				if (tlsConfig) {
 					hawserResp = await httpsAgentRequest(tlsConfig, '/_hawser/info', {}, false, hawserHeaders);
 				} else {
-					const hawserUrl = `http://${config.host}:${config.port || 2375}/_hawser/info`;
-					hawserResp = await fetch(hawserUrl, {
+					hawserResp = await fetch(`${origin}/_hawser/info`, {
 						headers: hawserHeaders,
+						redirect: 'manual',
 						signal: AbortSignal.timeout(5000),
 						keepalive: false
 					});

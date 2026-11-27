@@ -10,7 +10,8 @@ import { join, basename, dirname, resolve } from 'node:path';
 import yaml from 'js-yaml';
 import { getExternalStackPaths, getStackSources, upsertStackSource, type StackSourceType } from './db';
 import { DockerConnectionError } from './docker';
-import { isForbiddenStackPath } from './fs-guard';
+import { isForbiddenStackPath, isProtectedPath } from './fs-guard';
+import { isAllowedStackFilename } from './stack-filename';
 import { normalizeStackName } from '$lib/utils/stack-name';
 import { shouldSkipScanDir } from '$lib/utils/scan-skip';
 
@@ -228,10 +229,21 @@ export async function adoptStack(
 		return { success: false, error: 'Already adopted' };
 	}
 
-	// Adopted paths are read back and written through the stack routes, so they may not
-	// point at Dockhand's own secrets, /proc or a .ssh/.git path.
-	if ((stack.composePath && isForbiddenStackPath(stack.composePath)) || (stack.envPath && isForbiddenStackPath(stack.envPath))) {
+	// Adopted paths are read back and written through the stack routes, so they may not point
+	// at Dockhand's own secrets, /proc, a .ssh/.git path, or a system root (/etc, /root) - the
+	// same roots the write path blocks - and must be stack-shaped files (.yml/.yaml/.env) so an
+	// arbitrary host file cannot be adopted and then read back through the compose endpoint.
+	if (
+		(stack.composePath && (isForbiddenStackPath(stack.composePath) || isProtectedPath(stack.composePath))) ||
+		(stack.envPath && (isForbiddenStackPath(stack.envPath) || isProtectedPath(stack.envPath)))
+	) {
 		return { success: false, error: 'Path is not allowed' };
+	}
+	if (
+		(stack.composePath && !isAllowedStackFilename(basename(stack.composePath))) ||
+		(stack.envPath && !isAllowedStackFilename(basename(stack.envPath)))
+	) {
+		return { success: false, error: 'Path is not an allowed stack filename' };
 	}
 
 	// The compose file must live on Dockhand's own filesystem - it is the source of truth

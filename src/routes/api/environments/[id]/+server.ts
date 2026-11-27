@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { join } from 'path';
 import { existsSync, rmSync, renameSync } from 'fs';
 import type { RequestHandler } from './$types';
-import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, deleteEnvReportSettings, getGitStacksForEnvironmentOnly, deleteGitStack, getBackupConfigs } from '$lib/server/db';
+import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, deleteEnvReportSettings, getGitStacksForEnvironmentOnly, deleteGitStack, getBackupConfigs, rebaseStackSourcePaths, getEnvironmentByName } from '$lib/server/db';
 import { clearDockerClientCache } from '$lib/server/docker';
 import { deleteGitStackFiles, getGitReposDir } from '$lib/server/git';
 import { getStacksDir } from '$lib/server/stacks';
@@ -14,6 +14,8 @@ import { redactEnvironment } from '$lib/server/environment-redact';
 import { serializeLabels, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
 import { cleanPem } from '$lib/utils/pem';
 import { validateEnvName } from '$lib/utils/env-name';
+import { renameEnvStorage } from '$lib/server/env-rename-core';
+import { invalidateDiskUsage } from '$lib/server/disk-usage-cache';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { closeEdgeConnection } from '$lib/server/hawser';
 import { computeAuditDiff } from '$lib/utils/diff';
@@ -63,7 +65,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 
 /**
  * @openapi
- * summary: Update an environment; renaming also renames its on-disk stacks/git-repos directories
+ * summary: Update an environment; renaming also renames its on-disk stacks/git-repos directories and repoints the stack paths stored under them
  * path: id:integer! Environment id (from GET /api/environments)
  * body: {name:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, icon:string, socketPath:string, collectActivity:boolean, collectMetrics:boolean, highlightChanges:boolean, labels:string, connectionType:string, hawserToken:string, publicIp:string}
  * body-desc: tlsKey/hawserToken are write-only - a blank value keeps the stored secret; a non-blank value replaces it.
@@ -73,7 +75,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * resp-400: Invalid new name (rename validation)
  * resp-403: Permission denied (RBAC 'environments:edit' missing)
  * resp-404: Environment not found
- * resp-409: Rename target directory already exists, or the on-disk rename failed (e.g. EXDEV across filesystems)
+ * resp-409: Another environment already has the new name, the rename target directory already exists, or the on-disk rename failed (e.g. EXDEV across filesystems)
  * resp-500: Unexpected error while updating the environment
  */
 export const PUT: RequestHandler = async (event) => {
@@ -118,7 +120,15 @@ export const PUT: RequestHandler = async (event) => {
 		// in-app editor) and ALL git stacks clone to git-repos/<envName>/
 		// regardless of where they ultimately deploy — so the rename matters
 		// locally for every env type.
+		let renameDirs: { oldStacks: string; newStacks: string; oldRepos: string; newRepos: string } | null = null;
 		if (isRename) {
+			// Checked before any fs move: the unique-name violation would otherwise surface
+			// only after the dirs moved into the other environment's location.
+			const sameName = await getEnvironmentByName(data.name);
+			if (sameName && sameName.id !== id) {
+				return json({ error: 'An environment with this name already exists' }, { status: 409 });
+			}
+
 			const stacksDir = getStacksDir();
 			const gitReposDir = getGitReposDir();
 			const oldStacks = join(stacksDir, oldEnv.name);
@@ -138,20 +148,7 @@ export const PUT: RequestHandler = async (event) => {
 					error: `Cannot rename: ${newRepos} already exists. Pick a different name or move that directory out of the way.`
 				}, { status: 409 });
 			}
-
-			try {
-				if (existsSync(oldStacks)) renameSync(oldStacks, newStacks);
-				if (existsSync(oldRepos)) renameSync(oldRepos, newRepos);
-			} catch (err: any) {
-				// Best-effort rollback if the second rename failed after the first
-				// succeeded. Avoids leaving the filesystem in a split state.
-				try { if (existsSync(newStacks) && !existsSync(oldStacks)) renameSync(newStacks, oldStacks); } catch {}
-				try { if (existsSync(newRepos) && !existsSync(oldRepos)) renameSync(newRepos, oldRepos); } catch {}
-				const code = err?.code === 'EXDEV'
-					? 'EXDEV: stacks dir is on a different filesystem from the rename target. Move it back to the same filesystem to rename this environment.'
-					: (err?.message || 'Rename failed');
-				return json({ error: code }, { status: 409 });
-			}
+			renameDirs = { oldStacks, newStacks, oldRepos, newRepos };
 		}
 
 		// Clear cached Docker client before updating
@@ -169,7 +166,7 @@ export const PUT: RequestHandler = async (event) => {
 		// git credentials. (Removing a secret entirely is done by deleting the env.)
 		const cleanedTlsKey = cleanPem(data.tlsKey);
 		const trimmedToken = typeof data.hawserToken === 'string' ? data.hawserToken.trim() : data.hawserToken;
-		const env = await updateEnvironment(id, {
+		const writeEnv = () => updateEnvironment(id, {
 			name: data.name,
 			host: data.host,
 			port: data.port,
@@ -188,6 +185,30 @@ export const PUT: RequestHandler = async (event) => {
 			hawserToken: trimmedToken || undefined
 		});
 
+		let env;
+		if (renameDirs) {
+			const { oldStacks, newStacks, oldRepos, newRepos } = renameDirs;
+			// Stored compose/env paths are absolute, so they follow the stacks dir move.
+			const result = await renameEnvStorage({
+				fs: { exists: existsSync, rename: renameSync },
+				dirs: [{ from: oldStacks, to: newStacks }, { from: oldRepos, to: newRepos }],
+				stacks: { from: oldStacks, to: newStacks },
+				rebaseRows: (from, to, changed, onlyIds) => rebaseStackSourcePaths(id, from, to, changed, onlyIds),
+				update: writeEnv
+			});
+			if ('moveError' in result) {
+				const err = result.moveError as any;
+				const code = err?.code === 'EXDEV'
+					? 'EXDEV: stacks dir is on a different filesystem from the rename target. Move it back to the same filesystem to rename this environment.'
+					: (err?.message || 'Rename failed');
+				return json({ error: code }, { status: 409 });
+			}
+			if (result.repointed > 0) console.log(`[Environments] Rename "${oldEnv.name}" -> "${data.name}": repointed ${result.repointed} stack path(s)`);
+			env = result.value;
+		} else {
+			env = await writeEnv();
+		}
+
 		if (!env) {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
@@ -196,6 +217,8 @@ export const PUT: RequestHandler = async (event) => {
 		// lets a socketless deployment reach Docker without a restart (#1203).
 		resetHostDetection();
 		void detectHostDataDir();
+		// The environment may now point at another daemon.
+		invalidateDiskUsage(id);
 
 		// Notify event collectors if collectActivity or collectMetrics setting changed
 		if (data.collectActivity !== undefined || data.collectMetrics !== undefined) {
@@ -296,6 +319,7 @@ export const DELETE: RequestHandler = async (event) => {
 		if (!success) {
 			return json({ error: 'Cannot delete this environment' }, { status: 400 });
 		}
+		invalidateDiskUsage(id);
 
 		// Clean up custom icon file if exists
 		deleteEnvironmentIcon(id);

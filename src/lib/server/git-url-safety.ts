@@ -9,7 +9,8 @@
  */
 
 import { resolve, sep, join, dirname } from 'node:path';
-import { isForbiddenStackPath } from './fs-guard';
+import { existsSync, readFileSync } from 'node:fs';
+import { isForbiddenStackPath, safeResolve } from './fs-guard';
 
 export function assertSafeRepoUrl(url: string): void {
 	const u = (url || '').trim();
@@ -50,6 +51,43 @@ export function stripUrlCredentials(url: string, authType: string | null | undef
 	}
 }
 
+/**
+ * Whether a repo URL uses SSH transport: an `ssh://` URL or a scp-like `host:path`
+ * (`git@host:repo`, `user@host:repo`, or a bare `host:repo`). Case-insensitive scheme.
+ */
+export function isSshRepoUrl(url: string): boolean {
+	const u = url.trim();
+	// A `scheme://` URL: SSH only when the scheme is ssh (new URL() does not throw on a
+	// bare scp-like `host:path`, so that form is handled by the scp heuristic below).
+	const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(u);
+	if (schemeMatch) return schemeMatch[1].toLowerCase() === 'ssh';
+	// scp-like `host:path` (no `://`): a ':' before any '/', and not a Windows drive
+	// (`C:\...` / `C:/...`, a single-letter "host" followed by a backslash or slash).
+	const colon = u.indexOf(':');
+	if (colon <= 0) return false;
+	const slash = u.indexOf('/');
+	if (slash !== -1 && slash < colon) return false;
+	if (colon === 1 && /^[a-zA-Z]$/.test(u[0]) && /[\\/]/.test(u[2] ?? '')) return false;
+	return true;
+}
+
+/**
+ * Reject an unsupported credential/URL pairing before git runs, so the user gets a clear
+ * message instead of a misleading auth error. git cannot take a password non-interactively
+ * over SSH (there is no prompt to answer), so an `ssh://` URL needs an SSH-key credential,
+ * not username/password. Returns a reason string to reject with, or null when the pairing
+ * is fine. authType 'none'/'ssh' and all non-SSH URLs pass.
+ */
+export function incompatibleCredentialReason(
+	url: string,
+	authType: string | null | undefined
+): string | null {
+	if (authType === 'password' && isSshRepoUrl(url)) {
+		return 'SSH repository URLs require an SSH key credential, not username/password. Add an SSH key credential, or use an HTTPS URL for username/password.';
+	}
+	return null;
+}
+
 /** A git ref (branch/tag) must not be parseable as an option. Empty is allowed
  *  (callers fall back to a default like HEAD). */
 export function assertSafeGitRef(ref: string | null | undefined): void {
@@ -74,8 +112,29 @@ export function repoFilePath(repoPath: string, userRel: string, label: string): 
 	if (abs !== repoPath && !abs.startsWith(repoPath + sep)) {
 		throw new Error(`${label} must be a path inside the repository (got "${userRel}")`);
 	}
+	// The containment above is LEXICAL on the link path, but readFileSync follows a
+	// committed symlink to its target. Resolve the real path and require it to stay in the
+	// clone, so `leak.env -> /root/.env` (or another clone's .env) cannot be read out.
+	assertResolvedWithinRepo(repoPath, abs, label, userRel);
 	assertNotForbidden(abs, label, userRel);
 	return abs;
+}
+
+/** Refuse a path that reaches the clone through a symlink whose target escapes it.
+ * readFileSync follows a committed link to its target, so resolve the FULL chain the way
+ * the OS opens it (safeResolve follows every symlink, including a link-to-link-to-outside,
+ * before applying any `..`) and require the real target to stay under the clone. A dangling
+ * target still resolves to a lexical path, so `leak.env -> /root/.env` is refused even when
+ * the target does not exist here (it can appear later, or exist on the deploy host). */
+function assertResolvedWithinRepo(repoPath: string, abs: string, label: string, shown: string): void {
+	// safeResolve returns null for a path through /proc or a .ssh/.git segment - treat that
+	// as an escape too (those are refused anyway). Resolve the root the same way so a clone
+	// under a symlinked ancestor is compared like-for-like.
+	const resolved = safeResolve(abs);
+	const root = safeResolve(repoPath) ?? resolve(repoPath);
+	if (resolved === null || (resolved !== root && !resolved.startsWith(root + sep))) {
+		throw new Error(`${label} "${shown}" leads outside the repository`);
+	}
 }
 
 /** Throws when a path, its symlinks followed, reaches a location stacks may never use. */
@@ -89,11 +148,23 @@ function assertNotForbidden(abs: string, label: string, shown: string): void {
  * Absolute path of the base `.env` that sits beside a compose file inside a clone. The
  * compose path is resolved through repoFilePath (containment-checked, ABSOLUTE), so the
  * `.env` is just its sibling - NOT re-joined onto repoPath, which would double the prefix
- * (#1495).
+ * (#1495). Call it after the clone: a committed `.env` symlink must resolve inside it.
  */
 export function repoBaseEnvPath(repoPath: string, composeUserPath: string): string {
 	const safeComposePath = repoFilePath(repoPath, composeUserPath, 'Compose path');
 	const envPath = join(dirname(safeComposePath), '.env');
 	assertNotForbidden(envPath, 'Env file', '.env');
+	assertResolvedWithinRepo(repoPath, envPath, 'Env file', '.env');
 	return envPath;
+}
+
+/**
+ * Read a user-named file from a clone, validating the path against what is on disk NOW.
+ * repoFilePath follows committed symlinks, so it only means something once the clone
+ * exists; a check made before the clone sees no link and passes anything. Returns null
+ * when the file is absent.
+ */
+export function readRepoFile(repoPath: string, userRel: string, label: string): string | null {
+	const abs = repoFilePath(repoPath, userRel, label);
+	return existsSync(abs) ? readFileSync(abs, 'utf-8') : null;
 }

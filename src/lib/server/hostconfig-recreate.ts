@@ -13,6 +13,34 @@ interface CpuHostConfig {
 	CpuQuota?: number;
 }
 
+interface SwappinessHostConfig {
+	MemorySwappiness?: number | null;
+}
+
+/**
+ * Strip a default MemorySwappiness so a recreate survives Podman on cgroup v2. crun
+ * rejects setting memory swappiness under cgroup v2 at START even when the value is the
+ * unset default (Docker reports -1, Podman reports 0), so a HostConfig replayed from
+ * inspect creates fine but fails to start with "cannot set memory swappiness with
+ * cgroupv2". The three unset-default forms (null, -1, 0) are dropped; a non-default
+ * positive swappiness is kept. A deliberate 0 on Docker is indistinguishable from
+ * Podman's unset default and is dropped too. Docker ignores the field on cgroup v2, so
+ * dropping the default is a no-op there.
+ *
+ * Mutates `hostConfig` in place. Returns true when it dropped the field.
+ */
+export function stripDefaultMemorySwappiness(
+	hostConfig: SwappinessHostConfig | null | undefined
+): boolean {
+	if (!hostConfig || !('MemorySwappiness' in hostConfig)) return false;
+	const s = hostConfig.MemorySwappiness;
+	if (s == null || s === -1 || s === 0) {
+		delete hostConfig.MemorySwappiness;
+		return true;
+	}
+	return false;
+}
+
 /**
  * NanoCpus and CpuPeriod/CpuQuota are two encodings of the same CPU limit and are
  * mutually exclusive at create time. Podman's inspect reports BOTH the absolute
@@ -57,4 +85,31 @@ export function resolvePodmanUsernsMode(
 	const intent = annotations?.[PODMAN_USERNS_ANNOTATION]?.trim();
 	if (intent) return { mode: intent };
 	return { strip: true };
+}
+
+interface UsernsHostConfig {
+	UsernsMode?: string;
+}
+
+/**
+ * Apply resolvePodmanUsernsMode to a HostConfig in place: restore the keep-id intent
+ * onto UsernsMode, or strip a bare "private". The optional `log` receives the two
+ * messages (recreate wants them, the silent create paths pass nothing), so every caller
+ * is one line instead of repeating the decision-object interpretation.
+ */
+export function applyPodmanUsernsMode(
+	hostConfig: UsernsHostConfig | null | undefined,
+	annotations: Record<string, string> | undefined | null,
+	log?: (msg: string) => void
+): void {
+	if (!hostConfig) return;
+	const fix = resolvePodmanUsernsMode(hostConfig.UsernsMode, annotations);
+	if (!fix) return;
+	if ('mode' in fix) {
+		hostConfig.UsernsMode = fix.mode;
+		log?.(`Restored UsernsMode "${fix.mode}" from Podman annotation (was "private")`);
+	} else {
+		delete hostConfig.UsernsMode;
+		log?.('Dropped UsernsMode "private" - Podman rejects it without inline UID/GID mappings');
+	}
 }

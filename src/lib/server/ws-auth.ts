@@ -4,6 +4,8 @@ import { isEnterprise } from './license';
 import { userHasAdminRole, userCanAccessEnvironment } from './db';
 import { parseCookieHeader } from '$lib/utils/cookie-parse';
 import { canExecDecision } from './ws-exec-core';
+import { isOwnContainer } from './own-container-guard';
+import { isForbiddenCrossOriginUpgrade, parseTrustedOrigins, csrfOriginCheckDisabled } from './csrf-origin-core';
 
 export interface WsUpgradeAuth {
 	userId: number;
@@ -20,9 +22,29 @@ function pickHeader(headers: LowercasedHeaders, name: string): string | undefine
 	return v;
 }
 
+const WS_TRUSTED_ORIGINS = parseTrustedOrigins(process.env.TRUSTED_ORIGINS, process.env.ORIGIN);
+const WS_ORIGIN_CHECK_DISABLED = csrfOriginCheckDisabled(process.env.DISABLE_CSRF_ORIGIN_CHECK);
+
 export async function authenticateWsUpgrade(
 	headers: LowercasedHeaders
 ): Promise<WsUpgradeAuth | null> {
+	// A terminal reached from a page on another origin would run with this browser's session,
+	// or as admin while auth is off. The same origin rules as cross-site form posts apply.
+	if (
+		isForbiddenCrossOriginUpgrade({
+			origin: pickHeader(headers, 'origin') ?? null,
+			secFetchSite: pickHeader(headers, 'sec-fetch-site') ?? null,
+			host: pickHeader(headers, 'host') ?? null,
+			trustedOrigins: WS_TRUSTED_ORIGINS,
+			disabled: WS_ORIGIN_CHECK_DISABLED
+		})
+	) {
+		console.warn(
+			`[WS] terminal refused: origin ${pickHeader(headers, 'origin')} does not match host ${pickHeader(headers, 'host')}; behind a proxy set ORIGIN or TRUSTED_ORIGINS`
+		);
+		return null;
+	}
+
 	const authEnabled = await isAuthEnabled();
 	if (!authEnabled) {
 		return { userId: -1, username: '__bootstrap__', isAdmin: true, authDisabled: true };
@@ -84,6 +106,16 @@ export async function canExecForUser(
 	});
 }
 
+/** Whether the WS user is refused a terminal on Dockhand's own container (non-admins). */
+export async function refusesOwnContainerForUser(
+	auth: WsUpgradeAuth,
+	containerRef: string,
+	environmentId: number | undefined | null
+): Promise<boolean> {
+	if (auth.authDisabled || auth.isAdmin) return false;
+	return isOwnContainer(containerRef, environmentId ?? undefined);
+}
+
 declare global {
 	// eslint-disable-next-line no-var
 	var __authenticateWsUpgrade:
@@ -97,8 +129,13 @@ declare global {
 	var __canExecForUser:
 		| ((auth: WsUpgradeAuth, envId: number | undefined | null) => Promise<boolean>)
 		| undefined;
+	// eslint-disable-next-line no-var
+	var __refusesOwnContainerForUser:
+		| ((auth: WsUpgradeAuth, containerRef: string, envId: number | undefined | null) => Promise<boolean>)
+		| undefined;
 }
 
 globalThis.__authenticateWsUpgrade = authenticateWsUpgrade;
 globalThis.__canAccessEnvForUser = canAccessEnvForUser;
 globalThis.__canExecForUser = canExecForUser;
+globalThis.__refusesOwnContainerForUser = refusesOwnContainerForUser;

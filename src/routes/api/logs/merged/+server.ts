@@ -1,5 +1,6 @@
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import { getEnvironment } from '$lib/server/db';
 import { unixSocketRequest, unixSocketStreamRequest, httpsAgentRequest } from '$lib/server/docker';
 import type { DockerClientConfig as BaseDockerClientConfig } from '$lib/server/docker';
@@ -365,7 +366,7 @@ async function handleEdgeMergedLogs(containerIds: string[], tail: string, enviro
  * query: until:string Only return logs until this timestamp (Docker until format)
  * query: env:integer Environment the containers belong to (from GET /api/environments)
  * resp-200: Server-Sent Events stream (text/event-stream) emitting heartbeat and per-container log events
- * resp-400: No containers specified
+ * resp-400: No containers specified, or a container id is invalid
  * resp-403: Permission denied (requires the containers:logs permission)
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -392,6 +393,12 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			status: 400,
 			headers: { 'Content-Type': 'application/json' }
 		});
+	}
+
+	// Each id is interpolated into a Docker API path, as on the single-container log route.
+	for (const id of containerIds) {
+		const invalid = validateDockerIdParam(id, 'container');
+		if (invalid) return invalid;
 	}
 
 	console.log(`[merged-logs] Request: containers=${containerIds.length}, env=${envId}`);

@@ -65,8 +65,22 @@ const KNOWN_EXPORTS = [
 	'updateGitStack',
 	'upsertStackSource',
 	'getEnvironment',
+	'logContainerEvent',
 	'getSecretEnvVarsAsRecord',
-	'getNonSecretEnvVarsAsRecord'
+	'getNonSecretEnvVarsAsRecord',
+	'getAuthSettings',
+	'updateAuthSettings',
+	'countAdminUsers',
+	'getPasskeysEnabled',
+	'setPasskeysEnabled',
+	'getEnvironments',
+	'getEnvironmentByName',
+	'createEnvironment',
+	'getEnvironmentPublicIps',
+	'setEnvironmentPublicIp',
+	'getEnvUpdateCheckSettings',
+	'getEnvironmentTimezone',
+	'getImagePruneSettings'
 ] as const;
 
 const impls: Record<string, AnyFn> = {};

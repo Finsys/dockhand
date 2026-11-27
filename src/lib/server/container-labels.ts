@@ -186,6 +186,17 @@ export function pinnedDigestReportVisible(
 }
 
 /**
+ * Labels for Dockhand's own short-lived helper containers (scanners and their
+ * version checks, backup/restore helpers, probes): they exit on purpose, so they
+ * notify nothing, and they are not the user's, so container lists leave them out.
+ * A caller's own labels win.
+ */
+export const HELPER_CONTAINER_LABELS: Readonly<Record<string, string>> = {
+	[DOCKHAND_LABELS.NOTIFY]: 'false',
+	[DOCKHAND_LABELS.HIDDEN]: 'true'
+};
+
+/**
  * Check if a container should be hidden from the UI.
  * Returns true if dockhand.hidden is explicitly set to true/yes/1.
  * Default (no label): visible (opt-out model).

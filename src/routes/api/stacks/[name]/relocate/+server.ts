@@ -4,10 +4,11 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getStackSource, updateStackSource } from '$lib/server/db';
 import { findStackDir } from '$lib/server/stacks';
-import { isForbiddenStackPath, holdsForbiddenStackPath } from '$lib/server/fs-guard';
+import { isForbiddenStackPath, holdsForbiddenStackPath, isProtectedPath } from '$lib/server/fs-guard';
 import { moveDirEntries } from '$lib/server/stack-relocate-move';
 import { existsSync, readdirSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { deniesEnvScope } from '$lib/server/env-scope';
 
 /**
  * POST /api/stacks/[name]/relocate
@@ -21,7 +22,7 @@ import { join, dirname, resolve } from 'node:path';
  * resp-200: {success:boolean!, movedFiles:array<string>!, errors:array<string>, composeContent:string!, rawEnvContent:string!, envVars:array<{key:string!, value:string!, isSecret:boolean!}>!}
  * resp-200-example: {"success":true,"movedFiles":["compose.yaml",".env"],"composeContent":"services: {}","rawEnvContent":"FOO=bar\n","envVars":[{"key":"FOO","value":"bar","isSecret":false}]}
  * resp-400: oldDir and newComposePath are required, or the source directory does not exist
- * resp-403: Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory
+ * resp-403: Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory, or the environment is missing or out of scope (Enterprise non-admin)
  * resp-404: No stack source row for this name and environment
  * resp-500: Failed to relocate stack
  */
@@ -33,8 +34,9 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 	if (auth.authEnabled && !(await auth.can('stacks', 'edit', envIdNum))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
-	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
-	if (envAccessDenied) return envAccessDenied;
+	if (await deniesEnvScope(auth, envIdNum)) {
+		return json({ error: 'Access denied to this environment' }, { status: 403 });
+	}
 
 	try {
 		const body = await request.json();
@@ -46,12 +48,16 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 
 		const newDir = dirname(newComposePath);
 
-		// Every caller-supplied path is read from / written to / deleted below, so
-		// they must not reach Dockhand's own secrets (.encryption_key, db/, /proc) through
-		// the stack-path guard. Without it stacks:edit could read the master key or
-		// /proc/self/environ back through the response.
+		// Every caller-supplied path is read from / written to / deleted below, so they must
+		// not reach Dockhand's own secrets (.encryption_key, db/, /proc) nor the system roots
+		// (/etc, /root) where a moved file becomes a cron unit or a home-dir payload.
+		// isProtectedPath carries the /etc,/root block; isForbiddenStackPath carries the
+		// Dockhand-secret block. Both match the compose-path guard (validateStackPath), so a
+		// stack's files may not sit under /etc or /root anywhere in Dockhand - including as the
+		// oldDir of a stack adoption admitted one there before this guard existed; such a stack
+		// is then view/edit/relocate-locked, the consistent cost of blocking the write vector.
 		for (const p of [oldDir, newComposePath, newDir, newEnvPath].filter(Boolean)) {
-			if (isForbiddenStackPath(p)) {
+			if (isForbiddenStackPath(p) || isProtectedPath(p)) {
 				return json({ error: 'Path is not allowed' }, { status: 403 });
 			}
 		}
@@ -109,7 +115,7 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 		const envVars: { key: string; value: string; isSecret: boolean }[] = [];
 
 		// Read compose file. Guarded again: an entry moved into place can be a link.
-		if (existsSync(newComposePath) && !isForbiddenStackPath(newComposePath)) {
+		if (existsSync(newComposePath) && !isForbiddenStackPath(newComposePath) && !isProtectedPath(newComposePath)) {
 			composeContent = readFileSync(newComposePath, 'utf-8');
 		}
 
@@ -117,7 +123,7 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 		// omitted the fallback is join(newDir, '.env'), which readFileSync would follow
 		// through a final symlink - so guard it here too, matching the explicit form.
 		const envFilePath = newEnvPath || join(newDir, '.env');
-		if (existsSync(envFilePath) && !isForbiddenStackPath(envFilePath)) {
+		if (existsSync(envFilePath) && !isForbiddenStackPath(envFilePath) && !isProtectedPath(envFilePath)) {
 			rawEnvContent = readFileSync(envFilePath, 'utf-8');
 
 			for (const { key, value } of parseEnvFileForForm(rawEnvContent)) {

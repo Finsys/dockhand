@@ -4,6 +4,7 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import { parseChownSpec } from '$lib/server/chown-spec-core';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * Create a simple tar archive from a single file
@@ -99,7 +100,7 @@ function createTarArchive(filename: string, content: Uint8Array): Uint8Array {
  * resp-200: {success:boolean!, uploaded:array<string>!, errors:array<string>}
  * resp-200-example: {"success":true,"uploaded":["app.conf"]}
  * resp-400: Target path missing, or no files provided
- * resp-403: Permission denied to write to the path
+ * resp-403: Permission denied to write to the path, or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: Target directory not found
  * resp-500: Failed to upload the files
  */
@@ -116,6 +117,12 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 	// Permission check with environment context
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	if (!path) {

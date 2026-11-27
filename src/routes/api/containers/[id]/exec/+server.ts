@@ -10,6 +10,7 @@ import type { RequestHandler } from './$types';
 import { createExec, getDockerConnectionInfo } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * POST /api/containers/{id}/exec - Create an exec instance for terminal attachment
@@ -22,7 +23,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  * body-example: {"shell":"/bin/sh","user":"root"}
  * resp-200: {execId:string!, connectionInfo:{type:string!, host:string, port:integer}}
  * resp-401: Not authenticated
- * resp-403: Permission denied
+ * resp-403: Permission denied, or the target is Dockhand's own container and the caller is not an administrator
  * resp-500: Failed to create the exec instance
  */
 export const POST: RequestHandler = async ({ params, request, cookies, url }) => {
@@ -41,6 +42,12 @@ export const POST: RequestHandler = async ({ params, request, cookies, url }) =>
 	// Permission check with environment context
 	if (!await auth.can('containers', 'exec', envId)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envId);
+		if (denied) return denied;
 	}
 
 	try {

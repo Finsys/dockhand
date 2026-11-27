@@ -44,9 +44,11 @@
 		onSuccess: () => void;
 		/** Fired after the icon override changes, so the list can refresh its icons. */
 		onIconChanged?: () => void;
+		/** Hand the container to the single-container update flow (pull + recreate). */
+		onRepullImage?: (containerId: string, containerName: string) => void;
 	}
 
-	let { open = $bindable(), containerId, onClose, onSuccess, onIconChanged }: Props = $props();
+	let { open = $bindable(), containerId, onClose, onSuccess, onIconChanged, onRepullImage }: Props = $props();
 
 	// Config sets
 	let configSets = $state<ConfigSet[]>([]);
@@ -275,6 +277,7 @@
 	// Unsaved-changes guard on close (mirrors StackModal): settings changes OR a
 	// half-edited backup schedule in the embedded panel.
 	let showConfirmClose = $state(false);
+	let showConfirmRepull = $state(false);
 	let backupPanelRef = $state<BackupPanel | undefined>(undefined);
 	let statusMessage = $state('');
 	let visible = $state(false);
@@ -1220,6 +1223,18 @@
 		handleClose();
 	}
 
+	/** Hand the container to the single-container update flow (pull + recreate + start).
+	 * The form's unsaved edits are deliberately not applied: this refreshes the image the
+	 * container already runs, leaving the saved configuration untouched. */
+	function confirmRepull() {
+		if (!onRepullImage) return;
+		const id = containerId;
+		const containerName = originalConfig?.name ?? name.trim();
+		showConfirmRepull = false;
+		handleClose();
+		onRepullImage(id, containerName);
+	}
+
 	$effect(() => {
 		if (open && containerId && !hasLoadedData) {
 			visible = false;
@@ -1380,6 +1395,7 @@
 					bind:name
 					bind:image
 					hasImageUpdate={$containerStore.pendingUpdateIds.includes(containerId)}
+					onRepullImage={onRepullImage ? () => (showConfirmRepull = true) : undefined}
 					bind:command
 					bind:entrypoint
 					bind:restartPolicy
@@ -1478,6 +1494,26 @@
 			</Button>
 			<Button variant="destructive" size="sm" onclick={discardAndClose}>
 				{m.containers_edit_discard_changes()}
+			</Button>
+		</div>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Re-pull confirmation: recreating restarts the container and drops unsaved edits -->
+<Dialog.Root bind:open={showConfirmRepull}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>{m.containers_settings_repull_image()}</Dialog.Title>
+			<Dialog.Description>
+				{m.containers_settings_repull_image_confirm()}
+			</Dialog.Description>
+		</Dialog.Header>
+		<div class="flex justify-end gap-1.5 mt-4">
+			<Button variant="outline" size="sm" onclick={() => showConfirmRepull = false}>
+				{m.containers_edit_cancel()}
+			</Button>
+			<Button size="sm" onclick={confirmRepull}>
+				{m.containers_settings_repull_image()}
 			</Button>
 		</div>
 	</Dialog.Content>

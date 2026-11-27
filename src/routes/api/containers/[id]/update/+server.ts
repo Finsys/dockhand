@@ -5,6 +5,7 @@ import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { removePendingContainerUpdate, renameScheduledContainerAction } from '$lib/server/db';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { recordContainerUpdateActivity } from '$lib/server/scheduler/tasks/container-update';
 import type { RequestHandler } from './$types';
 
 /**
@@ -96,6 +97,15 @@ export const POST: RequestHandler = async (event) => {
 				// Ignore errors - record may not exist
 			});
 		}
+
+		const activityError = await recordContainerUpdateActivity({
+			envId: envIdNum,
+			containerId: container.id,
+			containerName: options.name || oldName || container.id,
+			image: options.image,
+			labels: options.labels
+		});
+		if (activityError) console.warn(`Failed to log container update activity event (update stands): ${activityError}`);
 
 		// Audit log - include full options to see what was modified
 		await auditContainer(event, 'update', container.id, options.name, envIdNum, { ...options, startAfterUpdate });

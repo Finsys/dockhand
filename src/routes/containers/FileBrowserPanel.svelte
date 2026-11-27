@@ -1270,7 +1270,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+											class="h-6 w-6 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); openFileForView(entry); }}
 											disabled={loadingFile}
 											title={m.containers_files_view_file()}
@@ -1282,7 +1282,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity {entry.readonly ? 'cursor-not-allowed' : ''}"
+											class="h-6 w-6 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity {entry.readonly ? 'cursor-not-allowed' : ''}"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); if (!entry.readonly) openFileForEdit(entry); }}
 											disabled={loadingFile || entry.readonly}
 											title={entry.readonly ? m.containers_files_file_readonly() : m.containers_files_edit_file()}
@@ -1300,7 +1300,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+											class="h-6 w-6 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); openRenameModal(entry); }}
 											title={m.containers_files_rename()}
 										>
@@ -1309,7 +1309,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+											class="h-6 w-6 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); openChmodModal(entry); }}
 											title={m.containers_files_change_permissions()}
 										>
@@ -1318,7 +1318,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+											class="h-6 w-6 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); openChownModal(entry); }}
 											title={m.containers_files_change_owner()}
 										>
@@ -1348,7 +1348,7 @@
 										<Button
 											variant="ghost"
 											size="icon"
-											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+											class="h-6 w-6 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); downloadFile(entry); }}
 											title={m.containers_files_download()}
 										>

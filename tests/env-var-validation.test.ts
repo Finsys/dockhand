@@ -4,42 +4,8 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-
-// Replicate the extractComposeVars function from the validate endpoint
-function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
-	const required: string[] = [];
-	const optional: string[] = [];
-
-	const lines = yaml.split('\n');
-	for (const line of lines) {
-		const trimmedLine = line.trim();
-		if (trimmedLine.startsWith('#')) continue;
-
-		// Match ${VAR_NAME} (required) and ${VAR_NAME:-default} (optional)
-		const regex = /(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-?)[^}]*)?\}/g;
-		let match;
-		while ((match = regex.exec(line)) !== null) {
-			const varName = match[1];
-			const hasDefault = match[2] !== undefined;
-			if (hasDefault) {
-				if (!optional.includes(varName) && !required.includes(varName)) optional.push(varName);
-			} else {
-				const optIdx = optional.indexOf(varName);
-				if (optIdx !== -1) optional.splice(optIdx, 1);
-				if (!required.includes(varName)) required.push(varName);
-			}
-		}
-
-		// Match $VAR_NAME (simple substitution)
-		const simpleRegex = /(?<![A-Za-z0-9\$])\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
-		while ((match = simpleRegex.exec(line)) !== null) {
-			const varName = match[1];
-			if (!required.includes(varName) && !optional.includes(varName)) required.push(varName);
-		}
-	}
-
-	return { required: required.sort(), optional: optional.sort() };
-}
+import { extractEnvPlaceholderReferences } from '../src/lib/server/env-parser';
+import { extractComposeVars, REF_START, BARE_REF_START } from '../src/lib/utils/compose-var-ref';
 
 describe('extractComposeVars', () => {
 	describe('${VAR} syntax', () => {
@@ -54,12 +20,9 @@ describe('extractComposeVars', () => {
 			expect(result.required).not.toContain('IMAGE_NAME');
 		});
 
-		test('${VAR-default} without colon is not detected (known limitation)', () => {
-			// Docker Compose supports ${VAR-default} but our regex only handles ${VAR:-default}
-			// This is a known gap — the hyphen-only default syntax is rare
+		test('${VAR-default} without colon is optional', () => {
 			const result = extractComposeVars('image: ${IMAGE_NAME-nginx}');
-			expect(result.required).toHaveLength(0);
-			expect(result.optional).toHaveLength(0);
+			expect(result).toEqual({ required: [], optional: ['IMAGE_NAME'] });
 		});
 
 		test('multiple vars on one line', () => {
@@ -182,20 +145,26 @@ services:
 	});
 
 	describe('gutter marker regex (#1048)', () => {
-		// Simulates the client-side gutter marker pattern from CodeEditor.svelte
+		// The gutter patterns CodeEditor.svelte builds from REF_START / BARE_REF_START
 		function gutterMarkerMatches(line: string, markerName: string): boolean {
 			const varPatterns = [
-				new RegExp(`(?<!\\$)\\$\\{${markerName}\\}`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}:-`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}-`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}:\\?`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}\\?`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}:\\+`),
-				new RegExp(`(?<!\\$)\\$\\{${markerName}\\+`),
-				new RegExp(`(?<![A-Za-z0-9\\$])\\$${markerName}(?![a-zA-Z0-9_])`)
+				new RegExp(`${REF_START}\\{${markerName}\\}`),
+				new RegExp(`${REF_START}\\{${markerName}:-`),
+				new RegExp(`${REF_START}\\{${markerName}-`),
+				new RegExp(`${REF_START}\\{${markerName}:\\?`),
+				new RegExp(`${REF_START}\\{${markerName}\\?`),
+				new RegExp(`${REF_START}\\{${markerName}:\\+`),
+				new RegExp(`${REF_START}\\{${markerName}\\+`),
+				new RegExp(`${BARE_REF_START}${markerName}(?![a-zA-Z0-9_])`)
 			];
 			return varPatterns.some((p) => p.test(line));
 		}
+
+		test('a reference after whole $$ pairs matches, an escaped one does not', () => {
+			expect(gutterMarkerMatches('A: $$${abcdef1234}', 'abcdef1234')).toBe(true);
+			expect(gutterMarkerMatches('A: $$$abcdef1234', 'abcdef1234')).toBe(true);
+			expect(gutterMarkerMatches('A: $${abcdef1234}', 'abcdef1234')).toBe(false);
+		});
 
 		test('$VAR at start of value matches', () => {
 			expect(gutterMarkerMatches('PASSWORD: $abcdef1234', 'abcdef1234')).toBe(true);
@@ -256,6 +225,94 @@ services:
 			// Should NOT detect "abcdef1234" as a variable
 			expect(result.required).toHaveLength(0);
 			expect(result.optional).toHaveLength(0);
+		});
+	});
+
+	describe('placeholder in env values (#1766)', () => {
+		function validateEnv(
+			yaml: string,
+			definedVars: string[],
+			envValues: Record<string, string> = {}
+		) {
+			const { required, optional } = extractComposeVars(yaml);
+			const defined = [...definedVars].sort();
+			const placeholderRefs = new Set<string>();
+			for (const val of Object.values(envValues)) {
+				if (typeof val === 'string') {
+					for (const ref of extractEnvPlaceholderReferences(val)) {
+						placeholderRefs.add(ref);
+					}
+				}
+			}
+			const missing = required.filter((v) => !defined.includes(v));
+			const unused = defined.filter(
+				(v) => !required.includes(v) && !optional.includes(v) && !placeholderRefs.has(v)
+			);
+			return {
+				valid: missing.length === 0,
+				required,
+				optional,
+				defined,
+				missing,
+				unused
+			};
+		}
+
+		test('marks variable used when referenced by another env variable placeholder', () => {
+			const yaml = `
+services:
+  web:
+    image: nginx
+    environment:
+      - API_URL=\${API_URL}
+`;
+			// API_URL is in compose, BASE_URL is only referenced inside API_URL's value
+			const defined = ['API_URL', 'BASE_URL'];
+			const envValues = {
+				API_URL: '${BASE_URL}/api/v1',
+				BASE_URL: 'https://example.com'
+			};
+
+			const result = validateEnv(yaml, defined, envValues);
+			expect(result.valid).toBe(true);
+			expect(result.required).toEqual(['API_URL']);
+			expect(result.missing).toEqual([]);
+			// BASE_URL must NOT be marked as unused because API_URL references it
+			expect(result.unused).not.toContain('BASE_URL');
+			expect(result.unused).toEqual([]);
+		});
+
+		test('detects bare $VAR placeholder in env values', () => {
+			const yaml = `
+services:
+  app:
+    image: \${APP_IMAGE}
+`;
+			const defined = ['APP_IMAGE', 'REGISTRY', 'TAG'];
+			const envValues = {
+				APP_IMAGE: '$REGISTRY/myapp:$TAG',
+				REGISTRY: 'docker.io',
+				TAG: 'latest'
+			};
+
+			const result = validateEnv(yaml, defined, envValues);
+			expect(result.unused).toEqual([]);
+		});
+
+		test('still marks genuinely unused variables as unused', () => {
+			const yaml = `
+services:
+  web:
+    image: \${IMAGE}
+`;
+			const defined = ['IMAGE', 'LEFTOVER_VAR'];
+			const envValues = {
+				IMAGE: 'redis:alpine',
+				LEFTOVER_VAR: 'nobody_uses_me'
+			};
+
+			const result = validateEnv(yaml, defined, envValues);
+			expect(result.unused).toEqual(['LEFTOVER_VAR']);
 		});
 	});
 });

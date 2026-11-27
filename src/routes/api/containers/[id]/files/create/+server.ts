@@ -4,6 +4,7 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import { parseChownSpec } from '$lib/server/chown-spec-core';
 import type { RequestHandler } from './$types';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * POST /api/containers/{id}/files/create - Create a file or directory in a container
@@ -17,7 +18,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!, path:string!, type:string!, owner:string}
  * resp-200-example: {"success":true,"path":"/app/data","type":"directory","owner":"1000:1000"}
  * resp-400: Path missing, type not "file" or "directory", or the container is not running
- * resp-403: Permission denied
+ * resp-403: Permission denied, or the target is Dockhand's own container and the caller is not an administrator
  * resp-404: Parent directory not found
  * resp-409: Path already exists
  * resp-500: Failed to create the path
@@ -34,6 +35,12 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 	// Permission check with environment context
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Dockhand's own container holds its database, encryption key and Docker socket.
+	if (auth.authEnabled && !auth.isAdmin) {
+		const denied = await refuseOwnContainer(params.id, envIdNum);
+		if (denied) return denied;
 	}
 
 	try {

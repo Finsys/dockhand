@@ -33,7 +33,7 @@
 		RotateCw,
 		Trash2,
 		Plus,
-		FileText,
+		ScrollText,
 		Pencil,
 		NotepadText,
 		Pin,
@@ -335,7 +335,7 @@
 	const UPDATE_AVAILABLE_FILTER_VALUE = 'update-available';
 	const NEWER_VERSION_FILTER_VALUE = 'newer-version';
 	const COOLING_DOWN_FILTER_VALUE = 'cooling-down';
-	let statusFilter = $state<string[]>([]);
+	let statusFilter = $state<string[]>(loadStatusFilter());
 
 	// Status types with icons for filter and table
 	const statusTypes = [
@@ -391,16 +391,13 @@
 		}
 	}
 
-	function loadStatusFilter() {
-		if (typeof window !== 'undefined') {
+	function loadStatusFilter(): string[] {
+		if (typeof window === 'undefined') return [];
+		try {
 			const saved = localStorage.getItem(STATUS_FILTER_STORAGE_KEY);
-			if (saved) {
-				try {
-					statusFilter = JSON.parse(saved);
-				} catch {
-					statusFilter = [];
-				}
-			}
+			return saved ? JSON.parse(saved) : [];
+		} catch {
+			return [];
 		}
 	}
 
@@ -532,9 +529,20 @@
 	// Version-update (semver) release-notes modal — opened from the Tag badge.
 	let versionModalContainer = $state<ContainerInfo | null>(null);
 	let versionModalNewer = $state<import('$lib/server/semver/find-newer').NewerVersion | null>(null);
-	function openVersionModal(container: ContainerInfo, newer: import('$lib/server/semver/find-newer').NewerVersion) {
+	let versionModalComposeStack = $state<string | null>(null);
+	async function openVersionModal(container: ContainerInfo, newer: import('$lib/server/semver/find-newer').NewerVersion) {
+		versionModalComposeStack = null;
 		versionModalContainer = container;
 		versionModalNewer = newer;
+		const project = getComposeProject(container.labels);
+		if (!project || !$canAccess('stacks', 'edit')) return;
+		try {
+			const res = await fetch(appendEnvParam('/api/stacks/sources', envId));
+			const sources = res.ok ? await res.json() : {};
+			if (sources[project]?.sourceType === 'internal' && versionModalContainer?.id === container.id) {
+				versionModalComposeStack = project;
+			}
+		} catch {}
 	}
 
 	// Release notes for a held (cooling-down) update, so the user can judge whether to
@@ -1622,7 +1630,6 @@
 
 	onMount(async () => {
 		loadLayoutMode();
-		loadStatusFilter();
 		terminalCustomUsers = getCustomUsers();
 
 		// Load persisted pending updates from database
@@ -2460,7 +2467,7 @@
 									title={m.containers_list_show_logs()}
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<FileText class="w-4 h-4 text-blue-400" style="filter: drop-shadow(0 0 4px rgba(96,165,250,0.9)) drop-shadow(0 0 8px rgba(96,165,250,0.6));" strokeWidth={2.5} />
+									<ScrollText class="w-4 h-4 text-blue-400" style="filter: drop-shadow(0 0 4px rgba(96,165,250,0.9)) drop-shadow(0 0 8px rgba(96,165,250,0.6));" strokeWidth={2.5} />
 								</button>
 							{:else}
 								<button
@@ -2469,7 +2476,7 @@
 									title={m.containers_list_open_logs()}
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<FileText class="grid-action-icon grid-action-logs text-muted-foreground hover:text-foreground" />
+									<ScrollText class="grid-action-icon grid-action-logs text-muted-foreground hover:text-foreground" />
 								</button>
 							{/if}
 							{/if}
@@ -2862,6 +2869,9 @@
 	onClose={() => { showEditModal = false; loadTags(envId); }}
 	onSuccess={fetchContainers}
 	onIconChanged={() => loadIconOverrides(envId)}
+	onRepullImage={$canAccess('containers', 'create')
+		? (id, name) => updateSingleContainer(id, name)
+		: undefined}
 />
 
 <ContainerInspectModal
@@ -2907,6 +2917,8 @@
 	bind:container={versionModalContainer}
 	newerVersion={versionModalNewer}
 	{envId}
+	composeStack={versionModalComposeStack}
+	canRedeploy={!versionModalContainer?.systemContainer}
 />
 
 <CooldownNotesModal
