@@ -73,6 +73,7 @@ import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { compareContainerOrder } from './container-labels';
 import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
 import { pendingRowsToClear } from './pending-updates-core';
+import { shouldCleanupStackContainer } from './stack-orphan-core';
 import { buildDockhandOverrideFile, planDockhandOverrideFile } from './dockhand-override-file';
 import { withComposeRateLimitRetry } from './pull-retry';
 
@@ -2333,9 +2334,11 @@ async function cleanupOrphanStackContainers(
 ): Promise<void> {
 	try {
 		const containers = await getStackContainers(stackName, envId);
-		const targets = containers.filter(
-			(c) => c.state === 'running' || c.state === 'restarting'
-		);
+		// Decision is the pure shouldCleanupStackContainer (unit-tested): 'restart' acts only
+		// on orphans so the recreate post-step never bounces a compose service (which kills a
+		// network_mode: service:X dependent mid-startup); stop/remove sweep every running
+		// container as a teardown safety net.
+		const targets = containers.filter((c) => shouldCleanupStackContainer(operation, c.state, c.labels));
 		if (targets.length === 0) return;
 
 		const { stopContainer, removeContainer, restartContainer } = await import('./docker.js');
