@@ -35,6 +35,8 @@
 		'es-ES': 'Español',
 		'fr-FR': 'Français',
 		'fr-CA': 'Français (Canada)',
+		it: 'Italiano',
+		nl: 'Nederlands',
 		pl: 'Polski',
 		'zh-CN': '简体中文',
 		ru: 'Русский',

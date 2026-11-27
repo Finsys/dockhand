@@ -6,8 +6,10 @@ import 'cronstrue/locales/bg';
 import 'cronstrue/locales/de';
 import 'cronstrue/locales/es';
 import 'cronstrue/locales/fr';
+import 'cronstrue/locales/it';
 import 'cronstrue/locales/ja';
 import 'cronstrue/locales/ko';
+import 'cronstrue/locales/nl';
 import 'cronstrue/locales/pl';
 import 'cronstrue/locales/pt_BR';
 import 'cronstrue/locales/ru';
@@ -20,6 +22,8 @@ const CRONSTRUE_LOCALES: Record<string, string> = {
 	'es-ES': 'es',
 	'fr-FR': 'fr',
 	'fr-CA': 'fr',
+	it: 'it',
+	nl: 'nl',
 	pl: 'pl',
 	'zh-CN': 'zh_CN',
 	ru: 'ru',

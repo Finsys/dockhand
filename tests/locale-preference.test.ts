@@ -105,7 +105,7 @@ describe('fromNavigator', () => {
 	});
 
 	test('gives up when nothing matches', () => {
-		expect(fromNavigator(['it', 'th'])).toBeUndefined();
+		expect(fromNavigator(['th', 'vi'])).toBeUndefined();
 		expect(fromNavigator([])).toBeUndefined();
 	});
 });
