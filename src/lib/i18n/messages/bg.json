@@ -2585,6 +2585,8 @@
 	"stacks_list_removed_files_kept": "файловете са запазени",
 	"stacks_list_removed_volumes_deleted": "томовете са изтрити",
 	"stacks_list_toast_removed": "{name} е премахнат ({details})",
+	"stacks_list_toast_removed_warning": "{name} е премахнат, но стъпката за почистване докладва проблем - някои томове може да не са премахнати. Проверете с docker volume ls.",
+	"stacks_list_toast_removed_warning_novolumes": "{name} е премахнат, но стъпката за почистване докладва проблем - проверете дали не е останало нещо.",
 	"stacks_list_toast_container_started": "Контейнерът е стартиран",
 	"stacks_list_toast_container_stopped": "Контейнерът е спрян",
 	"stacks_list_toast_container_restarted": "Контейнерът е рестартиран",

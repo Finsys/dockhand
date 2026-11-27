@@ -1623,6 +1623,7 @@
 	"updates_compose_variable": "The image tag comes from a variable. Change it in the stack's environment variables instead.",
 	"updates_compose_repo_mismatch": "The compose file uses a different image for this service",
 	"updates_compose_unchanged": "The compose file already uses this tag",
+	"updates_compose_invalid_tag": "The new tag has an unexpected format and was not applied",
 	"tags_filter_all": "All tags",
 	"tags_filter_untagged": "Untagged",
 	"tags_filter_count": [
@@ -2247,6 +2248,8 @@
 	"stacks_list_removed_files_kept": "files kept",
 	"stacks_list_removed_volumes_deleted": "volumes deleted",
 	"stacks_list_toast_removed": "Removed {name} ({details})",
+	"stacks_list_toast_removed_warning": "Removed {name}, but the cleanup step reported a problem - some volumes may not have been removed. Check with docker volume ls.",
+	"stacks_list_toast_removed_warning_novolumes": "{name} removed, but the cleanup step reported a problem - check that nothing was left behind.",
 	"stacks_list_toast_container_started": "Container started",
 	"stacks_list_toast_container_stopped": "Container stopped",
 	"stacks_list_toast_container_restarted": "Container restarted",

@@ -2451,6 +2451,8 @@
 	"stacks_list_removed_files_kept": "файлы сохранены",
 	"stacks_list_removed_volumes_deleted": "тома удалены",
 	"stacks_list_toast_removed": "Стек {name} удален ({details})",
+	"stacks_list_toast_removed_warning": "Стек {name} удален, но этап очистки сообщил о проблеме - некоторые тома могли не быть удалены. Проверьте через docker volume ls.",
+	"stacks_list_toast_removed_warning_novolumes": "Стек {name} удален, но этап очистки сообщил о проблеме - проверьте, не осталось ли чего-либо.",
 	"stacks_list_toast_container_started": "Контейнер запущен",
 	"stacks_list_toast_container_stopped": "Контейнер остановлен",
 	"stacks_list_toast_container_restarted": "Контейнер перезапущен",

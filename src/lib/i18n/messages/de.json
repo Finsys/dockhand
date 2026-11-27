@@ -1736,6 +1736,7 @@
 	"updates_compose_variable": "Der Image-Tag stammt aus einer Variable. Ändere ihn stattdessen in den Umgebungsvariablen des Stacks.",
 	"updates_compose_repo_mismatch": "Die Compose-Datei verwendet für diesen Dienst ein anderes Image",
 	"updates_compose_unchanged": "Die Compose-Datei verwendet diesen Tag bereits",
+	"updates_compose_invalid_tag": "Der neue Tag hat ein unerwartetes Format und wurde nicht angewendet",
 	"tags_filter_all": "Alle Tags",
 	"tags_filter_untagged": "Ohne Tag",
 	"tags_filter_count": [
@@ -2416,6 +2417,8 @@
 	"stacks_list_removed_files_kept": "Dateien behalten",
 	"stacks_list_removed_volumes_deleted": "Volumes gelöscht",
 	"stacks_list_toast_removed": "{name} entfernt ({details})",
+	"stacks_list_toast_removed_warning": "{name} entfernt, aber der Aufräumschritt meldete ein Problem - einige Volumes wurden möglicherweise nicht entfernt. Prüfe mit docker volume ls.",
+	"stacks_list_toast_removed_warning_novolumes": "{name} entfernt, aber der Aufräumschritt meldete ein Problem - prüfe, ob nichts zurückgeblieben ist.",
 	"stacks_list_toast_container_started": "Container gestartet",
 	"stacks_list_toast_container_stopped": "Container gestoppt",
 	"stacks_list_toast_container_restarted": "Container neu gestartet",

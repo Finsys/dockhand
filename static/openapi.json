@@ -27863,6 +27863,9 @@
                   "properties": {
                     "success": {
                       "type": "boolean"
+                    },
+                    "warning": {
+                      "type": "string"
                     }
                   },
                   "required": [

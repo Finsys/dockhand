@@ -2234,6 +2234,8 @@
 	"stacks_list_removed_files_kept": "dosyalar korundu",
 	"stacks_list_removed_volumes_deleted": "Volume'lar silindi",
 	"stacks_list_toast_removed": "{name} kaldırıldı ({details})",
+	"stacks_list_toast_removed_warning": "{name} kaldırıldı ancak temizleme adımı bir sorun bildirdi - bazı volumeler kaldırılmamış olabilir. docker volume ls ile kontrol edin.",
+	"stacks_list_toast_removed_warning_novolumes": "{name} kaldırıldı ancak temizleme adımı bir sorun bildirdi - geride bir şey kalmadığından emin olun.",
 	"stacks_list_toast_container_started": "Konteyner başlatıldı",
 	"stacks_list_toast_container_stopped": "Konteyner durduruldu",
 	"stacks_list_toast_container_restarted": "Konteyner yeniden başlatıldı",

@@ -2234,6 +2234,8 @@
 	"stacks_list_removed_files_kept": "ファイル保持",
 	"stacks_list_removed_volumes_deleted": "ボリューム削除済み",
 	"stacks_list_toast_removed": "{name} を削除しました ({details})",
+	"stacks_list_toast_removed_warning": "{name} を削除しましたが、クリーンアップ処理で問題が報告されました。一部のボリュームが削除されていない可能性があります。docker volume ls で確認してください。",
+	"stacks_list_toast_removed_warning_novolumes": "{name} を削除しましたが、クリーンアップ処理で問題が報告されました。残っているものがないか確認してください。",
 	"stacks_list_toast_container_started": "コンテナを開始しました",
 	"stacks_list_toast_container_stopped": "コンテナを停止しました",
 	"stacks_list_toast_container_restarted": "コンテナを再起動しました",

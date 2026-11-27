@@ -2275,6 +2275,8 @@
 	"stacks_list_removed_files_kept": "archivos conservados",
 	"stacks_list_removed_volumes_deleted": "volúmenes eliminados",
 	"stacks_list_toast_removed": "{name} se ha eliminado ({details})",
+	"stacks_list_toast_removed_warning": "{name} eliminado, pero el paso de limpieza informó de un problema: puede que algunos volúmenes no se hayan eliminado. Comprueba con docker volume ls.",
+	"stacks_list_toast_removed_warning_novolumes": "{name} eliminado, pero el paso de limpieza informó de un problema: comprueba que no haya quedado nada.",
 	"stacks_list_toast_container_started": "Contenedor iniciado",
 	"stacks_list_toast_container_stopped": "Contenedor detenido",
 	"stacks_list_toast_container_restarted": "Contenedor reiniciado",

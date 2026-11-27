@@ -2531,6 +2531,8 @@
 	"stacks_list_removed_files_kept": "файли збережено",
 	"stacks_list_removed_volumes_deleted": "томи видалено",
 	"stacks_list_toast_removed": "Видалено {name} ({details})",
+	"stacks_list_toast_removed_warning": "{name} видалено, але крок очищення повідомив про проблему - деякі томи могли не бути видалені. Перевірте через docker volume ls.",
+	"stacks_list_toast_removed_warning_novolumes": "{name} видалено, але крок очищення повідомив про проблему - перевірте, чи нічого не залишилося.",
 	"stacks_list_toast_container_started": "Контейнер запущено",
 	"stacks_list_toast_container_stopped": "Контейнер зупинено",
 	"stacks_list_toast_container_restarted": "Контейнер перезапущено",

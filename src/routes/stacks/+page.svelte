@@ -1444,8 +1444,13 @@
 				showErrorDialog(m.containers_list_toast_remove_failed({ name }), errorMsg);
 				return;
 			}
-			const bits = [opts.deleteFiles ? m.stacks_list_removed_files_deleted() : m.stacks_list_removed_files_kept(), ...(opts.deleteVolumes ? [m.stacks_list_removed_volumes_deleted()] : [])];
-			toast.success(m.stacks_list_toast_removed({ name, details: bits.join(', ') }));
+			const data = await response.json().catch(() => ({}));
+			if (data?.warning) {
+				toast.warning(opts.deleteVolumes ? m.stacks_list_toast_removed_warning({ name }) : m.stacks_list_toast_removed_warning_novolumes({ name }));
+			} else {
+				const bits = [opts.deleteFiles ? m.stacks_list_removed_files_deleted() : m.stacks_list_removed_files_kept(), ...(opts.deleteVolumes ? [m.stacks_list_removed_volumes_deleted()] : [])];
+				toast.success(m.stacks_list_toast_removed({ name, details: bits.join(', ') }));
+			}
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to remove stack:', error);

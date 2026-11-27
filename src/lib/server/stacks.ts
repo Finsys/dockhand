@@ -102,6 +102,13 @@ export interface StackOperationResult {
 	success: boolean;
 	output?: string;
 	error?: string;
+	/**
+	 * A non-fatal problem the operation chose to continue past. removeStack sets it
+	 * when a forced removal swallows a failed `docker compose down`: the stack is gone
+	 * but `down` never reached volume cleanup, so volumes may be left behind. Callers
+	 * surface it to the user instead of reporting a clean success.
+	 */
+	warning?: string;
 	/** The docker compose command that was executed (for debugging/testing) */
 	command?: string;
 	/** Result of applying git deletion sync (files removed / kept, with reasons) */
@@ -2906,6 +2913,11 @@ export async function removeStack(
 		return { success: false, error: 'Invalid stack name' };
 	}
 	return withStackLock(stackName, async () => {
+		// A forced removal continues past a failed `docker compose down`, but that down is
+		// what removes volumes - so a swallowed failure can leave volumes behind silently.
+		// Captured here and surfaced on the success result instead of reporting a clean ok.
+		let downWarning: string | undefined;
+
 		// Get compose file (may not exist for external stacks)
 		const composeResult = await getStackComposeFile(stackName, envId);
 
@@ -2973,6 +2985,16 @@ export async function removeStack(
 			);
 			if (!downResult.success && !force) {
 				return downResult;
+			}
+			if (!downResult.success && force) {
+				// Forced past a failed down: containers get cleaned up below, but `down`
+				// never reached volume removal, so volumes (if the caller asked to remove
+				// them) may be left behind. Surface this rather than report a clean success.
+				const detail = (downResult.error || downResult.output || '').trim();
+				downWarning = removeVolumes
+					? `docker compose down failed, so volumes may not have been removed${detail ? `: ${detail}` : ''}`
+					: `docker compose down failed during removal${detail ? `: ${detail}` : ''}`;
+				console.warn(`[Stack:${stackName}] ${downWarning}`);
 			}
 
 			// Remove any dynamically-spawned child containers not handled by compose
@@ -3158,7 +3180,7 @@ export async function removeStack(
 			? `Stack "${stackName}" removed with cleanup warnings: ${cleanupErrors.join('; ')}`
 			: `Stack "${stackName}" removed successfully`;
 
-		return { success: true, output };
+		return { success: true, output, warning: downWarning };
 	});
 }
 

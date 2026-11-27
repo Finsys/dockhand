@@ -13,7 +13,7 @@ import { deniesEnvScope } from '$lib/server/env-scope';
  * query: force:boolean Force removal even if the compose down step fails
  * query: volumes:boolean Also remove named volumes (docker compose down --volumes)
  * query: files:boolean Delete the stack's on-disk files/directory too (default true; pass files=false to keep them on disk)
- * resp-200: {success:boolean!}
+ * resp-200: {success:boolean!,warning:string}
  * resp-200-example: {"success":true}
  * resp-400: Compose down failed and force was not set
  * resp-403: Permission denied, or access denied to this environment, or the environment is missing or out of scope (Enterprise non-admin)
@@ -53,7 +53,7 @@ export const DELETE: RequestHandler = async (event) => {
 		if (!result.success) {
 			return json({ success: false, error: result.error }, { status: 400 });
 		}
-		return json({ success: true });
+		return json({ success: true, warning: result.warning });
 	} catch (error) {
 		if (error instanceof ComposeFileNotFoundError) {
 			return json({ error: error.message }, { status: 404 });

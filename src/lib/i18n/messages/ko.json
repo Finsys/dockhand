@@ -2234,6 +2234,8 @@
 	"stacks_list_removed_files_kept": "파일 유지됨",
 	"stacks_list_removed_volumes_deleted": "볼륨 삭제됨",
 	"stacks_list_toast_removed": "{name} 스택을 삭제했어요 ({details})",
+	"stacks_list_toast_removed_warning": "{name} 스택을 삭제했지만 정리 단계에서 문제가 보고되었어요. 일부 볼륨이 삭제되지 않았을 수 있어요. docker volume ls로 확인하세요.",
+	"stacks_list_toast_removed_warning_novolumes": "{name} 스택을 삭제했지만 정리 단계에서 문제가 보고되었어요. 남은 것이 없는지 확인하세요.",
 	"stacks_list_toast_container_started": "컨테이너를 시작했어요",
 	"stacks_list_toast_container_stopped": "컨테이너를 중지했어요",
 	"stacks_list_toast_container_restarted": "컨테이너를 재시작했어요",

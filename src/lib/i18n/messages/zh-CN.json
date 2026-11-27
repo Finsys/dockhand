@@ -2234,6 +2234,8 @@
 	"stacks_list_removed_files_kept": "文件已保留",
 	"stacks_list_removed_volumes_deleted": "数据卷已删除",
 	"stacks_list_toast_removed": "已移除 {name}({details})",
+	"stacks_list_toast_removed_warning": "已移除 {name}，但清理步骤报告了一个问题 - 部分卷可能未被移除。请用 docker volume ls 检查。",
+	"stacks_list_toast_removed_warning_novolumes": "已移除 {name}，但清理步骤报告了一个问题 - 请检查是否有残留。",
 	"stacks_list_toast_container_started": "容器已启动",
 	"stacks_list_toast_container_stopped": "容器已停止",
 	"stacks_list_toast_container_restarted": "容器已重启",
