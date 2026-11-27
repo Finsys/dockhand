@@ -18,7 +18,8 @@
       { "type": "fix", "text": "newer-version count reflects the installed build, not the pinned tag (#1880)" },
       { "type": "fix", "text": "serializes concurrent scans of the same scanner type so Trivy no longer fails on database lock errors (#1970)" },
       { "type": "fix", "text": "an offline Hawser environment no longer floods the log with per-cycle connection errors (#1966, #1739)" },
-      { "type": "fix", "text": "a forced stack removal warns when compose down failed and volumes may be left behind (#1968)" }
+      { "type": "fix", "text": "a forced stack removal warns when compose down failed and volumes may be left behind (#1968)" },
+      { "type": "fix", "text": "a stack recreate no longer restarts every container afterwards, which killed network_mode: service dependents mid-startup (#1873)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.60"
   },
