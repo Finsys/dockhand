@@ -836,13 +836,14 @@ function logDockerFetchFailure(
 	msg: string,
 	error: unknown
 ) {
-	// A probe that cannot reach an offline host says nothing a reader needs: the
-	// environment already shows as offline, and the attempt repeats every cycle. It stays
-	// in the log on stdout rather than as an error, so a log collector filtering on stderr
-	// is not flooded. A probe failing for any OTHER reason - a bad token, an expired
-	// certificate - is still an error, because that one needs acting on.
+	// A request that cannot reach an offline host says nothing a reader needs: the
+	// collector already reported the offline transition once, and the attempt repeats
+	// every cycle. It stays in the log on stdout rather than as an error, so a log
+	// collector filtering on stderr is not flooded. A request failing for any OTHER
+	// reason - a bad token, an expired certificate, a refusal - is still an error,
+	// because that one needs acting on.
 	if (isQuietDockerFailure(path, error)) {
-		console.debug(`[Docker] ${targetLabel}: ${method} ${path} probe failed after ${elapsed}ms (host offline/unreachable): ${msg}`);
+		console.debug(`[Docker] ${targetLabel}: ${method} ${path} failed after ${elapsed}ms (host offline/unreachable): ${msg}`);
 	} else {
 		console.error(`[Docker] ${targetLabel}: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
 	}

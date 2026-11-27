@@ -36,13 +36,15 @@ export function isExpectedConnectionError(error: unknown): boolean {
 /**
  * Whether a failed request should be logged as an error.
  *
- * Only a probe that could not reach the host is quiet: that failure repeats every
- * collection cycle and says nothing the environment's offline status does not. A probe
- * that failed for any other reason - a bad token, an expired certificate - is an error,
- * and so is every non-probe request.
+ * A request that could not reach the host is quiet whatever the path: the collector
+ * already reports the online->offline transition once (with a notification and
+ * env_up=0), so the per-cycle unreachable failures on /containers/json, /images/json,
+ * /volumes and /networks add nothing and just flood the log. A failure for any OTHER
+ * reason - a bad token, an expired certificate, a refusal - is still an error, because
+ * the host answered and that needs acting on.
  */
-export function isQuietDockerFailure(path: string, error: unknown): boolean {
-	return isDockerProbePath(path) && isExpectedConnectionError(error);
+export function isQuietDockerFailure(_path: string, error: unknown): boolean {
+	return isExpectedConnectionError(error);
 }
 
 /**

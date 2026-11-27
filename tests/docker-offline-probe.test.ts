@@ -93,22 +93,25 @@ describe('which failures are logged quietly', () => {
 	// unimportable module is a decision nothing can hold.
 	const offline = transportTimeoutError('Request aborted');
 
-	it('quiets a probe that could not reach the host', () => {
+	it('quiets any request that could not reach the host, probe or not', () => {
 		expect(isQuietDockerFailure('/_ping', offline)).toBe(true);
 		expect(isQuietDockerFailure('/version', new TypeError('fetch failed'))).toBe(true);
 		expect(isQuietDockerFailure('/_hawser/info', 'connect ECONNREFUSED 10.0.0.1:2376')).toBe(true);
+		// The operational endpoints that flooded the log for a powered-off host: the
+		// collector already reports the offline transition once, so the per-cycle repeats
+		// of these say nothing and must not be errors.
+		expect(isQuietDockerFailure('/containers/json?all=true', offline)).toBe(true);
+		expect(isQuietDockerFailure('/images/json', new TypeError('fetch failed'))).toBe(true);
+		expect(isQuietDockerFailure('/volumes', offline)).toBe(true);
+		expect(isQuietDockerFailure('/networks', offline)).toBe(true);
 	});
 
-	it('still reports a probe that failed for any other reason', () => {
-		// The whole point of not quieting by environment status: these need acting on.
+	it('still reports a request that failed for any other reason', () => {
+		// A host that ANSWERED - a bad token, an expired certificate, a refusal - needs
+		// acting on, on a probe path or an operational one.
 		expect(isQuietDockerFailure('/_ping', new Error('401 Unauthorized'))).toBe(false);
 		expect(isQuietDockerFailure('/version', new Error('certificate has expired'))).toBe(false);
-		expect(isQuietDockerFailure('/_ping', new Error('permission denied'))).toBe(false);
-	});
-
-	it('still reports an operational request, even when the host is unreachable', () => {
-		// A real call that failed is news, however offline the host is.
-		expect(isQuietDockerFailure('/containers/json', offline)).toBe(false);
-		expect(isQuietDockerFailure('/images/json', new TypeError('fetch failed'))).toBe(false);
+		expect(isQuietDockerFailure('/containers/json', new Error('permission denied'))).toBe(false);
+		expect(isQuietDockerFailure('/images/json', new Error('500 Internal Server Error'))).toBe(false);
 	});
 });
