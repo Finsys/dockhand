@@ -150,10 +150,19 @@
 	let inheritStackTags = $state(
 		typeof window === 'undefined' || localStorage.getItem(INHERIT_STACK_TAGS_KEY) !== '0'
 	);
+	const USE_STACK_AS_TAG_KEY = 'dockhand-containers-use-stack-as-tag';
+	let useStackAsTag = $state(
+		typeof window !== 'undefined' && localStorage.getItem(USE_STACK_AS_TAG_KEY) === '1'
+	);
 	$effect(() => {
 		const v = inheritStackTags;
 		if (typeof window === 'undefined') return;
 		localStorage.setItem(INHERIT_STACK_TAGS_KEY, v ? '1' : '0');
+	});
+	$effect(() => {
+		const v = useStackAsTag;
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(USE_STACK_AS_TAG_KEY, v ? '1' : '0');
 	});
 	let tagCatalog = $state<UserTag[]>([]);
 	// The catalogue has actually been fetched. Until then the tag picker is only
@@ -217,6 +226,7 @@
 			tagById,
 			catalog: tagCatalog,
 			inheritStackTags,
+			useStackAsTag,
 			iconKnown: isKnownIconName
 		});
 	}
@@ -1604,7 +1614,7 @@
 		});
 	}
 
-	function getComposeProject(labels: ContainerInfo['labels']): string | null {
+	function getComposeProject(labels: ContainerInfo['labels'] | undefined): string | null {
 		return labels?.['com.docker.compose.project'] || null;
 	}
 
@@ -1697,7 +1707,7 @@
 				width="w-48"
 				defaultIcon={Box}
 			/>
-			<TagFilter tags={filterTags} bind:selected={tagFilter} bind:mode={tagFilterMode} bind:groupBy={groupByTag} bind:showTags={showTags} bind:showBands={showBands} bind:inlineEditing={inlineTagEditing} bind:inheritStackTags bind:settingsExpanded={tagSettingsExpanded} />
+			<TagFilter tags={filterTags} bind:selected={tagFilter} bind:mode={tagFilterMode} bind:groupBy={groupByTag} bind:showTags={showTags} bind:showBands={showBands} bind:inlineEditing={inlineTagEditing} bind:inheritStackTags bind:useStackAsTag bind:settingsExpanded={tagSettingsExpanded} />
 			<!-- Action buttons: scroll horizontally on narrow screens (mobile) instead of
 			     clipping the overflow. min-w-0 lets the row shrink below its content so
 			     overflow-x can kick in; shrink-0 keeps each button its natural size. -->
@@ -2978,4 +2988,3 @@
 	}
 
 </style>
-

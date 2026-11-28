@@ -10,6 +10,7 @@ import {
 	matchesTagFilter,
 	prunedTagFilter,
 	stackLabelTags,
+	withStackNameTag,
 	withStackTags,
 	type Tag
 } from '../src/lib/utils/tags-core';
@@ -646,4 +647,65 @@ describe('a container showing its stack tags', () => {
 		).toEqual(['standalone']);
 	});
 
+});
+
+describe('using a container stack name as a tag', () => {
+	test('container resolution adds the stack name independently of stack tag inheritance', () => {
+		const tags = containerTags(
+			{ name: 'web', labels: { 'com.docker.compose.project': 'media-stack' } },
+			{
+				assignedTagIds: {},
+				stackTagIds: { 'media-stack': [PROD.id] },
+				tagById: new Map([[PROD.id, PROD]]),
+				catalog: CATALOG,
+				inheritStackTags: false,
+				useStackAsTag: true
+			}
+		);
+		expect(tags.map((t) => t.name)).toEqual(['media-stack']);
+		expect(tags[0].inherited).toBe(true);
+	});
+
+	test('container resolution keeps assigned stack tags alongside the stack name', () => {
+		const tags = containerTags(
+			{ name: 'web', labels: { 'com.docker.compose.project': 'media-stack' } },
+			{
+				assignedTagIds: {},
+				stackTagIds: { 'media-stack': [PROD.id] },
+				tagById: new Map([[PROD.id, PROD]]),
+				catalog: CATALOG,
+				inheritStackTags: true,
+				useStackAsTag: true
+			}
+		);
+		expect(tags.map((t) => t.name)).toEqual(['prod', 'media-stack']);
+		expect(tags.every((t) => t.inherited)).toBe(true);
+	});
+
+	test('adds the stack name as an inherited synthetic tag', () => {
+		const out = withStackNameTag([], 'media-stack', CATALOG);
+		expect(out).toEqual([{
+			id: labelTagId('media-stack'),
+			name: 'media-stack',
+			color: 'slate',
+			icon: null,
+			inherited: true
+		}]);
+	});
+
+	test('uses a matching catalog tag appearance', () => {
+		const out = withStackNameTag([], 'prod', CATALOG);
+		expect(out).toEqual([{ ...PROD, inherited: true }]);
+	});
+
+	test('does not duplicate a direct tag with the same name', () => {
+		const out = withStackNameTag([PROD], 'PROD', CATALOG);
+		expect(out).toEqual([PROD]);
+		expect(out[0].inherited).toBeUndefined();
+	});
+
+	test('a container outside a stack is unchanged', () => {
+		const own = [PROD];
+		expect(withStackNameTag(own, null, CATALOG)).toBe(own);
+	});
 });
