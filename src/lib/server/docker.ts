@@ -42,6 +42,7 @@ export { isDigestBasedImage };
 import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs, imageReleaseAgeStatus, type ImageCreationMetadata } from './minimum-release-age';
 import { manualPullAgeWarning, verifiedImagePullPlan } from './minimum-release-age-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
+import { containerMountBindings, containerMountOptions, type StructuredMount } from '../utils/container-mounts';
 import { resolveNanoCpusConflict, applyPodmanUsernsMode, stripDefaultMemorySwappiness } from './hostconfig-recreate';
 import { isUnknownNetworkKeyError, retryEndpointKey } from './podman-network-key';
 import { expectedEvents, EXPECTED_EVENT_TTL_MS } from './expected-events-core';
@@ -1591,7 +1592,7 @@ export interface CreateContainerOptions {
 	domainname?: string;
 }
 
-export async function createContainer(options: CreateContainerOptions, envId?: number | null) {
+export async function createContainer(options: CreateContainerOptions, envId?: number | null, preservedMounts?: StructuredMount[]) {
 	const containerConfig: any = {
 		Image: options.image,
 		Env: options.env || [],
@@ -1660,6 +1661,7 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	if (options.volumes) {
 		containerConfig.Volumes = options.volumes;
 	}
+	if (preservedMounts?.length) containerConfig.HostConfig.Mounts = preservedMounts;
 
 	// Backward-compat: callers (and the auto-update inspect path) may still pass
 	// the legacy "networks" array which conflated primary + extras. Normalize to
@@ -2865,33 +2867,7 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
 		}
 	}
 
-	// Volume bindings - preserve ALL volumes including anonymous volumes
-	const volumeBinds: string[] = [];
-	const mountedPaths = new Set<string>();
-
-	// First, add all entries from hostConfig.Binds (named volumes and bind mounts)
-	if (hostConfig.Binds && Array.isArray(hostConfig.Binds)) {
-		for (const bind of hostConfig.Binds) {
-			volumeBinds.push(bind);
-			const parts = bind.split(':');
-			if (parts.length >= 2) {
-				mountedPaths.add(parts[1].split(':')[0]);
-			}
-		}
-	}
-
-	// Then, add anonymous volumes from Mounts that aren't already in Binds
-	const mounts = inspectData.Mounts || [];
-	for (const mount of mounts) {
-		if (mount.Type === 'volume' && mount.Name && mount.Destination) {
-			if (!mountedPaths.has(mount.Destination)) {
-				const bindStr = mount.RW === false
-					? `${mount.Name}:${mount.Destination}:ro`
-					: `${mount.Name}:${mount.Destination}`;
-				volumeBinds.push(bindStr);
-			}
-		}
-	}
+	const volumeBinds = containerMountBindings(inspectData);
 
 	// Healthcheck configuration
 	let healthcheck: HealthcheckConfig | undefined = undefined;
@@ -3144,6 +3120,8 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 				}
 			: options.labels === null ? {} : existingOptions.labels
 	};
+	const mountOptions = containerMountOptions(oldContainerInfo, options.volumeBinds);
+	mergedOptions.volumeBinds = mountOptions.volumeBinds;
 
 	// 1. Stop old container
 	if (wasRunning) {
@@ -3199,7 +3177,7 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 	// 4. Create new container
 	let newContainer;
 	try {
-		newContainer = await createContainer(mergedOptions, envId);
+		newContainer = await createContainer(mergedOptions, envId, mountOptions.mounts);
 	} catch (createError) {
 		await rollback();
 		throw createError;
