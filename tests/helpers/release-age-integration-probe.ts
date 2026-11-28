@@ -18,6 +18,9 @@ const deferred = phase.includes('young');
 const skipLabel = phase.includes('skip-label');
 // nodigest: the registry stops answering after the update check, so the pull has no digest.
 const noDigest = phase.includes('nodigest');
+// multiarch-recorded: as multiarch-different, with the new image's version already recorded
+// by an earlier check (as after a restart, when nothing is cached in memory).
+const multiarchDifferent = phase === 'multiarch-different' || phase === 'multiarch-recorded';
 let registryDown = false;
 let advisories = 0;
 let remainingMs = deferred || skipLabel || phase === 'skip-cooldown' ? 3600001 : 0;
@@ -58,7 +61,9 @@ let pendingStore: any[] = phase.includes('keep-on-error')
 	? [{ containerId: originalId, containerName: 'app', currentImage: image, hasImageUpdate: true, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false }]
 	: phase.endsWith('-stale')
 		? [{ containerId: 'gone', containerName: 'gone', currentImage: image, hasImageUpdate: true, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false }]
-		: [];
+		: phase === 'multiarch-recorded'
+			? [{ containerId: 'other', containerName: 'other', currentImage: image, hasImageUpdate: true, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, newImageVersion: '9.9.9', newImageVersionDigest: 'sha256:' + 'a'.repeat(64) }]
+			: [];
 const environment = { id: 1, name: 'test', connectionType: 'direct', protocol: 'http', host: 'daemon.test', port: 2375 };
 const db = {
 	setEnvSetting: noop, deleteSetting: noop,
@@ -79,6 +84,10 @@ const db = {
 		const saved = { id: loggedEvents.length + 1, ...data };
 		loggedEvents.push(saved);
 		return saved;
+	},
+	getRecordedImageVersion: async (_envId: number, digest: string) => {
+		const row = pendingStore.find(r => r.newImageVersionDigest === digest);
+		return row ? { version: row.newImageVersion ?? null } : null;
 	}
 };
 mock.module(root + 'db', () => db);
@@ -139,11 +148,11 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 		if (phase.includes('keep-on-error') && method === 'HEAD') return new Response('', { status: 502 });
 		if (phase.startsWith('multiarch-') && method === 'GET' && path.endsWith('/manifests/' + digest)) {
 			if (phase === 'multiarch-unknown') return new Response('', { status: 502 });
-			const child = phase === 'multiarch-different' ? 'sha256:' + 'e'.repeat(64) : old;
+			const child = multiarchDifferent ? 'sha256:' + 'e'.repeat(64) : old;
 			return Response.json({ mediaType: 'application/vnd.oci.image.index.v1+json', manifests: [{ digest: child, platform: { os: 'linux', architecture: 'amd64' } }] });
 		}
 		// A local digest that is not an index answers 404 under the index-only Accept.
-		if (phase === 'multiarch-different' && method === 'GET' && path.includes('/manifests/sha256:')) return new Response('', { status: 404 });
+		if (multiarchDifferent && method === 'GET' && path.includes('/manifests/sha256:')) return new Response('', { status: 404 });
 		if (path.includes('/manifests/')) return Response.json({ schemaVersion: 2 }, { headers: { 'Docker-Content-Digest': digest } });
 		throw new Error('Unexpected registry request ' + path);
 	}
@@ -153,7 +162,7 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 		return Response.json({ Descriptor: { digest } });
 	}
 	if (phase === 'metadata-info-failure' && path === '/info') return new Response('{}', { status: 503 });
-	if (phase === 'multiarch-different' && path === '/info') return Response.json({ OSType: 'linux', Architecture: 'x86_64' });
+	if (multiarchDifferent && path === '/info') return Response.json({ OSType: 'linux', Architecture: 'x86_64' });
 	// The environment cannot be listed: a check must fail without touching the saved updates.
 	if (phase.endsWith('-list') && path === '/containers/json') return Response.json({ message: 'daemon unreachable' }, { status: 500 });
 	if (path === '/containers/json') {
@@ -255,7 +264,8 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(await docker.getImageReleaseAgeWarning(image, 1), null, 'Manual advisory must use the same durable platform');
 	await assert.rejects(docker.verifyImageReleaseAge(image, 2), /cooldown/, 'A different platform must retain its own cooldown');
 	await assert.rejects(docker.verifyImageReleaseAge(image, 3), /cooldown/, 'An unknown environment must not borrow the mature platform');
-	assert.equal(calls.filter(call => call === 'GET /info').length, 5, 'Exercise actual daemon info failures in every age path');
+	// Five age paths, plus the found update's version label read (#1501).
+	assert.equal(calls.filter(call => call === 'GET /info').length, 6, 'Exercise actual daemon info failures in every age path');
 	assert.equal(pullReferences.length, 0);
 } else if (phase === 'blocked-registry') {
 	for (const reference of ['localhost:5000/app:latest', '127.0.0.1:5000/app:latest', '169.254.169.254/app:latest']) {
@@ -352,18 +362,27 @@ if (phase === 'metadata-info-failure') {
 		assert.equal(indexReads(), 2, 'A transient index failure is read once more before it is reported');
 	} else if (phase === 'multiarch-different') {
 		// The current index plus each of the two local digests (both 404: not an index) is
-		// read once. The cached sign-in serves the HEAD and all three index reads.
+		// read once, and the update found reads the new index once more for its version
+		// label (#1501). The cached sign-in serves the HEAD and every read.
 		const manifestGets = () => calls.filter(call => call.startsWith('GET /v2/team/app/manifests/')).length;
 		const challenges = () => calls.filter(call => call === 'GET /v2/').length;
 		assert.equal(result.hasUpdate, true, JSON.stringify(result));
 		assert.equal(result.error, undefined);
-		assert.equal(manifestGets(), 3);
+		assert.equal(manifestGets(), 4);
 		assert.equal(challenges(), 1, 'One sign-in serves the HEAD and every index read of a check');
 		// Repeated: every read by digest, the 404s included, is reused, and so is the sign-in.
 		const again = await docker.checkImageUpdateAvailable(image, old, 1);
 		assert.equal(again.hasUpdate, true, JSON.stringify(again));
-		assert.equal(manifestGets(), 3, 'A repeated check must reuse every read by digest');
+		assert.equal(manifestGets(), 4, 'A repeated check must reuse every read by digest');
 		assert.equal(challenges(), 1, 'A repeated check within the token lifetime must not sign in again');
+	} else if (phase === 'multiarch-recorded') {
+		// The version recorded with an earlier check's pending update answers for the same
+		// digest: no registry read for it, and the recorded digest is carried on.
+		const manifestGets = () => calls.filter(call => call.startsWith('GET /v2/team/app/manifests/')).length;
+		assert.equal(result.hasUpdate, true, JSON.stringify(result));
+		assert.equal(result.newImageVersion, '9.9.9');
+		assert.equal(result.newImageVersionDigest, digest);
+		assert.equal(manifestGets(), 3, 'A recorded version must not be read again: ' + calls.join(', '));
 	} else {
 		assert.equal(result.hasUpdate, false, JSON.stringify(result));
 		assert.equal(result.error, undefined);

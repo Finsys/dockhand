@@ -34,7 +34,7 @@ import { configuredMacAddress, endpointForRecreate } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
 import { mapContainerNetworks, recreateEndpointAliases } from '$lib/utils/network-identity';
 import type { Environment } from './db';
-import { getSetting } from './db';
+import { getSetting, getRecordedImageVersion } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
 import { imageCheckPlan, resolvePinnedToDigest, isDigestBasedImage, portableImageReference, trackedImageLabels, trackedImageReference } from '../utils/tracked-image';
 // Re-exported: the updaters import it from here, and it belongs beside imagePinning.
@@ -48,7 +48,7 @@ import { expectedEvents, EXPECTED_EVENT_TTL_MS } from './expected-events-core';
 import { decideRespawnOutcome, isExactNameMatch, isSystemdManagedUnit } from './systemd-recreate-core';
 // Import-light image parsing shared with the semver layer; re-exported below for callers.
 import { parseImageReference } from './registry/image-ref';
-import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
+import { fetchImageConfigMetadata, imagePlatform, type ImageAgeRequest } from './registry/image-age';
 export { parseImageReference } from './registry/image-ref';
 import { HELPER_CONTAINER_LABELS } from './container-labels';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
@@ -3926,32 +3926,94 @@ export async function getRegistryManifestDigestDetailed(imageName: string, _envI
 // Failed lookups are retried on the next check; the durable fallback lives in settings.
 const imageCreationTimes = new Map<string, string>();
 
+// The version label of a digest's image, keyed like imageCreationTimes. A digest
+// names immutable content, so a config read once answers for good, label or not; a
+// read that failed is retried after VERSION_RETRY_MS rather than on every check.
+const imageVersions = new Map<string, { version: string | null; retryAt: number }>();
+const VERSION_RETRY_MS = 60 * 60 * 1000;
+
+/** Where one digest's image metadata lives for the environment's platform, and the
+ * keys it is cached under. Null when the registry is unsafe or the platform unknown. */
+async function registryImageTarget(imageName: string, digest: string, envId: number | null | undefined, signal: AbortSignal): Promise<{ registry: string; repo: string; platform: NonNullable<ReturnType<typeof imagePlatform>>; key: string; platformKey: string } | null> {
+	const { registry, repo } = parseImageReference(imageName);
+	if (!isSafeRegistryHost(registry).ok) return null;
+	signal.throwIfAborted();
+	const info = await dockerJsonRequest('/info', { signal }, envId) as { OSType?: string; Architecture?: string };
+	const platform = imagePlatform(info?.OSType, info?.Architecture);
+	if (!platform) return null;
+	const platformKey = `${platform.os}/${platform.architecture}/${platform.variant ?? ''}`;
+	return { registry, repo, platform, key: `${registry}/${repo}@${digest}/${platformKey}`, platformKey };
+}
+
+async function registryImageRequest(target: { registry: string; repo: string; platform: ImageAgeRequest['platform'] }, digest: string, signal: AbortSignal): Promise<ImageAgeRequest> {
+	signal.throwIfAborted();
+	const [authorization, scheme] = await Promise.all([
+		getRegistryBearerToken(target.registry, target.repo, signal), getRegistrySchemeForHost(target.registry)
+	]);
+	return { registry: target.registry, repo: target.repo, digest, platform: target.platform, scheme, authorization, signal };
+}
+
+function rememberImageMetadata(target: { key: string }, metadata: { createdAt: string | null; version: string | null } | null): void {
+	if (metadata?.createdAt) {
+		if (imageCreationTimes.size >= 256) imageCreationTimes.delete(imageCreationTimes.keys().next().value!);
+		imageCreationTimes.set(target.key, metadata.createdAt);
+	}
+	if (imageVersions.size >= 256) imageVersions.delete(imageVersions.keys().next().value!);
+	imageVersions.set(target.key, metadata
+		? { version: metadata.version, retryAt: Infinity }
+		: { version: null, retryAt: Date.now() + VERSION_RETRY_MS });
+}
+
 async function getRegistryImageCreatedAt(imageName: string, digest: string, envId?: number | null, parentSignal?: AbortSignal, persisted: Readonly<Record<string, string>> = {}): Promise<ImageCreationMetadata | null> {
 	try {
-		const { registry, repo } = parseImageReference(imageName);
-		if (!isSafeRegistryHost(registry).ok) return null;
 		const signal = parentSignal ?? AbortSignal.timeout(8000);
-		signal.throwIfAborted();
-		const info = await dockerJsonRequest('/info', { signal }, envId) as { OSType?: string; Architecture?: string };
-		const platform = imagePlatform(info?.OSType, info?.Architecture);
-		if (!platform) return null;
-		const key = `${registry}/${repo}@${digest}/${platform.os}/${platform.architecture}/${platform.variant ?? ''}`;
-		const platformKey = `${platform.os}/${platform.architecture}/${platform.variant ?? ''}`;
-		const cached = persisted[platformKey] ?? imageCreationTimes.get(key);
-		if (cached) return { createdAt: cached, platform: platformKey };
-		signal.throwIfAborted();
-		const [authorization, scheme] = await Promise.all([
-			getRegistryBearerToken(registry, repo, signal), getRegistrySchemeForHost(registry)
-		]);
-		const created = await fetchImageCreatedAt({ registry, repo, digest, platform, scheme, authorization, signal });
-		if (created) {
-			if (imageCreationTimes.size >= 256) imageCreationTimes.delete(imageCreationTimes.keys().next().value!);
-			imageCreationTimes.set(key, created);
-		}
-		return { createdAt: created, platform: platformKey };
+		const target = await registryImageTarget(imageName, digest, envId, signal);
+		if (!target) return null;
+		const cached = persisted[target.platformKey] ?? imageCreationTimes.get(target.key);
+		if (cached) return { createdAt: cached, platform: target.platformKey };
+		const metadata = await fetchImageConfigMetadata(await registryImageRequest(target, digest, signal));
+		rememberImageMetadata(target, metadata);
+		return { createdAt: metadata?.createdAt ?? null, platform: target.platformKey };
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * The `org.opencontainers.image.version` label of the image a digest names, read from
+ * its config blob for the environment's platform (#1501). For a floating tag such as
+ * `:latest` a digest is all an update check knows; this is the version that update
+ * would install. `{ version: null }` when the image has no such label; null when it
+ * couldn't be read, so a later check tries again.
+ *
+ * One registry read per new digest: a pending update already recorded for the digest
+ * answers first, so a restart doesn't read again (Docker Hub counts manifest reads as
+ * pulls); then the in-memory cache, shared with the minimum image age's config read.
+ */
+export async function getRegistryImageVersion(imageName: string, digest: string, envId?: number | null): Promise<{ version: string | null } | null> {
+	try {
+		if (envId != null) {
+			const recorded = await getRecordedImageVersion(envId, digest);
+			if (recorded) return recorded;
+		}
+		const signal = AbortSignal.timeout(8000);
+		const target = await registryImageTarget(imageName, digest, envId, signal);
+		if (!target) return null;
+		const known = imageVersions.get(target.key);
+		if (known && Date.now() < known.retryAt) return known.retryAt === Infinity ? { version: known.version } : null;
+		const metadata = await fetchImageConfigMetadata(await registryImageRequest(target, digest, signal));
+		rememberImageMetadata(target, metadata);
+		return metadata ? { version: metadata.version } : null;
+	} catch {
+		return null;
+	}
+}
+
+/** The fields a found update carries for its new image's version label. */
+async function newImageVersionFields(imageName: string, digest: string, envId?: number): Promise<Pick<ImageUpdateCheckResult, 'newImageVersion' | 'newImageVersionDigest'>> {
+	const read = await getRegistryImageVersion(imageName, digest, envId);
+	if (!read) return {};
+	return { newImageVersionDigest: digest, ...(read.version ? { newImageVersion: read.version } : {}) };
 }
 
 /**
@@ -4098,6 +4160,17 @@ export interface ImageUpdateCheckResult {
 	 * in their compose on purpose. Updating it is their edit to make.
 	 */
 	pinnedToDigest?: boolean;
+	/**
+	 * The new image's `org.opencontainers.image.version`, when an update was found and
+	 * the image sets it: for a floating tag (`:latest`, `:6.2`) the version the update
+	 * installs, which the digest alone can't say (#1501).
+	 */
+	newImageVersion?: string;
+	/**
+	 * The digest the version label was read for, set once the read was answered (label
+	 * or not), so the pending update records it and later checks reuse it.
+	 */
+	newImageVersionDigest?: string;
 }
 
 /**
@@ -4204,7 +4277,8 @@ async function checkTagForUpdate(
 				const remaining = await imageCooldownRemainingMs(checkedReference, rd, envId);
 				if (remaining > 0 && !skipCooldown) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 			}
-			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd };
+			const version = hasUpdate && rd ? await newImageVersionFields(checkedReference, rd, envId) : {};
+			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd, ...version };
 		}
 
 		// Query registry for current manifest digest
@@ -4254,7 +4328,8 @@ async function checkTagForUpdate(
 			hasUpdate: true,
 			currentDigest: currentRepoDigests[0],
 			registryDigest,
-			localDigests
+			localDigests,
+			...await newImageVersionFields(checkedReference, registryDigest, envId)
 		};
 	} catch (e: any) {
 		return { hasUpdate: false, error: e.message };

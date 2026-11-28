@@ -47,6 +47,8 @@ export interface ContainerStoreState {
 	 * to change. Like coolingDown, deliberately NOT offered for a bulk update.
 	 */
 	pinnedDigest: Set<string>;
+	/** The version each pending image update installs, keyed by container ID, where the new image has a version label (#1501). */
+	newImageVersions: Map<string, string>;
 	/** Whether the current environment has vulnerability scanning */
 	envHasScanning: boolean;
 	/** Environment-level vulnerability criteria */
@@ -69,6 +71,7 @@ const INITIAL_STATE: ContainerStoreState = {
 	newerVersions: new Map(),
 	coolingDown: new Map(),
 	pinnedDigest: new Set(),
+	newImageVersions: new Map(),
 	envHasScanning: false,
 	envVulnerabilityCriteria: 'never',
 	loading: true,
@@ -323,7 +326,8 @@ function createContainerStore() {
 				pendingUpdateNames: new Map(split.updatable.map((u) => [u.containerId, u.containerName])),
 				newerVersions: split.newerVersions as Map<string, NewerVersion>,
 				coolingDown: split.coolingDown,
-				pinnedDigest: split.pinnedDigest
+				pinnedDigest: split.pinnedDigest,
+				newImageVersions: split.newImageVersions
 			});
 		} catch {
 			// Ignore errors - background load
