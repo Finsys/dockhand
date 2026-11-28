@@ -29,6 +29,7 @@ import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 import { calculateCpuPercent, calculateMemoryUsage, calculateMemoryLimit } from '$lib/server/stats-calc-core';
 import { containerDisplayName } from '$lib/utils/container-display-name';
 import { getCachedDiskUsage, SKIP_DF_COLLECTION } from '$lib/server/disk-usage-cache';
+import { LIST_TIMEOUT_MS, outcomeAfterContainerTimeout } from '$lib/server/env-probe-core';
 
 
 
@@ -212,11 +213,31 @@ async function getEnvironmentStatsProgressive(
 
 		// PHASE 1: Containers (usually fast) - this determines online status
 		// Use 10s timeout - this is the critical path that determines if env is online
-		const containersPromise = withTimeout(listContainers(true, env.id), 10000, null)
+		const containersPromise = withTimeout(listContainers(true, env.id), LIST_TIMEOUT_MS, null)
 			.then(async (containers) => {
-				// Timeout returns null
+				// Timeout returns null. A listing timeout on its own is not proof the host is
+				// gone: a starved daemon can take longer than the budget while still answering
+				// /_ping in milliseconds, which used to flip a healthy environment to
+				// "Connection timeout". Ping before declaring it offline.
 				if (containers === null) {
-					throw new Error('Connection timeout');
+					const pingSucceeded = await dockerPing(env.id).catch(() => false);
+					const outcome = outcomeAfterContainerTimeout(pingSucceeded, LIST_TIMEOUT_MS);
+					envStats.online = outcome.online;
+					envStats.error = outcome.error ?? undefined;
+					envStats.loading!.containers = false;
+					dockerApiAccessible = outcome.online;
+					if (!outcome.online) dockerApiError = outcome.error;
+
+					onPartialUpdate({
+						id: env.id,
+						online: outcome.online,
+						error: outcome.error ?? undefined,
+						loading: { ...envStats.loading! }
+					});
+
+					// null = no container payload this cycle: phase 4 then keeps the last known
+					// top-containers list instead of publishing an empty one.
+					return null;
 				}
 				// If we got here, Docker API is accessible
 				dockerApiAccessible = true;
@@ -275,7 +296,7 @@ async function getEnvironmentStatsProgressive(
 			});
 
 		// PHASE 2: Images, Networks, Stacks (medium speed) - run in parallel
-		const imagesPromise = withTimeout(listImages(env.id).catch(() => []), 10000, [])
+		const imagesPromise = withTimeout(listImages(env.id).catch(() => []), LIST_TIMEOUT_MS, [])
 			.then((images) => {
 				envStats.images.total = images.length;
 				envStats.images.totalSize = images.reduce((sum: number, img: any) => sum + getValidSize(img.size), 0);
@@ -295,7 +316,7 @@ async function getEnvironmentStatsProgressive(
 				return [];
 			});
 
-		const networksPromise = withTimeout(listNetworks(env.id).catch(() => []), 10000, [])
+		const networksPromise = withTimeout(listNetworks(env.id).catch(() => []), LIST_TIMEOUT_MS, [])
 			.then((networks) => {
 				envStats.networks.total = networks.length;
 				envStats.loading!.networks = false;
@@ -314,7 +335,7 @@ async function getEnvironmentStatsProgressive(
 				return [];
 			});
 
-		const stacksPromise = withTimeout(listComposeStacks(env.id).catch(() => []), 10000, [])
+		const stacksPromise = withTimeout(listComposeStacks(env.id).catch(() => []), LIST_TIMEOUT_MS, [])
 			.then((stacks) => {
 				envStats.stacks.total = stacks.length;
 				envStats.stacks.running = stacks.filter((s: any) => s.status === 'running').length;
@@ -392,6 +413,13 @@ async function getEnvironmentStatsProgressive(
 		// PHASE 4: Top containers (slow - requires per-container stats)
 		// Limited to TOP_CONTAINERS_LIMIT containers to reduce API calls
 		const topContainersPromise = containersPromise.then(async (containers) => {
+			// A timed-out listing says nothing about what is running, so leave the last
+			// known top list alone rather than publishing an empty one.
+			if (containers === null) {
+				envStats.loading!.topContainers = false;
+				onPartialUpdate({ id: env.id, loading: { ...envStats.loading! } });
+				return [];
+			}
 			const runningContainersList = containers.filter((c: any) => c.state === 'running');
 
 			const topContainersPromises = runningContainersList.slice(0, TOP_CONTAINERS_LIMIT).map(async (container: any) => {
