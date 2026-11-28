@@ -5,6 +5,7 @@ import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { hasEnvironments } from '$lib/server/db';
 import { isHiddenByLabel } from '$lib/server/container-labels';
+import { replacedContainers } from '$lib/server/replaced-containers-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -46,8 +47,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 	try {
 		const containers = await listContainers(all, envIdNum);
-		// Filter out containers with dockhand.hidden=true label
-		const visible = containers.filter(c => !isHiddenByLabel(c.labels));
+		// Filter out containers with dockhand.hidden=true label, and the old copy of a
+		// container Dockhand is replacing right now
+		const visible = containers.filter(c => !isHiddenByLabel(c.labels) && !replacedContainers.isOldCopy(c));
 		return json(visible);
 	} catch (error: any) {
 		// Return 404 for missing environment so frontend can clear stale localStorage

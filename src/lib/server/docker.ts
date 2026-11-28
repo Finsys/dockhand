@@ -45,6 +45,7 @@ import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedu
 import { resolveNanoCpusConflict, applyPodmanUsernsMode, stripDefaultMemorySwappiness } from './hostconfig-recreate';
 import { isUnknownNetworkKeyError, retryEndpointKey } from './podman-network-key';
 import { expectedEvents, EXPECTED_EVENT_TTL_MS } from './expected-events-core';
+import { replacedContainers } from './replaced-containers-core';
 import { decideRespawnOutcome, isExactNameMatch, isSystemdManagedUnit } from './systemd-recreate-core';
 // Import-light image parsing shared with the semver layer; re-exported below for callers.
 import { parseImageReference } from './registry/image-ref';
@@ -2225,8 +2226,17 @@ async function restoreAfterFailedStop(
  * 7. Remove old container
  *
  * On failure: rollback (rename old back, reconnect networks, restart old)
+ *
+ * While it runs, the containers list leaves out the old copy (replaced-containers-core.ts).
  */
 export async function recreateContainerFromInspect(
+	...args: Parameters<typeof recreateFromInspect>
+): ReturnType<typeof recreateFromInspect> {
+	const [inspectData] = args;
+	return replacedContainers.whileReplacing(inspectData?.Id, inspectData?.Name, () => recreateFromInspect(...args));
+}
+
+async function recreateFromInspect(
 	inspectData: any,
 	newImage: string,
 	envId?: number | null,
@@ -3092,6 +3102,13 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
  */
 export async function updateContainer(id: string, options: Partial<CreateContainerOptions>, startAfterUpdate = false, envId?: number | null) {
 	const oldContainerInfo = await inspectContainer(id, envId);
+	// While it runs, the containers list leaves out the old copy (replaced-containers-core.ts).
+	return replacedContainers.whileReplacing(oldContainerInfo.Id, oldContainerInfo.Name, () =>
+		replaceContainer(oldContainerInfo, options, startAfterUpdate, envId)
+	);
+}
+
+async function replaceContainer(oldContainerInfo: any, options: Partial<CreateContainerOptions>, startAfterUpdate: boolean, envId?: number | null) {
 	const wasRunning = oldContainerInfo.State.Running;
 	const name = oldContainerInfo.Name?.replace(/^\//, '') || '';
 	const oldContainerId = oldContainerInfo.Id;
@@ -3147,7 +3164,7 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 
 	// 1. Stop old container
 	if (wasRunning) {
-		await stopContainer(id, envId);
+		await stopContainer(oldContainerId, envId);
 	}
 
 	// 2. Rename old container to free the name (instead of removing — allows rollback)
