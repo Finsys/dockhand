@@ -1,8 +1,7 @@
 [
   {
     "version": "1.0.60",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-11-28",
     "changes": [
       { "type": "feature", "text": "re-pull a container's image from the edit modal (#1943, PR#1943, @vgezer)" },
       { "type": "feature", "text": "Bitwarden inline references with bws://<secret-UUID> (PR#1952, @tuvokian)" },
